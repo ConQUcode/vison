@@ -1,0 +1,17 @@
+engineer\quaternionekf.o: ..\MODULE\algorithm\QuaternionEKF.c
+engineer\quaternionekf.o: ..\MODULE\algorithm\QuaternionEKF.h
+engineer\quaternionekf.o: ..\MODULE\algorithm\kalman_filter.h
+engineer\quaternionekf.o: ../Drivers/CMSIS/Device/ST/STM32F4xx/Include/stm32f407xx.h
+engineer\quaternionekf.o: ../Drivers/CMSIS/Include/core_cm4.h
+engineer\quaternionekf.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+engineer\quaternionekf.o: ../Drivers/CMSIS/Include/cmsis_version.h
+engineer\quaternionekf.o: ../Drivers/CMSIS/Include/cmsis_compiler.h
+engineer\quaternionekf.o: ../Drivers/CMSIS/Include/cmsis_armcc.h
+engineer\quaternionekf.o: ../Drivers/CMSIS/Include/mpu_armv7.h
+engineer\quaternionekf.o: ../Drivers/CMSIS/Device/ST/STM32F4xx/Include/system_stm32f4xx.h
+engineer\quaternionekf.o: ../Middlewares/ST/ARM/DSP/Inc/arm_math.h
+engineer\quaternionekf.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
+engineer\quaternionekf.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\math.h
+engineer\quaternionekf.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\float.h
+engineer\quaternionekf.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\limits.h
+engineer\quaternionekf.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdlib.h
