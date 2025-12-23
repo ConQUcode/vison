@@ -18,8 +18,7 @@
 #define RAD_2_DEGREE        57.2957795f    // 180/pi
 
 // 机器人几何尺寸定义
-// #define CHASSIS_SIZE_HALF        0.4f       // 底盘半边长(米)，假设正方形边长0.8m
-// 根据用户提供: 长410mm, 宽320mm. 假设长为前后方向(轴距), 宽为左右方向(轮距)
+// 长410mm, 宽320mm. 假设长为前后方向(轴距), 宽为左右方向(轮距)
 #define CHASSIS_WHEEL_BASE      0.410f      // 轴距(前后轮距离, X轴方向)
 #define CHASSIS_WHEEL_TRACK     0.320f      // 轮距(左右轮距离, Y轴方向)
 #define CHASSIS_HALF_BASE       (CHASSIS_WHEEL_BASE / 2.0f)
@@ -27,7 +26,7 @@
 
 // 电机速度转换相关宏定义 
 #define MOTOR_REDUCTION_RATIO    19.2032f     // 电机减速比 1:19.2302
-#define WHEEL_RADIUS_M           0.021f     // 轮子半径(米) - 根据实际轮子尺寸调整
+#define WHEEL_RADIUS_M           0.081f     // 轮子半径(米) - 根据实际轮子尺寸调整
 
 // 线速度转换为3508电机速度环参数的转换系数
 // 转换公式: 电机RPM = 线速度(m/s) * 转换系数

@@ -639,9 +639,7 @@ void ChassisTask()
         float cmd_vx = usb_chassis_cmd.linear_x * LINEAR_VELOCITY_TO_MOTOR_RPM; 
         
         // 角速度转换: 
-        // 之前的逻辑是: rad/s * 半径 = 线速度 -> RPM
-        // 现在的逻辑是: 传入 (rad/s * 转换系数), 在解算函数内部再乘以具体的半径(half_track/half_base)
-        // 因此这里不需要乘半径了
+        //传入 (rad/s * 转换系数), 在解算函数内部再乘以具体的半径(half_track/half_base)
         float cmd_vw = usb_chassis_cmd.angular_z * LINEAR_VELOCITY_TO_MOTOR_RPM; 
         
         SteeringWheelKinematics_old(cmd_vx, cmd_vw);

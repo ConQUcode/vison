@@ -207,7 +207,6 @@ void USB_ProcessTask(void)
                 usb_last_recv_time = HAL_GetTick();
 
                 // [DEBUG] 回显功能：将接收到的原始数据帧原样发回
-                // TODO: 调试完成后请删除此行
                 USB_Transmit(frame, USB_FRAME_LEN);
                 
                 // 从缓冲区中移除该帧
