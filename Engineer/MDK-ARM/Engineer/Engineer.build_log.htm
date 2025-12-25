@@ -17,17 +17,26 @@ Library Manager: ArmAr.exe V5.06 update 7 (build 960)
 Hex Converter:   FromElf.exe V5.06 update 7 (build 960)
 CPU DLL:         SARMCM3.DLL V5.36.0.0
 Dialog DLL:      DCM.DLL V1.17.3.0
-Target DLL:      CMSIS_AGDI.dll V1.33.0.0
+Target DLL:      STLink\ST-LINKIII-KEIL_SWO.dll V3.0.9.0
 Dialog DLL:      TCM.DLL V1.53.0.0
  
 <h2>Project:</h2>
-C:\Users\11737\Desktop\Engineer\MDK-ARM\Engineer.uvprojx
-Project File Date:  12/20/2025
+C:\Users\11737\Desktop\vison\Engineer\MDK-ARM\Engineer.uvprojx
+Project File Date:  12/25/2025
 
 <h2>Output:</h2>
 *** Using Compiler 'V5.06 update 7 (build 960)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
 Build target 'Engineer'
-"Engineer\Engineer.axf" - 0 Error(s), 0 Warning(s).
+compiling protocol.c...
+..\MODULE\protocol\protocol.c(108): warning:  #223-D: function "send_Handshake" declared implicitly
+                  send_Handshake(&handshake);
+..\MODULE\protocol\protocol.c(124): warning:  #159-D: declaration is incompatible with previous "send_Handshake"  (declared at line 108)
+  void send_Handshake(const Packet_Handshake* pkt) {
+..\MODULE\protocol\protocol.c: 2 warnings, 0 errors
+linking...
+Program Size: Code=63888 RO-data=3872 RW-data=1456 ZI-data=97312  
+FromELF: creating hex file...
+"Engineer\Engineer.axf" - 0 Error(s), 2 Warning(s).
 
 <h2>Software Packages used:</h2>
 

@@ -32,6 +32,7 @@ typedef void (*usb_rx_callback_t)(uint8_t *data, uint32_t len);
 #pragma pack(1)
 typedef struct {
     float linear_x;   // 线速度 m/s
+    float linear_y;   // 横移速度 m/s
     float angular_z;  // 角速度 rad/s
 } USB_Chassis_Cmd_s;
 #pragma pack()

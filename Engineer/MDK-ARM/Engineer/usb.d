@@ -49,3 +49,4 @@ engineer\usb.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_core.h
 engineer\usb.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h
 engineer\usb.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ctlreq.h
 engineer\usb.o: ../USB_DEVICE/App/usb_device.h
+engineer\usb.o: ..\MODULE\protocol\protocol.h

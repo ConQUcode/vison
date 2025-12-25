@@ -7,7 +7,7 @@ void ChassisInit(void);
 void ChassisTask(void);
 void Jiaozhun(void);
 void SteeringWheelKinematics(float vx, float vy, float vw);
-void SteeringWheelKinematics_old(float vx, float vw);
+void SteeringWheelKinematics_old(float vx, float vy, float vw);
 extern  float V;
 extern  RC_ctrl_t *rc_cmd;
 extern Chassis_Ctrl_Cmd_s chassis_ctrl_cmd;

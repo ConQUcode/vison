@@ -373,95 +373,52 @@ static void SteeringWheelCalculate()
 /**
  * @brief 舵轮运动学解算(旧版本修改-速度控制+航向锁定)
  * @param vx 前进速度   
+ * @param vy 横移速度
  * @param vw 角速度(旋转速度)
- * @note  内部强制 vy=0，且在 vw=0 时自动锁定航向
+ * @note  在 vw=0 时自动锁定航向
  */
-void SteeringWheelKinematics_old(float vx, float vw)
+void SteeringWheelKinematics_old(float vx, float vy, float vw)
 {
-    float vy = 0; // 强制横移为0
     float offset_lf, offset_rf, offset_lb, offset_rb;     // 用于计算舵轮的角度
     float at_lf_last, at_rf_last, at_lb_last, at_rb_last; // 上次的角度
     float chassis_vx = 0;
     float chassis_vy = 0;
     float chassis_vw = 0;
-    
     // 获取上次角度
     at_lb_last = motor_steering_lb->measure.total_angle;
     at_lf_last = motor_steering_lf->measure.total_angle;
     at_rf_last = motor_steering_rf->measure.total_angle;
     at_rb_last = motor_steering_rb->measure.total_angle;
-   
+
     // 赋值速度
     chassis_vx = vx;
     chassis_vy = vy;
 
-    // --- IMU 航向锁定逻辑 ---
-    static float target_lock_yaw = 0;
-    static uint8_t first_run = 1;
-    float current_yaw = chassis_ctrl_cmd.Chassis_IMU_data->Yaw;
-
-    // 初始化
-    if(first_run) {
-        target_lock_yaw = current_yaw;
-        first_run = 0;
+    // 旧版IMU叠加+简化解算
+    static uint8_t first_run_kinematics = 1;
+    if(first_run_kinematics) {
+        chassis_ctrl_cmd.last_yaw = chassis_ctrl_cmd.Chassis_IMU_data->Yaw;
+        first_run_kinematics = 0;
     }
+    chassis_ctrl_cmd.offset_w = UpdateIMUCorrection(vw);
+    chassis_vw = vw + chassis_ctrl_cmd.offset_w;
 
-    if (fabsf(vw) > 10.0f) { // 设定一个死区，避免摇杆漂移导致无法锁定
-        // 1. 有旋转指令：执行指令，并跟随当前角度
-        chassis_vw = vw;
-        target_lock_yaw = current_yaw; 
-    } else {
-        // 2. 无旋转指令：执行锁头 (PID修正)
-        float yaw_error = target_lock_yaw - current_yaw;
-        
-        // 角度过零处理 (-180 ~ 180)
-        if(yaw_error > 180.0f) yaw_error -= 360.0f;
-        else if(yaw_error < -180.0f) yaw_error += 360.0f;
+    float w = chassis_vw;
+    float temp_x = chassis_vx - w, temp_y = chassis_vy - w;
+    arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_lf); // lf：y- , x-
+    temp_y = chassis_vy + w;
+    arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_lb); // lb: y+ , x-
+    temp_x = chassis_vx + w;
+    arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_rb); // rb: y+ , x+
+    temp_y = chassis_vy - w;
+    arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_rf); // rf: y- , x+
 
-        // 使用与新版本相同的 PID 对象进行修正
-        // 注意：这里假设 PID 输出方向与 vw 定义一致，参考新版本取负号
-        chassis_vw = -PIDCalculate(&chassis_follow_pid, yaw_error, 0);
-    }
-
-    // 核心解算
-    // 使用真实的物理尺寸进行解算
-    // LF: x+, y+; RF: x+, y-; LB: x-, y+; RB: x-, y-
-    // v_wheel_x = vx - w * y
-    // v_wheel_y = vy + w * x
-    
-    float half_base = CHASSIS_HALF_BASE;   // L/2
-    float half_track = CHASSIS_HALF_TRACK; // W/2
-
-    // LF (Left Front)
-    float v_lf_x = chassis_vx - chassis_vw * half_track;
-    float v_lf_y = chassis_vy + chassis_vw * half_base;
-    arm_sqrt_f32(v_lf_x * v_lf_x + v_lf_y * v_lf_y, &vt_lf);
-    offset_lf = atan2f(v_lf_y, v_lf_x) * RAD_2_DEGREE;
-
-    // RF (Right Front)
-    float v_rf_x = chassis_vx + chassis_vw * half_track;
-    float v_rf_y = chassis_vy + chassis_vw * half_base;
-    arm_sqrt_f32(v_rf_x * v_rf_x + v_rf_y * v_rf_y, &vt_rf);
-    offset_rf = atan2f(v_rf_y, v_rf_x) * RAD_2_DEGREE;
-
-    // LB (Left Back)
-    float v_lb_x = chassis_vx - chassis_vw * half_track;
-    float v_lb_y = chassis_vy - chassis_vw * half_base;
-    arm_sqrt_f32(v_lb_x * v_lb_x + v_lb_y * v_lb_y, &vt_lb);
-    offset_lb = atan2f(v_lb_y, v_lb_x) * RAD_2_DEGREE;
-
-    // RB (Right Back)
-    float v_rb_x = chassis_vx + chassis_vw * half_track;
-    float v_rb_y = chassis_vy - chassis_vw * half_base;
-    arm_sqrt_f32(v_rb_x * v_rb_x + v_rb_y * v_rb_y, &vt_rb);
-    offset_rb = atan2f(v_rb_y, v_rb_x) * RAD_2_DEGREE;
-    
     // 计算角度偏移
-    // offset_lf = atan2f(chassis_vy - w, chassis_vx - w) * RAD_2_DEGREE;
-    // offset_rf = atan2f(chassis_vy - w, chassis_vx + w) * RAD_2_DEGREE;
-    // offset_lb = atan2f(chassis_vy + w, chassis_vx - w) * RAD_2_DEGREE;
-    // offset_rb = atan2f(chassis_vy + w, chassis_vx + w) * RAD_2_DEGREE;
-  
+    offset_lf = atan2f(chassis_vy - w, chassis_vx - w) * RAD_2_DEGREE; // lf:  y- , x-
+    offset_rf = atan2f(chassis_vy - w, chassis_vx + w) * RAD_2_DEGREE; // rf:  y- , x+
+    offset_lb = atan2f(chassis_vy + w, chassis_vx - w) * RAD_2_DEGREE; // lb:  y+ , x-
+    offset_rb = atan2f(chassis_vy + w, chassis_vx + w) * RAD_2_DEGREE; // rb:  y+ , x+
+
     at_lf = STEERING_CHASSIS_ALIGN_ANGLE_LF + offset_lf; 
     at_rf = STEERING_CHASSIS_ALIGN_ANGLE_RF + offset_rf;
     at_lb = STEERING_CHASSIS_ALIGN_ANGLE_LB + offset_lb;
@@ -482,7 +439,7 @@ void SteeringWheelKinematics_old(float vx, float vw)
     DJIMotorSetRef(motor_steering_lb, at_lb);
     DJIMotorSetRef(motor_steering_rb, at_rb);
 
-    // 停车逻辑：指令全0 且 PID修正量也很小(说明已对准)
+    // 保留当前更合理的停车阈值
     if (vx == 0 && vw == 0 && fabsf(chassis_vw) < 100.0f){
         DJIMotorSetRef(motor_lf, 0 );
         DJIMotorSetRef(motor_rf, 0 );
@@ -498,66 +455,40 @@ void SteeringWheelKinematics_old(float vx, float vw)
 }
 
 /**
- * @brief 舵轮运动学解算(角度控制版本-IMU闭环)
+ * @brief 舵轮运动学解算(角速度控制版本-IMU辅助)
  * @param vx 前进速度   
  * @param vy 横移速度    
- * @param target_angle 目标绝对角度(度),以IMU初始yaw=0为基准,正值逆时针,负值顺时针
- *                     传入0时保持当前角度不变
+ * @param vw 角速度(旋转速度)
+ * @note 直接控制角速度，IMU辅助修正
  */
-void SteeringWheelKinematics(float vx, float vy, float target_angle)
+void SteeringWheelKinematics(float vx, float vy, float vw)
 {
     float offset_lf, offset_rf, offset_lb, offset_rb;
     float at_lf_last, at_rf_last, at_lb_last, at_rb_last;
     float chassis_vx = 0;
     float chassis_vy = 0;
     float chassis_vw = 0;
-    
-    static float last_target_angle = 0;  // 记录上次的目标角度
     static uint8_t first_run_kinematics = 1;
-    
     // 获取上次角度
     at_lb_last = motor_steering_lb->measure.total_angle;
     at_lf_last = motor_steering_lf->measure.total_angle;
     at_rf_last = motor_steering_rf->measure.total_angle;
     at_rb_last = motor_steering_rb->measure.total_angle;
-    
+
     // 首次运行时初始化last_yaw
     if(first_run_kinematics) {
         chassis_ctrl_cmd.last_yaw = chassis_ctrl_cmd.Chassis_IMU_data->Yaw;
         first_run_kinematics = 0;
     }
-    
-    // 处理角度控制逻辑
-    float current_yaw = chassis_ctrl_cmd.Chassis_IMU_data->Yaw;
-    
-    // 检测目标角度是否改变
-    if(fabsf(target_angle - last_target_angle) > 0.1f) {
-        // 目标角度改变,更新目标
-        chassis_ctrl_cmd.target_yaw = target_angle;
-        // 归一化到-180~180
-        while(chassis_ctrl_cmd.target_yaw > 180.0f) chassis_ctrl_cmd.target_yaw -= 360.0f;
-        while(chassis_ctrl_cmd.target_yaw < -180.0f) chassis_ctrl_cmd.target_yaw += 360.0f;
-        last_target_angle = target_angle;
-    }
-    
-    // 计算角度误差
-    float yaw_error = chassis_ctrl_cmd.target_yaw - current_yaw;
-    if(yaw_error > 180.0f) yaw_error -= 360.0f;
-    else if(yaw_error < -180.0f) yaw_error += 360.0f;
-    
-    // 判断是否到达目标
-    if(fabsf(yaw_error) < 2.0f) {  // 到达目标,精度2度
-        chassis_vw = 0;
-        chassis_ctrl_cmd.last_yaw = current_yaw;  // 更新参考角度
-    } else {
-        // 使用PID计算角速度,实现闭环控制
-        chassis_vw = -PIDCalculate(&chassis_follow_pid, yaw_error, 0);
-    }
-    
+
+    // 角速度控制模式，直接用传入vw，可选叠加IMU修正
+    chassis_ctrl_cmd.offset_w = UpdateIMUCorrection(vw);
+    chassis_vw = vw + chassis_ctrl_cmd.offset_w;
+
     // 设置线速度
     chassis_vx = vx;
     chassis_vy = vy;
-    
+
     // 生成预计算变量
     float w = chassis_vw;
     float temp_x = chassis_vx - w, temp_y = chassis_vy - w;
@@ -568,33 +499,33 @@ void SteeringWheelKinematics(float vx, float vy, float target_angle)
     arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_rb);
     temp_y = chassis_vy - w;
     arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_rf);
-    
+
     // 计算角度偏移
     offset_lf = atan2f(chassis_vy - w, chassis_vx - w) * RAD_2_DEGREE;
     offset_rf = atan2f(chassis_vy - w, chassis_vx + w) * RAD_2_DEGREE;
     offset_lb = atan2f(chassis_vy + w, chassis_vx - w) * RAD_2_DEGREE;
     offset_rb = atan2f(chassis_vy + w, chassis_vx + w) * RAD_2_DEGREE;
-    
+
     at_lf = STEERING_CHASSIS_ALIGN_ANGLE_LF + offset_lf;
     at_rf = STEERING_CHASSIS_ALIGN_ANGLE_RF + offset_rf;
     at_lb = STEERING_CHASSIS_ALIGN_ANGLE_LB + offset_lb;
     at_rb = STEERING_CHASSIS_ALIGN_ANGLE_RB + offset_rb;
-    
+
     ANGLE_LIMIT_360_TO_180_ABS(at_lf);
     ANGLE_LIMIT_360_TO_180_ABS(at_rf);
     ANGLE_LIMIT_360_TO_180_ABS(at_lb);
     ANGLE_LIMIT_360_TO_180_ABS(at_rb);
-    
+
     MinmizeRotation(&at_lf, &at_lf_last, &vt_lf);
     MinmizeRotation(&at_rf, &at_rf_last, &vt_rf);
     MinmizeRotation(&at_lb, &at_lb_last, &vt_lb);
     MinmizeRotation(&at_rb, &at_rb_last, &vt_rb);
-    
+
     DJIMotorSetRef(motor_steering_lf, at_lf);
     DJIMotorSetRef(motor_steering_rf, at_rf);
     DJIMotorSetRef(motor_steering_lb, at_lb);
     DJIMotorSetRef(motor_steering_rb, at_rb);
-    
+
     if(w == 0 && vx == 0 && vy == 0) {
         DJIMotorSetRef(motor_lf, 0);
         DJIMotorSetRef(motor_rf, 0);
@@ -611,40 +542,41 @@ void SteeringWheelKinematics(float vx, float vy, float target_angle)
 void ChassisTest_OldVersion(){
     // 使用遥控器模拟上位机指令进行测试
     // 左摇杆上下(rocker_l1) -> 控制前进速度 vx
+    // 左摇杆左右(rocker_l_) -> 控制横移速度 vy
     // 拨轮(dial) -> 控制旋转速度 vw
-    
+
     float test_vx = ((float)rc_cmd->rc.rocker_l1 / 660.0f) * 8000.0f; // 速度系数，根据实际情况调整
+    float test_vy = ((float)rc_cmd->rc.rocker_l_ / 660.0f) * 8000.0f; // 横移速度系数
     float test_vw = ((float)rc_cmd->rc.dial / 660.0f) * 5000.0f;      // 角速度系数
-    
+
     // 简单的死区处理，防止误触
     if(fabsf(test_vx) < 200.0f) test_vx = 0;
+    if(fabsf(test_vy) < 200.0f) test_vy = 0;
     if(fabsf(test_vw) < 100.0f) test_vw = 0;
-    
-    // 调用修改后的旧版本解算函数
-    SteeringWheelKinematics_old(test_vx, test_vw);
-}
 
+    // 调用新角速度控制解算函数
+    SteeringWheelKinematics(test_vx, test_vy, test_vw);
+}
+/**
+ * @brief 底盘主任务入口，USB/遥控器自动切换
+ * 优先使用USB指令，超时则切换为遥控器测试
+ */
 void ChassisTask()
 {
+	
     // 检查USB数据超时 (500ms)
     // 如果上位机停止发送，底盘应该停止，防止失控
     if (HAL_GetTick() - usb_last_recv_time < 500) {
         // 未超时，使用USB指令
-        
         // 单位转换: 
         // 上位机单位: 线速度 m/s, 角速度 rad/s
         // 转换系数: LINEAR_VELOCITY_TO_MOTOR_RPM (m/s -> RPM)
-        
-        // 线速度转换
         float cmd_vx = usb_chassis_cmd.linear_x * LINEAR_VELOCITY_TO_MOTOR_RPM; 
-        
-        // 角速度转换: 
-        //传入 (rad/s * 转换系数), 在解算函数内部再乘以具体的半径(half_track/half_base)
+        float cmd_vy = usb_chassis_cmd.linear_y * LINEAR_VELOCITY_TO_MOTOR_RPM;
         float cmd_vw = usb_chassis_cmd.angular_z * LINEAR_VELOCITY_TO_MOTOR_RPM; 
-        
-        SteeringWheelKinematics_old(cmd_vx, cmd_vw);
+        SteeringWheelKinematics(cmd_vx, cmd_vy, cmd_vw);
     } else {
-        // 超时，停车
-        SteeringWheelKinematics_old(0, 0);
+        // 超时，使用遥控器测试
+        ChassisTest_OldVersion();
     }
 }

@@ -51,6 +51,7 @@
 "engineer\quaternionekf.o"
 "engineer\relay.o"
 "engineer\usb.o"
+"engineer\protocol.o"
 "engineer\chassis.o"
 "engineer\arm.o"
 "engineer\shoot.o"

@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../MODULE/algorithm;../MODULE/C_comm;../MODULE/motor;../MODULE/motor/DJImotor;../MODULE/motor/DMmotor;../BSP/CAN;../BSP/DWT;../BSP/USART;../APPLICATION;../APPLICATION/arm;../MODULE/remote;../Middlewares/Third_Party/FreeRTOS/Source/include;../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;../Middlewares/ST/ARM/DSP/Inc;../MODULE/daemon;../MODULE;../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS;../APPLICATION/dribble;../APPLICATION/chassis;../MODULE/imu;../APPLICATION/shoot;../APPLICATION/cmd;../MODULE/relay;./Engineer;../USB_DEVICE/App;../USB_DEVICE/Target;../Middlewares/ST/STM32_USB_Device_Library/Core/Inc;../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc;../MODULE/usb</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../MODULE/algorithm;../MODULE/C_comm;../MODULE/motor;../MODULE/motor/DJImotor;../MODULE/motor/DMmotor;../BSP/CAN;../BSP/DWT;../BSP/USART;../APPLICATION;../APPLICATION/arm;../MODULE/remote;../Middlewares/Third_Party/FreeRTOS/Source/include;../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;../Middlewares/ST/ARM/DSP/Inc;../MODULE/daemon;../MODULE;../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS;../APPLICATION/dribble;../APPLICATION/chassis;../MODULE/imu;../APPLICATION/shoot;../APPLICATION/cmd;../MODULE/relay;./Engineer;../USB_DEVICE/App;../USB_DEVICE/Target;../Middlewares/ST/STM32_USB_Device_Library/Core/Inc;../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc;../MODULE/usb;..\MODULE\protocol</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -1234,6 +1234,11 @@
               <FileName>usb.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\MODULE\usb\usb.h</FilePath>
+            </File>
+            <File>
+              <FileName>protocol.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\MODULE\protocol\protocol.c</FilePath>
             </File>
           </Files>
         </Group>

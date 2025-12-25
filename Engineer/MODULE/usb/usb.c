@@ -14,6 +14,7 @@
 #include "stdio.h"
 #include "usb_device.h"
 #include "main.h" // 确保可以使用 HAL_GetTick()
+#include "protocol.h"
 
 /* 全局变量 */
 USB_Chassis_Cmd_s usb_chassis_cmd;
@@ -150,6 +151,33 @@ static uint8_t RingBuffer_Peek(uint32_t offset, uint8_t *data)
     return 1;
 }
 
+/* 协议栈回调函数实现 */
+
+void serial_write_byte(uint8_t byte)
+{
+    USB_Transmit(&byte, 1);
+}
+
+void on_receive_Handshake(const Packet_Handshake* pkt)
+{
+    // 收到握手包处理，可在此处添加回复逻辑
+}
+
+void on_receive_Heartbeat(const Packet_Heartbeat* pkt)
+{
+    // 收到心跳包，更新时间戳
+    usb_last_recv_time = HAL_GetTick();
+}
+
+void on_receive_CmdVel(const Packet_CmdVel* pkt)
+{
+    // 收到速度控制包
+    usb_chassis_cmd.linear_x = pkt->linear_x;
+    usb_chassis_cmd.linear_y = pkt->linear_y;
+    usb_chassis_cmd.angular_z = pkt->angular_z;
+    usb_last_recv_time = HAL_GetTick();
+}
+
 /**
  * @brief USB数据解析任务
  * @note 建议在主循环或任务中周期性调用
@@ -159,69 +187,9 @@ void USB_ProcessTask(void)
     uint8_t byte;
     
     // 循环处理缓冲区中的数据
-    while (1)
+    while (RingBuffer_Read(&byte))
     {
-        // 1. 寻找帧头
-        if (!RingBuffer_Peek(0, &byte)) break; // 缓冲区空
-        
-        if (byte != USB_FRAME_HEADER)
-        {
-            // 不是帧头，丢弃该字节，继续寻找
-            RingBuffer_Read(&byte);
-            continue;
-        }
-        
-        // 2. 检查缓冲区是否有足够的数据构成一帧
-        uint32_t count = (rb_head >= rb_tail) ? (rb_head - rb_tail) : (RING_BUFFER_SIZE - rb_tail + rb_head);
-        if (count < USB_FRAME_LEN)
-        {
-            // 数据不够，等待下次处理
-            break;
-        }
-        
-        // 3. 预读取完整帧进行校验
-        uint8_t frame[USB_FRAME_LEN];
-        for (uint32_t i = 0; i < USB_FRAME_LEN; i++)
-        {
-            RingBuffer_Peek(i, &frame[i]);
-        }
-        
-        // 4. 校验帧格式
-        if (frame[1] == USB_FUNC_CONTROL && 
-            frame[2] == USB_DATA_LEN && 
-            frame[12] == USB_FRAME_FOOTER)
-        {
-            // 计算校验和
-            uint8_t checksum = 0;
-            for (int j = 1; j <= 10; j++) {
-                checksum += frame[j];
-            }
-            
-            if (checksum == frame[11])
-            {
-                // 校验通过，提取数据
-                memcpy(&usb_chassis_cmd.linear_x, &frame[3], 4);
-                memcpy(&usb_chassis_cmd.angular_z, &frame[7], 4);
-                
-                // 更新时间戳
-                usb_last_recv_time = HAL_GetTick();
-
-                // [DEBUG] 回显功能：将接收到的原始数据帧原样发回
-                USB_Transmit(frame, USB_FRAME_LEN);
-                
-                // 从缓冲区中移除该帧
-                for (uint32_t i = 0; i < USB_FRAME_LEN; i++)
-                {
-                    RingBuffer_Read(&byte);
-                }
-                
-                // 继续处理下一帧
-                continue;
-            }
-        }
-        
-        // 校验失败或格式错误，丢弃帧头，尝试下一字节
-        RingBuffer_Read(&byte);
+        protocol_fsm_feed(byte);
     }
 }
 
