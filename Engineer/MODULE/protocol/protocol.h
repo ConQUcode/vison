@@ -1,14 +1,13 @@
 #pragma once
 #include <stdint.h>
 
-// åè®®å“ˆå¸Œæ ¡éªŒç 
-#define PROTOCOL_HASH 0xC52C4A6B
-
-// å¸§å¤´å®šä¹‰
+// Ğ­Òé¹şÏ£Ğ£ÑéÂë
+#define PROTOCOL_HASH 0x2B7F3DC3
+// Ö¡Í·¶¨Òå
 #define FRAME_HEADER1 90
 #define FRAME_HEADER2 165
 
-// æ•°æ®åŒ…IDå®šä¹‰
+// Êı¾İ°üID¶¨Òå
 typedef enum {
     PACKET_ID_HANDSHAKE = 0,
     PACKET_ID_HEARTBEAT = 1,
@@ -32,7 +31,7 @@ typedef struct {
 
 #pragma pack()
 
-// CRC8æŸ¥æ‰¾è¡¨
+// CRC8²éÕÒ±í
 static const uint8_t CRC8_TABLE[256] = {
     0x00, 0x31, 0x62, 0x53, 0xC4, 0xF5, 0xA6, 0x97, 0xB9, 0x88, 0xDB, 0xEA, 0x7D, 0x4C, 0x1F, 0x2E,
     0x43, 0x72, 0x21, 0x10, 0x87, 0xB6, 0xE5, 0xD4, 0xFA, 0xCB, 0x98, 0xA9, 0x3E, 0x0F, 0x5C, 0x6D,

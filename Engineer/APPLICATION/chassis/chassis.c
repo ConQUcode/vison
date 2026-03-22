@@ -8,7 +8,6 @@
 #include "nac.h"
 #include "usb.h" // 引入USB模块
 
-static DJIMotor_Instance *chassis_lf, *chassis_lb, *chassis_rf, *chassis_rb;
 RC_ctrl_t *rc_cmd;
 static DJIMotor_Instance *motor_lf, *motor_rf, *motor_lb, *motor_rb;                                     // left right forward back
 static DJIMotor_Instance *motor_steering_lf, *motor_steering_rf, *motor_steering_lb, *motor_steering_rb; // 6020电机 
@@ -24,7 +23,7 @@ void ChassisInit()
 		rc_cmd = RemoteControlInit(&huart3);
 	// 四个轮子的参数一样,改tx_id和反转标志位即可
     Motor_Init_Config_s chassis_motor_config = {
-        .can_init_config.can_handle   = &hcan1,
+        .can_init_config.can_handle   = &hcan2,
         .controller_param_init_config = {
             .speed_PID = {
                 .Kp            = 4, // 3
@@ -53,7 +52,7 @@ void ChassisInit()
     };
     //  @todo: 当前还没有设置电机的正反转,仍然需要手动添加reference的正负号,需要电机module的支持,待修改.
     chassis_motor_config.can_init_config.tx_id                             = 4;
-    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_NORMAL;
+    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
     motor_lf                                                               = DJIMotorInit(&chassis_motor_config);
 
     chassis_motor_config.can_init_config.tx_id                             = 1;
@@ -61,7 +60,7 @@ void ChassisInit()
     motor_rf                                                               = DJIMotorInit(&chassis_motor_config);
 
     chassis_motor_config.can_init_config.tx_id                             = 3;
-    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_NORMAL;
+    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
     motor_lb                                                               = DJIMotorInit(&chassis_motor_config);
 
     chassis_motor_config.can_init_config.tx_id                             = 2;
@@ -71,7 +70,7 @@ void ChassisInit()
 
     // 6020电机初始化
     Motor_Init_Config_s chassis_motor_steering_config = {
-        .can_init_config.can_handle   = &hcan1,
+        .can_init_config.can_handle   = &hcan2,
         .controller_param_init_config = {
             .angle_PID = {
                 .Kp                = 12,
@@ -322,11 +321,8 @@ static void SteeringWheelCalculate()
         at_rf = STEERING_CHASSIS_ALIGN_ANGLE_RF + offset_rf;
         at_lb = STEERING_CHASSIS_ALIGN_ANGLE_LB + offset_lb;
         at_rb = STEERING_CHASSIS_ALIGN_ANGLE_RB + offset_rb;
-
-
 				
-				
-		ANGLE_LIMIT_360_TO_180_ABS(at_lf);
+		    ANGLE_LIMIT_360_TO_180_ABS(at_lf);
         ANGLE_LIMIT_360_TO_180_ABS(at_rf);
         ANGLE_LIMIT_360_TO_180_ABS(at_lb);
         ANGLE_LIMIT_360_TO_180_ABS(at_rb);
@@ -335,22 +331,6 @@ static void SteeringWheelCalculate()
         MinmizeRotation(&at_rf, &at_rf_last, &vt_rf);
         MinmizeRotation(&at_lb, &at_lb_last, &vt_lb);
         MinmizeRotation(&at_rb, &at_rb_last, &vt_rb);
-    
-//if(w==0){
-
-//    DJIMotorSetRef(motor_steering_lf, at_lf);
-//    DJIMotorSetRef(motor_steering_rf, at_rf);
-//    DJIMotorSetRef(motor_steering_lb, at_lb);
-//    DJIMotorSetRef(motor_steering_rb, at_rb);
-//		
-//		DJIMotorSetRef(motor_lf, vt_lf*2.5 );
-//    DJIMotorSetRef(motor_rf, vt_rf*2.5 );
-//    DJIMotorSetRef(motor_lb, vt_lb*2.5 );
-//    DJIMotorSetRef(motor_rb, vt_rb*2.5 );
-//}
-
-//else{
-    
 
     DJIMotorSetRef(motor_steering_lf, at_lf);
     DJIMotorSetRef(motor_steering_rf, at_rf);
@@ -368,91 +348,7 @@ static void SteeringWheelCalculate()
     DJIMotorSetRef(motor_lb, vt_lb );
     DJIMotorSetRef(motor_rb, vt_rb );
 		}
-//}
 	}
-/**
- * @brief 舵轮运动学解算(旧版本修改-速度控制+航向锁定)
- * @param vx 前进速度   
- * @param vy 横移速度
- * @param vw 角速度(旋转速度)
- * @note  在 vw=0 时自动锁定航向
- */
-void SteeringWheelKinematics_old(float vx, float vy, float vw)
-{
-    float offset_lf, offset_rf, offset_lb, offset_rb;     // 用于计算舵轮的角度
-    float at_lf_last, at_rf_last, at_lb_last, at_rb_last; // 上次的角度
-    float chassis_vx = 0;
-    float chassis_vy = 0;
-    float chassis_vw = 0;
-    // 获取上次角度
-    at_lb_last = motor_steering_lb->measure.total_angle;
-    at_lf_last = motor_steering_lf->measure.total_angle;
-    at_rf_last = motor_steering_rf->measure.total_angle;
-    at_rb_last = motor_steering_rb->measure.total_angle;
-
-    // 赋值速度
-    chassis_vx = vx;
-    chassis_vy = vy;
-
-    // 旧版IMU叠加+简化解算
-    static uint8_t first_run_kinematics = 1;
-    if(first_run_kinematics) {
-        chassis_ctrl_cmd.last_yaw = chassis_ctrl_cmd.Chassis_IMU_data->Yaw;
-        first_run_kinematics = 0;
-    }
-    chassis_ctrl_cmd.offset_w = UpdateIMUCorrection(vw);
-    chassis_vw = vw + chassis_ctrl_cmd.offset_w;
-
-    float w = chassis_vw;
-    float temp_x = chassis_vx - w, temp_y = chassis_vy - w;
-    arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_lf); // lf：y- , x-
-    temp_y = chassis_vy + w;
-    arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_lb); // lb: y+ , x-
-    temp_x = chassis_vx + w;
-    arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_rb); // rb: y+ , x+
-    temp_y = chassis_vy - w;
-    arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_rf); // rf: y- , x+
-
-    // 计算角度偏移
-    offset_lf = atan2f(chassis_vy - w, chassis_vx - w) * RAD_2_DEGREE; // lf:  y- , x-
-    offset_rf = atan2f(chassis_vy - w, chassis_vx + w) * RAD_2_DEGREE; // rf:  y- , x+
-    offset_lb = atan2f(chassis_vy + w, chassis_vx - w) * RAD_2_DEGREE; // lb:  y+ , x-
-    offset_rb = atan2f(chassis_vy + w, chassis_vx + w) * RAD_2_DEGREE; // rb:  y+ , x+
-
-    at_lf = STEERING_CHASSIS_ALIGN_ANGLE_LF + offset_lf; 
-    at_rf = STEERING_CHASSIS_ALIGN_ANGLE_RF + offset_rf;
-    at_lb = STEERING_CHASSIS_ALIGN_ANGLE_LB + offset_lb;
-    at_rb = STEERING_CHASSIS_ALIGN_ANGLE_RB + offset_rb;
-
-    ANGLE_LIMIT_360_TO_180_ABS(at_lf);
-    ANGLE_LIMIT_360_TO_180_ABS(at_rf);
-    ANGLE_LIMIT_360_TO_180_ABS(at_lb);
-    ANGLE_LIMIT_360_TO_180_ABS(at_rb);
-
-    MinmizeRotation(&at_lf, &at_lf_last, &vt_lf);
-    MinmizeRotation(&at_rf, &at_rf_last, &vt_rf);
-    MinmizeRotation(&at_lb, &at_lb_last, &vt_lb);
-    MinmizeRotation(&at_rb, &at_rb_last, &vt_rb);
-
-    DJIMotorSetRef(motor_steering_lf, at_lf);
-    DJIMotorSetRef(motor_steering_rf, at_rf);
-    DJIMotorSetRef(motor_steering_lb, at_lb);
-    DJIMotorSetRef(motor_steering_rb, at_rb);
-
-    // 保留当前更合理的停车阈值
-    if (vx == 0 && vw == 0 && fabsf(chassis_vw) < 100.0f){
-        DJIMotorSetRef(motor_lf, 0 );
-        DJIMotorSetRef(motor_rf, 0 );
-        DJIMotorSetRef(motor_lb, 0 );
-        DJIMotorSetRef(motor_rb, 0 );
-    }
-    else{
-        DJIMotorSetRef(motor_lf, vt_lf );
-        DJIMotorSetRef(motor_rf, vt_rf );
-        DJIMotorSetRef(motor_lb, vt_lb );
-        DJIMotorSetRef(motor_rb, vt_rb );
-    }
-}
 
 /**
  * @brief 舵轮运动学解算(角速度控制版本-IMU辅助)
@@ -460,20 +356,46 @@ void SteeringWheelKinematics_old(float vx, float vy, float vw)
  * @param vy 横移速度    
  * @param vw 角速度(旋转速度)
  * @note 直接控制角速度，IMU辅助修正
+ * @note [三轮切换说明]: 
+ *       原四轮逻辑已被注释保存。三轮模式下，id3为前顶点，id1为左后，id2为右后。
+ *       如需切换回四轮，只需解开注释的四轮代码，并注释掉当前的三轮代码即可。
  */
 void SteeringWheelKinematics(float vx, float vy, float vw)
 {
+    // ================== 三轮模式变量声明 ==================
+    float offset_1, offset_2, offset_3;
+    float at_1_last, at_2_last, at_3_last;
+    float vt_1, vt_2, vt_3;
+    float at_1, at_2, at_3;
+
+    // ================== 原四轮模式变量声明 (保留) ==================
+    /*
     float offset_lf, offset_rf, offset_lb, offset_rb;
     float at_lf_last, at_rf_last, at_lb_last, at_rb_last;
+    */
+    
     float chassis_vx = 0;
     float chassis_vy = 0;
     float chassis_vw = 0;
     static uint8_t first_run_kinematics = 1;
-    // 获取上次角度
+
+    // ================== 获取上次角度 (三轮) ==================
+    // 注意：假设你的三轮电机指针目前复用原四轮指针：
+    // id3(前) -> motor_steering_lf
+    // id1(左后) -> motor_steering_lb
+    // id2(右后) -> motor_steering_rb
+    // 请根据实际硬件绑定的指针进行调整，这里使用lf/lb/rb代指3/1/2
+    at_3_last = motor_steering_lf->measure.total_angle; // 3号:前
+    at_1_last = motor_steering_lb->measure.total_angle; // 1号:左后
+    at_2_last = motor_steering_rb->measure.total_angle; // 2号:右后
+    
+    // ================== 获取上次角度 (原四轮) ==================
+    /*
     at_lb_last = motor_steering_lb->measure.total_angle;
     at_lf_last = motor_steering_lf->measure.total_angle;
     at_rf_last = motor_steering_rf->measure.total_angle;
     at_rb_last = motor_steering_rb->measure.total_angle;
+    */
 
     // 首次运行时初始化last_yaw
     if(first_run_kinematics) {
@@ -489,8 +411,34 @@ void SteeringWheelKinematics(float vx, float vy, float vw)
     chassis_vx = vx;
     chassis_vy = vy;
 
-    // 生成预计算变量
     float w = chassis_vw;
+
+    // ================== 运动学解算 (三轮模式) ==================
+    // 根据 chassis.h 中的宏定义 (W3_X, W3_Y 等) 计算分量
+    // 3号轮 (前顶点)
+    float temp_x_3 = chassis_vx - w * W3_Y; 
+    float temp_y_3 = chassis_vy + w * W3_X;
+    
+    // 1号轮 (左后)
+    float temp_x_1 = chassis_vx - w * W1_Y;
+    float temp_y_1 = chassis_vy + w * W1_X;
+    
+    // 2号轮 (右后)
+    float temp_x_2 = chassis_vx - w * W2_Y;
+    float temp_y_2 = chassis_vy + w * W2_X;
+
+    // 计算速度标量
+    arm_sqrt_f32(temp_x_1 * temp_x_1 + temp_y_1 * temp_y_1, &vt_1);
+    arm_sqrt_f32(temp_x_2 * temp_x_2 + temp_y_2 * temp_y_2, &vt_2);
+    arm_sqrt_f32(temp_x_3 * temp_x_3 + temp_y_3 * temp_y_3, &vt_3);
+
+    // 计算期望角度
+    offset_1 = atan2f(temp_y_1, temp_x_1) * RAD_2_DEGREE;
+    offset_2 = atan2f(temp_y_2, temp_x_2) * RAD_2_DEGREE;
+    offset_3 = atan2f(temp_y_3, temp_x_3) * RAD_2_DEGREE;
+
+    // ================== 运动学解算 (原四轮模式) ==================
+    /*
     float temp_x = chassis_vx - w, temp_y = chassis_vy - w;
     arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_lf);
     temp_y = chassis_vy + w;
@@ -500,12 +448,28 @@ void SteeringWheelKinematics(float vx, float vy, float vw)
     temp_y = chassis_vy - w;
     arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_rf);
 
-    // 计算角度偏移
     offset_lf = atan2f(chassis_vy - w, chassis_vx - w) * RAD_2_DEGREE;
     offset_rf = atan2f(chassis_vy - w, chassis_vx + w) * RAD_2_DEGREE;
     offset_lb = atan2f(chassis_vy + w, chassis_vx - w) * RAD_2_DEGREE;
     offset_rb = atan2f(chassis_vy + w, chassis_vx + w) * RAD_2_DEGREE;
+    */
 
+    // ================== 绝对偏角设定 (三轮) ==================
+    // 注意：假设你的对齐配置目前复用: lf->3, lb->1, rb->2 
+    at_3 = STEERING_CHASSIS_ALIGN_ANGLE_3 + offset_3; // 3号:前
+    at_1 = STEERING_CHASSIS_ALIGN_ANGLE_1 + offset_1; // 1号:左后
+    at_2 = STEERING_CHASSIS_ALIGN_ANGLE_2 + offset_2; // 2号:右后
+    
+    ANGLE_LIMIT_360_TO_180_ABS(at_3);
+    ANGLE_LIMIT_360_TO_180_ABS(at_1);
+    ANGLE_LIMIT_360_TO_180_ABS(at_2);
+
+    MinmizeRotation(&at_3, &at_3_last, &vt_3);
+    MinmizeRotation(&at_1, &at_1_last, &vt_1);
+    MinmizeRotation(&at_2, &at_2_last, &vt_2);
+
+    // ================== 绝对偏角设定 (原四轮) ==================
+    /*
     at_lf = STEERING_CHASSIS_ALIGN_ANGLE_LF + offset_lf;
     at_rf = STEERING_CHASSIS_ALIGN_ANGLE_RF + offset_rf;
     at_lb = STEERING_CHASSIS_ALIGN_ANGLE_LB + offset_lb;
@@ -520,7 +484,25 @@ void SteeringWheelKinematics(float vx, float vy, float vw)
     MinmizeRotation(&at_rf, &at_rf_last, &vt_rf);
     MinmizeRotation(&at_lb, &at_lb_last, &vt_lb);
     MinmizeRotation(&at_rb, &at_rb_last, &vt_rb);
+    */
 
+    // ================== 下发电控指令 (三轮) ==================
+    DJIMotorSetRef(motor_steering_lf, at_3); // 用lf指针代打3号
+    DJIMotorSetRef(motor_steering_rf, at_1); // 用lb指针代打1号
+    DJIMotorSetRef(motor_steering_rb, at_2); // 用rb指针代打2号
+
+    if(w == 0 && vx == 0 && vy == 0) {
+        DJIMotorSetRef(motor_lf, 0);
+        DJIMotorSetRef(motor_lb, 0);
+        DJIMotorSetRef(motor_rb, 0);
+    } else {
+        DJIMotorSetRef(motor_lf, vt_3); // 3号:前
+        DJIMotorSetRef(motor_rf, vt_1); // 1号:左后
+        DJIMotorSetRef(motor_rb, vt_2); // 2号:右后
+    }
+
+    // ================== 下发电控指令 (原四轮) ==================
+    /*
     DJIMotorSetRef(motor_steering_lf, at_lf);
     DJIMotorSetRef(motor_steering_rf, at_rf);
     DJIMotorSetRef(motor_steering_lb, at_lb);
@@ -537,6 +519,7 @@ void SteeringWheelKinematics(float vx, float vy, float vw)
         DJIMotorSetRef(motor_lb, vt_lb);
         DJIMotorSetRef(motor_rb, vt_rb);
     }
+    */
 }
 
 void ChassisTest_OldVersion(){
@@ -547,7 +530,7 @@ void ChassisTest_OldVersion(){
 
     float test_vx = ((float)rc_cmd->rc.rocker_l1 / 660.0f) * 8000.0f; // 速度系数，根据实际情况调整
     float test_vy = ((float)rc_cmd->rc.rocker_l_ / 660.0f) * 8000.0f; // 横移速度系数
-    float test_vw = ((float)rc_cmd->rc.dial / 660.0f) * 5000.0f;      // 角速度系数
+    float test_vw = ((float)rc_cmd->rc.dial / 660.0f) * 20000.0f;      // 角速度系数
 
     // 简单的死区处理，防止误触
     if(fabsf(test_vx) < 200.0f) test_vx = 0;
@@ -564,6 +547,8 @@ void ChassisTest_OldVersion(){
 void ChassisTask()
 {
 	
+	//ChassisTest_OldVersion();
+	
     // 检查USB数据超时 (500ms)
     // 如果上位机停止发送，底盘应该停止，防止失控
     if (HAL_GetTick() - usb_last_recv_time < 500) {
@@ -575,8 +560,5 @@ void ChassisTask()
         float cmd_vy = usb_chassis_cmd.linear_y * LINEAR_VELOCITY_TO_MOTOR_RPM;
         float cmd_vw = usb_chassis_cmd.angular_z * LINEAR_VELOCITY_TO_MOTOR_RPM; 
         SteeringWheelKinematics(cmd_vx, cmd_vy, cmd_vw);
-    } else {
-        // 超时，使用遥控器测试
-        ChassisTest_OldVersion();
     }
 }

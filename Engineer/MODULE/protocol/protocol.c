@@ -103,8 +103,8 @@ void protocol_fsm_feed(uint8_t byte) {
                     default:
                         break;
                 }
-                // 新增：每次接收有效包后自动发送握手包
-                Packet_Handshake handshake = {0};
+                // 新增：每次接收有效包后自动发送握手包，内容为协议哈希
+                Packet_Handshake handshake = { .protocol_hash = PROTOCOL_HASH };
                 send_Handshake(&handshake);
             }
             // 无论校验成功与否，都重置状态
@@ -122,24 +122,27 @@ void protocol_fsm_feed(uint8_t byte) {
 extern void serial_write_byte(uint8_t byte);
 
 void send_Handshake(const Packet_Handshake* pkt) {
-    uint8_t header[4] = {FRAME_HEADER1, FRAME_HEADER2, PACKET_ID_HANDSHAKE, sizeof(Packet_Handshake)};
-    uint8_t crc = 0;
-    // Send Header
-    for(int i=0; i<4; i++) { serial_write_byte(header[i]); }
-    
-    // Calc CRC part 1
-    crc = CRC8_TABLE[crc ^ header[2]]; // ID
-    crc = CRC8_TABLE[crc ^ header[3]]; // Len
-    
-    // Send Data & Calc CRC
+    uint8_t buf[4 + sizeof(Packet_Handshake) + 1];
+    buf[0] = FRAME_HEADER1;
+    buf[1] = FRAME_HEADER2;
+    buf[2] = PACKET_ID_HANDSHAKE;
+    buf[3] = sizeof(Packet_Handshake);
+    // 拷贝数据区
     const uint8_t* data = (const uint8_t*)pkt;
-    for(int i=0; i<sizeof(Packet_Handshake); i++) {
-        serial_write_byte(data[i]);
-        crc = CRC8_TABLE[crc ^ data[i]];
+    for (int i = 0; i < sizeof(Packet_Handshake); i++) {
+        buf[4 + i] = data[i];
     }
-    
-    // Send CRC
-    serial_write_byte(crc);
+    // 计算CRC
+    uint8_t crc = 0;
+    crc = CRC8_TABLE[crc ^ buf[2]]; // ID
+    crc = CRC8_TABLE[crc ^ buf[3]]; // Len
+    for (int i = 0; i < sizeof(Packet_Handshake); i++) {
+        crc = CRC8_TABLE[crc ^ buf[4 + i]];
+    }
+    buf[4 + sizeof(Packet_Handshake)] = crc;
+    // 一次性发送完整包
+    extern uint8_t USB_Transmit(uint8_t *data, uint16_t len);
+    USB_Transmit(buf, 4 + sizeof(Packet_Handshake) + 1);
 }
 void send_Heartbeat(const Packet_Heartbeat* pkt) {
     uint8_t header[4] = {FRAME_HEADER1, FRAME_HEADER2, PACKET_ID_HEARTBEAT, sizeof(Packet_Heartbeat)};

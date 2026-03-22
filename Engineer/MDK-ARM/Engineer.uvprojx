@@ -1240,6 +1240,11 @@
               <FileType>1</FileType>
               <FilePath>..\MODULE\protocol\protocol.c</FilePath>
             </File>
+            <File>
+              <FileName>protocol.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\MODULE\protocol\protocol.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

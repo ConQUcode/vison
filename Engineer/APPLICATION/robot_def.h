@@ -24,6 +24,19 @@
 #define CHASSIS_HALF_BASE       (CHASSIS_WHEEL_BASE / 2.0f)
 #define CHASSIS_HALF_TRACK      (CHASSIS_WHEEL_TRACK / 2.0f)
 
+// 三角形舵轮各轮相对质心的物理坐标 (单位: 里程米，根据730/816/816计算得出)
+// 3号轮：顶点 (正前)
+#define W3_X  (0.4865f)
+#define W3_Y  (0.0f)   
+
+// 1号轮：底边左顶点 (左后) -> 假设1为左，2为右
+#define W1_X  (-0.2433f)
+#define W1_Y  (0.3650f)
+
+// 2号轮：底边右顶点 (右后)
+#define W2_X  (-0.2433f)
+#define W2_Y  (-0.3650f)
+
 // 电机速度转换相关宏定义 
 #define MOTOR_REDUCTION_RATIO    19.2032f     // 电机减速比 1:19.2302
 #define WHEEL_RADIUS_M           0.081f     // 轮子半径(米) - 根据实际轮子尺寸调整
@@ -60,6 +73,16 @@
 #define STEERING_CHASSIS_ALIGN_ANGLE_LB STEERING_CHASSIS_ALIGN_ECD_LB / 8192.f * 360.f // 舵轮 B 对齐角度
 #define STEERING_CHASSIS_ALIGN_ANGLE_RF STEERING_CHASSIS_ALIGN_ECD_RF / 8192.f * 360.f // 舵轮 C 对齐角度
 #define STEERING_CHASSIS_ALIGN_ANGLE_RB STEERING_CHASSIS_ALIGN_ECD_RB / 8192.f * 360.f // 舵轮 D 对齐角度
+
+// ================== 新三轮对齐参数 (待填入实际测量值) ==================
+// 假设：1号为左后，2号为右后，3号为前顶点
+#define STEERING_CHASSIS_ALIGN_ECD_1   700 // 你测出的1号轮编码器值700
+#define STEERING_CHASSIS_ALIGN_ECD_2   0 // 你测出的2号轮编码器值8011
+#define STEERING_CHASSIS_ALIGN_ECD_3   6150 // 你测出的4号轮编码器值1240
+
+#define STEERING_CHASSIS_ALIGN_ANGLE_1 STEERING_CHASSIS_ALIGN_ECD_1 / 8192.f * 360.f
+#define STEERING_CHASSIS_ALIGN_ANGLE_2 STEERING_CHASSIS_ALIGN_ECD_2 / 8192.f * 360.f
+#define STEERING_CHASSIS_ALIGN_ANGLE_3 STEERING_CHASSIS_ALIGN_ECD_3 / 8192.f * 360.f
 
 #pragma pack(1) // 压缩结构体,取消字节对齐,下面的数据都可能被传输
 
