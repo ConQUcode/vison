@@ -66,7 +66,7 @@ I (C:\Keil_v5\ARM\ARMCC\include\string.h)(0x6025237E)
 I (../Core/Inc/gpio.h)(0x67CDA964)
 I (../APPLICATION/chassis/chassis.h)(0x69BBF213)
 I (../APPLICATION/cmd/robot_cmd.h)(0x683AFBCA)
-I (../APPLICATION/robot_def.h)(0x69BE464C)
+I (../APPLICATION/robot_def.h)(0x69C1310A)
 I (../MODULE/imu/ins_task.h)(0x6728AD12)
 I (../MODULE/imu/BMI088driver.h)(0x6728AD12)
 I (../MODULE/algorithm/QuaternionEKF.h)(0x67CDA97C)
@@ -172,7 +172,7 @@ I (../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h)(0x68CEA630)
 I (../Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h)(0x68CEA630)
 I (../APPLICATION/chassis/chassis.h)(0x69BBF213)
 I (../APPLICATION/cmd/robot_cmd.h)(0x683AFBCA)
-I (../APPLICATION/robot_def.h)(0x69BE464C)
+I (../APPLICATION/robot_def.h)(0x69C1310A)
 I (../MODULE/imu/ins_task.h)(0x6728AD12)
 I (../MODULE/imu/BMI088driver.h)(0x6728AD12)
 I (../MODULE/algorithm/QuaternionEKF.h)(0x67CDA97C)
@@ -1695,7 +1695,7 @@ I (C:\Keil_v5\ARM\ARMCC\include\string.h)(0x6025237E)
 I (../BSP/USART/bsp_usart.h)(0x67CDA964)
 I (C:\Keil_v5\ARM\ARMCC\include\stdlib.h)(0x60252374)
 I (../MODULE/daemon/daemon.h)(0x67CDA97C)
-I (../APPLICATION/robot_def.h)(0x69BE464C)
+I (../APPLICATION/robot_def.h)(0x69C1310A)
 I (../MODULE/imu/ins_task.h)(0x6728AD12)
 I (../MODULE/imu/BMI088driver.h)(0x6728AD12)
 I (../MODULE/algorithm/QuaternionEKF.h)(0x67CDA97C)
@@ -2124,10 +2124,10 @@ I (..\MODULE\protocol\protocol.h)(0x694D7965)
 I (C:\Keil_v5\ARM\ARMCC\include\stdint.h)(0x6025237E)
 I (C:\Keil_v5\ARM\ARMCC\include\string.h)(0x6025237E)
 F (..\MODULE\protocol\protocol.h)(0x694D7965)()
-F (..\APPLICATION\chassis\chassis.c)(0x69BE46BF)(--c99 --gnu -c --cpu Cortex-M4.fp.sp -g -O0 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F4xx/Include -I ../Drivers/CMSIS/Include -I ../MODULE/algorithm -I ../MODULE/C_comm -I ../MODULE/motor -I ../MODULE/motor/DJImotor -I ../MODULE/motor/DMmotor -I ../BSP/CAN -I ../BSP/DWT -I ../BSP/USART -I ../APPLICATION -I ../APPLICATION/arm -I ../MODULE/remote -I ../Middlewares/Third_Party/FreeRTOS/Source/include -I ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F -I ../Middlewares/ST/ARM/DSP/Inc -I ../MODULE/daemon -I ../MODULE -I ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS -I ../APPLICATION/dribble -I ../APPLICATION/chassis -I ../MODULE/imu -I ../APPLICATION/shoot -I ../APPLICATION/cmd -I ../MODULE/relay -I ./Engineer -I ../USB_DEVICE/App -I ../USB_DEVICE/Target -I ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc -I ../MODULE/usb -I ..\MODULE\protocol-I.\RTE\_Engineer-IC:\Users\11737\AppData\Local\Arm\Packs\ARM\CMSIS\5.8.0\CMSIS\Core\Include-D__UVISION_VERSION="536" -D_RTE_ -DSTM32F407xx -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F407xx-o engineer\chassis.o --omf_browse engineer\chassis.crf --depend engineer\chassis.d)
+F (..\APPLICATION\chassis\chassis.c)(0x69C13195)(--c99 --gnu -c --cpu Cortex-M4.fp.sp -g -O0 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F4xx/Include -I ../Drivers/CMSIS/Include -I ../MODULE/algorithm -I ../MODULE/C_comm -I ../MODULE/motor -I ../MODULE/motor/DJImotor -I ../MODULE/motor/DMmotor -I ../BSP/CAN -I ../BSP/DWT -I ../BSP/USART -I ../APPLICATION -I ../APPLICATION/arm -I ../MODULE/remote -I ../Middlewares/Third_Party/FreeRTOS/Source/include -I ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F -I ../Middlewares/ST/ARM/DSP/Inc -I ../MODULE/daemon -I ../MODULE -I ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS -I ../APPLICATION/dribble -I ../APPLICATION/chassis -I ../MODULE/imu -I ../APPLICATION/shoot -I ../APPLICATION/cmd -I ../MODULE/relay -I ./Engineer -I ../USB_DEVICE/App -I ../USB_DEVICE/Target -I ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc -I ../MODULE/usb -I ..\MODULE\protocol-I.\RTE\_Engineer-IC:\Users\11737\AppData\Local\Arm\Packs\ARM\CMSIS\5.8.0\CMSIS\Core\Include-D__UVISION_VERSION="536" -D_RTE_ -DSTM32F407xx -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F407xx-o engineer\chassis.o --omf_browse engineer\chassis.crf --depend engineer\chassis.d)
 I (..\APPLICATION\chassis\chassis.h)(0x69BBF213)
 I (../APPLICATION/cmd/robot_cmd.h)(0x683AFBCA)
-I (../APPLICATION/robot_def.h)(0x69BE464C)
+I (../APPLICATION/robot_def.h)(0x69C1310A)
 I (C:\Keil_v5\ARM\ARMCC\include\stdint.h)(0x6025237E)
 I (../MODULE/imu/ins_task.h)(0x6728AD12)
 I (../MODULE/imu/BMI088driver.h)(0x6728AD12)
@@ -2265,7 +2265,7 @@ I (../MODULE/daemon/daemon.h)(0x67CDA97C)
 I (../MODULE/motor/DJImotor/DJI_motor.h)(0x69456DD8)
 I (../MODULE/remote/remote.h)(0x67CDA97C)
 I (../Core/Inc/usart.h)(0x688838EA)
-I (../APPLICATION/robot_def.h)(0x69BE464C)
+I (../APPLICATION/robot_def.h)(0x69C1310A)
 I (../MODULE/imu/ins_task.h)(0x6728AD12)
 I (../MODULE/imu/BMI088driver.h)(0x6728AD12)
 I (../MODULE/algorithm/QuaternionEKF.h)(0x67CDA97C)
@@ -2333,7 +2333,7 @@ I (../MODULE/motor/motor_def.h)(0x67CDA97C)
 I (../MODULE/daemon/daemon.h)(0x67CDA97C)
 I (../MODULE/motor/DJImotor/DJI_motor.h)(0x69456DD8)
 I (../MODULE/remote/remote.h)(0x67CDA97C)
-I (../APPLICATION/robot_def.h)(0x69BE464C)
+I (../APPLICATION/robot_def.h)(0x69C1310A)
 I (../MODULE/imu/ins_task.h)(0x6728AD12)
 I (../MODULE/imu/BMI088driver.h)(0x6728AD12)
 I (../MODULE/algorithm/QuaternionEKF.h)(0x67CDA97C)
@@ -2358,7 +2358,7 @@ I (../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h)(0x68CEA630)
 I (../Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h)(0x68CEA630)
 F (..\APPLICATION\cmd\robot_cmd.c)(0x683AFBCA)(--c99 --gnu -c --cpu Cortex-M4.fp.sp -g -O0 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F4xx/Include -I ../Drivers/CMSIS/Include -I ../MODULE/algorithm -I ../MODULE/C_comm -I ../MODULE/motor -I ../MODULE/motor/DJImotor -I ../MODULE/motor/DMmotor -I ../BSP/CAN -I ../BSP/DWT -I ../BSP/USART -I ../APPLICATION -I ../APPLICATION/arm -I ../MODULE/remote -I ../Middlewares/Third_Party/FreeRTOS/Source/include -I ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F -I ../Middlewares/ST/ARM/DSP/Inc -I ../MODULE/daemon -I ../MODULE -I ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS -I ../APPLICATION/dribble -I ../APPLICATION/chassis -I ../MODULE/imu -I ../APPLICATION/shoot -I ../APPLICATION/cmd -I ../MODULE/relay -I ./Engineer -I ../USB_DEVICE/App -I ../USB_DEVICE/Target -I ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc -I ../MODULE/usb -I ..\MODULE\protocol-I.\RTE\_Engineer-IC:\Users\11737\AppData\Local\Arm\Packs\ARM\CMSIS\5.8.0\CMSIS\Core\Include-D__UVISION_VERSION="536" -D_RTE_ -DSTM32F407xx -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F407xx-o engineer\robot_cmd.o --omf_browse engineer\robot_cmd.crf --depend engineer\robot_cmd.d)
 I (..\APPLICATION\cmd\robot_cmd.h)(0x683AFBCA)
-I (../APPLICATION/robot_def.h)(0x69BE464C)
+I (../APPLICATION/robot_def.h)(0x69C1310A)
 I (C:\Keil_v5\ARM\ARMCC\include\stdint.h)(0x6025237E)
 I (../MODULE/imu/ins_task.h)(0x6728AD12)
 I (../MODULE/imu/BMI088driver.h)(0x6728AD12)
@@ -2422,7 +2422,7 @@ I (../BSP/USART/bsp_usart.h)(0x67CDA964)
 F (..\APPLICATION\Test.c)(0x69BE2CDA)(--c99 --gnu -c --cpu Cortex-M4.fp.sp -g -O0 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F4xx/Include -I ../Drivers/CMSIS/Include -I ../MODULE/algorithm -I ../MODULE/C_comm -I ../MODULE/motor -I ../MODULE/motor/DJImotor -I ../MODULE/motor/DMmotor -I ../BSP/CAN -I ../BSP/DWT -I ../BSP/USART -I ../APPLICATION -I ../APPLICATION/arm -I ../MODULE/remote -I ../Middlewares/Third_Party/FreeRTOS/Source/include -I ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F -I ../Middlewares/ST/ARM/DSP/Inc -I ../MODULE/daemon -I ../MODULE -I ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS -I ../APPLICATION/dribble -I ../APPLICATION/chassis -I ../MODULE/imu -I ../APPLICATION/shoot -I ../APPLICATION/cmd -I ../MODULE/relay -I ./Engineer -I ../USB_DEVICE/App -I ../USB_DEVICE/Target -I ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc -I ../MODULE/usb -I ..\MODULE\protocol-I.\RTE\_Engineer-IC:\Users\11737\AppData\Local\Arm\Packs\ARM\CMSIS\5.8.0\CMSIS\Core\Include-D__UVISION_VERSION="536" -D_RTE_ -DSTM32F407xx -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F407xx-o engineer\test.o --omf_browse engineer\test.crf --depend engineer\test.d)
 I (../APPLICATION/chassis/chassis.h)(0x69BBF213)
 I (../APPLICATION/cmd/robot_cmd.h)(0x683AFBCA)
-I (../APPLICATION/robot_def.h)(0x69BE464C)
+I (../APPLICATION/robot_def.h)(0x69C1310A)
 I (C:\Keil_v5\ARM\ARMCC\include\stdint.h)(0x6025237E)
 I (../MODULE/imu/ins_task.h)(0x6728AD12)
 I (../MODULE/imu/BMI088driver.h)(0x6728AD12)
@@ -2535,7 +2535,7 @@ I (../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd.h)(0x68CEA67E)
 I (../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_usb.h)(0x68CEA67E)
 I (../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd_ex.h)(0x68CEA67E)
 I (C:\Keil_v5\ARM\ARMCC\include\string.h)(0x6025237E)
-I (../APPLICATION/robot_def.h)(0x69BE464C)
+I (../APPLICATION/robot_def.h)(0x69C1310A)
 I (../MODULE/imu/ins_task.h)(0x6728AD12)
 I (../MODULE/imu/BMI088driver.h)(0x6728AD12)
 I (../MODULE/algorithm/QuaternionEKF.h)(0x67CDA97C)

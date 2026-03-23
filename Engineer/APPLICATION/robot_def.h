@@ -31,11 +31,11 @@
 
 // 1号轮：底边左顶点 (左后) -> 假设1为左，2为右
 #define W1_X  (-0.2433f)
-#define W1_Y  (0.3650f)
+#define W1_Y  (-0.3650f)
 
 // 2号轮：底边右顶点 (右后)
 #define W2_X  (-0.2433f)
-#define W2_Y  (-0.3650f)
+#define W2_Y  (0.3650f)
 
 // 电机速度转换相关宏定义 
 #define MOTOR_REDUCTION_RATIO    19.2032f     // 电机减速比 1:19.2302

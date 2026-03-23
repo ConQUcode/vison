@@ -52,8 +52,8 @@ void ChassisInit()
     };
     //  @todo: 当前还没有设置电机的正反转,仍然需要手动添加reference的正负号,需要电机module的支持,待修改.
     chassis_motor_config.can_init_config.tx_id                             = 4;
-    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
-    motor_lf                                                               = DJIMotorInit(&chassis_motor_config);
+    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_NORMAL;
+       motor_lf                                                               = DJIMotorInit(&chassis_motor_config);
 
     chassis_motor_config.can_init_config.tx_id                             = 1;
     chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_NORMAL;
@@ -528,9 +528,9 @@ void ChassisTest_OldVersion(){
     // 左摇杆左右(rocker_l_) -> 控制横移速度 vy
     // 拨轮(dial) -> 控制旋转速度 vw
 
-    float test_vx = ((float)rc_cmd->rc.rocker_l1 / 660.0f) * 8000.0f; // 速度系数，根据实际情况调整
-    float test_vy = ((float)rc_cmd->rc.rocker_l_ / 660.0f) * 8000.0f; // 横移速度系数
-    float test_vw = ((float)rc_cmd->rc.dial / 660.0f) * 20000.0f;      // 角速度系数
+    float test_vx = ((float)rc_cmd->rc.rocker_l1 / 660.0f) * 12000.0f; // 速度系数，根据实际情况调整
+    float test_vy = ((float)rc_cmd->rc.rocker_l_ / 660.0f) * 12000.0f; // 横移速度系数
+    float test_vw = -((float)rc_cmd->rc.dial / 660.0f) * 25000.0f;      // 角速度系数
 
     // 简单的死区处理，防止误触
     if(fabsf(test_vx) < 200.0f) test_vx = 0;
