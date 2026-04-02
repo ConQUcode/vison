@@ -3,9 +3,9 @@
 <title>Static Call Graph - [Engineer\Engineer.axf]</title></head>
 <body><HR>
 <H1>Static Call Graph for image Engineer\Engineer.axf</H1><HR>
-<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060960: Last Updated: Mon Mar 23 20:27:04 2026
+<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060960: Last Updated: Thu Apr 02 22:11:50 2026
 <BR><P>
-<H3>Maximum Stack Usage =        904 bytes + Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)</H3><H3>
+<H3>Maximum Stack Usage =       1184 bytes + Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)</H3><H3>
 Call chain for Maximum Stack Depth:</H3>
 __rt_entry_main &rArr; main &rArr; all_init_Task &rArr; ChassisInit &rArr; INS_Init &rArr; BMI088Init &rArr; Calibrate_MPU_Offset &rArr; BMI088_read_muli_reg &rArr; BMI088_read_write_byte &rArr; HAL_SPI_TransmitReceive &rArr; SPI_EndRxTxTransaction &rArr; SPI_WaitFlagStateUntilTimeout
 <P>
@@ -289,7 +289,7 @@ Global Symbols
 <P><STRONG><a name="[269]"></a>__rt_entry_postsh_1</STRONG> (Thumb, 0 bytes, Stack size unknown bytes, __rtentry2.o(.ARM.Collect$$rtentry$$00000009))
 
 <P><STRONG><a name="[9c]"></a>__rt_entry_main</STRONG> (Thumb, 0 bytes, Stack size unknown bytes, __rtentry2.o(.ARM.Collect$$rtentry$$0000000D))
-<BR><BR>[Stack]<UL><LI>Max Depth = 904 + Unknown Stack Size
+<BR><BR>[Stack]<UL><LI>Max Depth = 1184 + Unknown Stack Size
 <LI>Call Chain = __rt_entry_main &rArr; main &rArr; all_init_Task &rArr; ChassisInit &rArr; INS_Init &rArr; BMI088Init &rArr; Calibrate_MPU_Offset &rArr; BMI088_read_muli_reg &rArr; BMI088_read_write_byte &rArr; HAL_SPI_TransmitReceive &rArr; SPI_EndRxTxTransaction &rArr; SPI_WaitFlagStateUntilTimeout
 </UL>
 <BR>[Calls]<UL><LI><a href="#[9d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;main
@@ -1030,8 +1030,8 @@ Global Symbols
 <BR>[Called By]<UL><LI><a href="#[20c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_Transmit
 </UL>
 
-<P><STRONG><a name="[e5]"></a>ChassisInit</STRONG> (Thumb, 260 bytes, Stack size 608 bytes, chassis.o(i.ChassisInit))
-<BR><BR>[Stack]<UL><LI>Max Depth = 896<LI>Call Chain = ChassisInit &rArr; INS_Init &rArr; BMI088Init &rArr; Calibrate_MPU_Offset &rArr; BMI088_read_muli_reg &rArr; BMI088_read_write_byte &rArr; HAL_SPI_TransmitReceive &rArr; SPI_EndRxTxTransaction &rArr; SPI_WaitFlagStateUntilTimeout
+<P><STRONG><a name="[e5]"></a>ChassisInit</STRONG> (Thumb, 270 bytes, Stack size 888 bytes, chassis.o(i.ChassisInit))
+<BR><BR>[Stack]<UL><LI>Max Depth = 1176<LI>Call Chain = ChassisInit &rArr; INS_Init &rArr; BMI088Init &rArr; Calibrate_MPU_Offset &rArr; BMI088_read_muli_reg &rArr; BMI088_read_write_byte &rArr; HAL_SPI_TransmitReceive &rArr; SPI_EndRxTxTransaction &rArr; SPI_WaitFlagStateUntilTimeout
 </UL>
 <BR>[Calls]<UL><LI><a href="#[e7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;RemoteControlInit
 <LI><a href="#[e8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DJIMotorInit
@@ -3261,7 +3261,7 @@ Global Symbols
 </UL>
 
 <P><STRONG><a name="[214]"></a>all_init_Task</STRONG> (Thumb, 8 bytes, Stack size 8 bytes, test.o(i.all_init_Task))
-<BR><BR>[Stack]<UL><LI>Max Depth = 904<LI>Call Chain = all_init_Task &rArr; ChassisInit &rArr; INS_Init &rArr; BMI088Init &rArr; Calibrate_MPU_Offset &rArr; BMI088_read_muli_reg &rArr; BMI088_read_write_byte &rArr; HAL_SPI_TransmitReceive &rArr; SPI_EndRxTxTransaction &rArr; SPI_WaitFlagStateUntilTimeout
+<BR><BR>[Stack]<UL><LI>Max Depth = 1184<LI>Call Chain = all_init_Task &rArr; ChassisInit &rArr; INS_Init &rArr; BMI088Init &rArr; Calibrate_MPU_Offset &rArr; BMI088_read_muli_reg &rArr; BMI088_read_write_byte &rArr; HAL_SPI_TransmitReceive &rArr; SPI_EndRxTxTransaction &rArr; SPI_WaitFlagStateUntilTimeout
 </UL>
 <BR>[Calls]<UL><LI><a href="#[e5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ChassisInit
 </UL>
@@ -3301,7 +3301,7 @@ Global Symbols
 </UL>
 
 <P><STRONG><a name="[9d]"></a>main</STRONG> (Thumb, 60 bytes, Stack size 0 bytes, main.o(i.main))
-<BR><BR>[Stack]<UL><LI>Max Depth = 904<LI>Call Chain = main &rArr; all_init_Task &rArr; ChassisInit &rArr; INS_Init &rArr; BMI088Init &rArr; Calibrate_MPU_Offset &rArr; BMI088_read_muli_reg &rArr; BMI088_read_write_byte &rArr; HAL_SPI_TransmitReceive &rArr; SPI_EndRxTxTransaction &rArr; SPI_WaitFlagStateUntilTimeout
+<BR><BR>[Stack]<UL><LI>Max Depth = 1184<LI>Call Chain = main &rArr; all_init_Task &rArr; ChassisInit &rArr; INS_Init &rArr; BMI088Init &rArr; Calibrate_MPU_Offset &rArr; BMI088_read_muli_reg &rArr; BMI088_read_write_byte &rArr; HAL_SPI_TransmitReceive &rArr; SPI_EndRxTxTransaction &rArr; SPI_WaitFlagStateUntilTimeout
 </UL>
 <BR>[Calls]<UL><LI><a href="#[21a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;osKernelStart
 <LI><a href="#[214]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;all_init_Task

@@ -52,11 +52,11 @@ void ChassisInit()
     };
     //  @todo: 当前还没有设置电机的正反转,仍然需要手动添加reference的正负号,需要电机module的支持,待修改.
     chassis_motor_config.can_init_config.tx_id                             = 4;
-    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_NORMAL;
+    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
        motor_lf                                                               = DJIMotorInit(&chassis_motor_config);
 
     chassis_motor_config.can_init_config.tx_id                             = 1;
-    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_NORMAL;
+    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
     motor_rf                                                               = DJIMotorInit(&chassis_motor_config);
 
     chassis_motor_config.can_init_config.tx_id                             = 3;
@@ -67,6 +67,35 @@ void ChassisInit()
 		chassis_motor_config.controller_param_init_config.speed_PID.Kp         =2;
     chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
     motor_rb                                                               = DJIMotorInit(&chassis_motor_config);
+ 
+		 Motor_Init_Config_s chassis_motor_config1 = {
+        .can_init_config.can_handle   = &hcan1,
+        .controller_param_init_config = {
+            .speed_PID = {
+                .Kp            = 4, // 3
+                .Ki            = 0.2, // 0.5
+                .Kd            = 0.005,   // 0
+                .IntegralLimit = 3000,//5000
+                .Improve       = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
+                .MaxOut        = 10000,
+            },
+            .current_PID = {
+                .Kp            = 1, // 1
+                .Ki            = 0.01,   // 0
+                .Kd            = 0,
+                .IntegralLimit = 3000,//3000
+                .Improve       = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
+                .MaxOut        = 10000,
+            },
+        },
+        .controller_setting_init_config = {
+            .angle_feedback_source = MOTOR_FEED,
+            .speed_feedback_source = MOTOR_FEED,
+            .outer_loop_type       = SPEED_LOOP,
+            .close_loop_type       = CURRENT_LOOP | SPEED_LOOP,
+        },
+        .motor_type = M3508,
+    };
 
     // 6020电机初始化
     Motor_Init_Config_s chassis_motor_steering_config = {
@@ -134,15 +163,15 @@ void ChassisInit()
     motor_steering_rb                                   = DJIMotorInit(&chassis_motor_steering_config);
 
 		PID_Init_Config_s chassis_follow_pid_conf = {
-        .Kp                = 100, // 6
+        .Kp                = 150, // 6
         .Ki                = 0.1f,
         .Kd                = 17, // 0.5
         .DeadBand          = 0.5,
         .CoefA             = 0.2,
         .CoefB             = 0.3,
-        .Improve           = PID_Trapezoid_Intergral | PID_DerivativeFilter | PID_DerivativeFilter | PID_Derivative_On_Measurement | PID_Integral_Limit | PID_Derivative_On_Measurement,
+        .Improve           = PID_Trapezoid_Intergral | PID_DerivativeFilter | PID_DerivativeFilter | PID_Derivative_On_Measurement | PID_Integral_Limit | PID_Derivative_On_Measurement | PID_ErrorHandle,
         .IntegralLimit     = 500, // 200
-        .MaxOut            = 20000,
+        .MaxOut            = 25000,
         .Derivative_LPF_RC = 0.01, // 0.01
     };
     PIDInit(&chassis_follow_pid, &chassis_follow_pid_conf);
@@ -195,7 +224,8 @@ static float UpdateIMUCorrection(float target_vw)
         case IMU_CORRECT_STRAIGHT:
             // 直线模式：只在无转速指令时校准
             if(fabsf(target_vw) < 100.0f) {  // 死区判断
-                float yaw_error = current_yaw - chassis_ctrl_cmd.last_yaw;
+                // 方案二修改：将误差计算换为 "目标 - 实际"，纠正正反馈发散问题
+                float yaw_error = chassis_ctrl_cmd.last_yaw - current_yaw;
                 // 处理角度跳变
                 if(yaw_error > 180.0f) yaw_error -= 360.0f;
                 else if(yaw_error < -180.0f) yaw_error += 360.0f;
@@ -216,8 +246,8 @@ static float UpdateIMUCorrection(float target_vw)
                 while(chassis_ctrl_cmd.target_yaw > 180.0f) chassis_ctrl_cmd.target_yaw -= 360.0f;
                 while(chassis_ctrl_cmd.target_yaw < -180.0f) chassis_ctrl_cmd.target_yaw += 360.0f;
             }
-            // 计算与目标角度的误差
-            float target_error = current_yaw - chassis_ctrl_cmd.target_yaw;
+            // 方案二修改：将计算与目标角度的误差换为 "目标 - 实际"
+            float target_error = chassis_ctrl_cmd.target_yaw - current_yaw;
             if(target_error > 180.0f) target_error -= 360.0f;
             else if(target_error < -180.0f) target_error += 360.0f;
             offset = PIDCalculate(&chassis_follow_pid, target_error, 0);
@@ -226,7 +256,8 @@ static float UpdateIMUCorrection(float target_vw)
         case IMU_CORRECT_HYBRID:
         {
             // 混合模式：根据转速大小动态调整
-            float yaw_error = current_yaw - chassis_ctrl_cmd.last_yaw;
+            // 方案二修改：将误差计算换为 "目标 - 实际"
+            float yaw_error = chassis_ctrl_cmd.last_yaw - current_yaw;
             // 处理角度跳变
             if(yaw_error > 180.0f) yaw_error -= 360.0f;
             else if(yaw_error < -180.0f) yaw_error += 360.0f;

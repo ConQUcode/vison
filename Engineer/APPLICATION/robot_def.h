@@ -76,9 +76,9 @@
 
 // ================== 新三轮对齐参数 (待填入实际测量值) ==================
 // 假设：1号为左后，2号为右后，3号为前顶点
-#define STEERING_CHASSIS_ALIGN_ECD_1   700 // 你测出的1号轮编码器值700
+#define STEERING_CHASSIS_ALIGN_ECD_1   6900 // 你测出的1号轮编码器值700
 #define STEERING_CHASSIS_ALIGN_ECD_2   0 // 你测出的2号轮编码器值8011
-#define STEERING_CHASSIS_ALIGN_ECD_3   6150 // 你测出的4号轮编码器值1240
+#define STEERING_CHASSIS_ALIGN_ECD_3   2950 // 你测出的4号轮编码器值1240
 
 #define STEERING_CHASSIS_ALIGN_ANGLE_1 STEERING_CHASSIS_ALIGN_ECD_1 / 8192.f * 360.f
 #define STEERING_CHASSIS_ALIGN_ANGLE_2 STEERING_CHASSIS_ALIGN_ECD_2 / 8192.f * 360.f

@@ -27,36 +27,7 @@ Project File Date:  12/26/2025
 <h2>Output:</h2>
 *** Using Compiler 'V5.06 update 7 (build 960)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
 Build target 'Engineer'
-compiling chassis.c...
-../APPLICATION/nac.h(107): warning:  #1295-D: Deprecated declaration NacSend - give arg types
-  void NacSend();
-../APPLICATION/nac.h(117): warning:  #1-D: last line of file ends without a newline
-  #endif
-..\APPLICATION\chassis\chassis.c(33): warning:  #188-D: enumerated type mixed with another type
-                  .Improve       = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
-..\APPLICATION\chassis\chassis.c(41): warning:  #188-D: enumerated type mixed with another type
-                  .Improve       = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
-..\APPLICATION\chassis\chassis.c(49): warning:  #188-D: enumerated type mixed with another type
-              .close_loop_type       = CURRENT_LOOP | SPEED_LOOP,
-..\APPLICATION\chassis\chassis.c(81): warning:  #188-D: enumerated type mixed with another type
-                  .Improve           = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement | PID_DerivativeFilter | PID_ChangingIntegrationRate,
-..\APPLICATION\chassis\chassis.c(91): warning:  #188-D: enumerated type mixed with another type
-                  .Improve       = PID_Integral_Limit | PID_Derivative_On_Measurement | PID_ChangingIntegrationRate | PID_OutputFilter,
-..\APPLICATION\chassis\chassis.c(122): warning:  #188-D: enumerated type mixed with another type
-              .close_loop_type       = SPEED_LOOP | ANGLE_LOOP,
-..\APPLICATION\chassis\chassis.c(143): warning:  #188-D: enumerated type mixed with another type
-          .Improve           = PID_Trapezoid_Intergral | PID_DerivativeFilter | PID_DerivativeFilter | PID_Derivative_On_Measurement | PID_Integral_Limit | PID_Derivative_On_Measurement,
-..\APPLICATION\chassis\chassis.c(193): warning:  #546-D: transfer of control bypasses initialization of:
-            variable "target_error"  (declared at line 220)
-      switch(chassis_ctrl_cmd.correct_mode)
-      ^
-..\APPLICATION\chassis\chassis.c(269): warning:  #177-D: function "SteeringWheelCalculate"  was declared but never referenced
-  static void SteeringWheelCalculate()
-..\APPLICATION\chassis\chassis.c: 11 warnings, 0 errors
-linking...
-Program Size: Code=63468 RO-data=3876 RW-data=1440 ZI-data=97312  
-FromELF: creating hex file...
-"Engineer\Engineer.axf" - 0 Error(s), 11 Warning(s).
+"Engineer\Engineer.axf" - 0 Error(s), 0 Warning(s).
 
 <h2>Software Packages used:</h2>
 
@@ -79,7 +50,7 @@ Package Vendor: Keil
 
    * Component: ARM::CMSIS:CORE:5.5.0
       Include file:  CMSIS\Core\Include\tz_context.h
-Build Time Elapsed:  00:00:02
+Build Time Elapsed:  00:00:00
 </pre>
 </body>
 </html>
