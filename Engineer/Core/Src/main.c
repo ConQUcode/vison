@@ -30,8 +30,6 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "chassis.h"
-#include "arm.h"
-#include "shoot.h"
 #include "Test.h"
 /* USER CODE END Includes */
 
@@ -94,7 +92,7 @@ int main(void)
   /* USER CODE BEGIN SysInit */
 
   /* USER CODE END SysInit */
-               
+
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();

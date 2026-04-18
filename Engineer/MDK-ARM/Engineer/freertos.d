@@ -67,8 +67,6 @@ engineer\freertos.o: ../MODULE/remote/remote.h
 engineer\freertos.o: ../Core/Inc/usart.h
 engineer\freertos.o: ../APPLICATION/nac.h
 engineer\freertos.o: ../BSP/USART/bsp_usart.h
-engineer\freertos.o: ../APPLICATION/arm/arm.h
-engineer\freertos.o: ../APPLICATION/shoot/shoot.h
 engineer\freertos.o: ../MODULE/motor/DJImotor/DJI_motor.h
 engineer\freertos.o: ../BSP/CAN/bsp_can.h
 engineer\freertos.o: ../Core/Inc/can.h
@@ -88,3 +86,4 @@ engineer\freertos.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_co
 engineer\freertos.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h
 engineer\freertos.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ctlreq.h
 engineer\freertos.o: ../APPLICATION/Test.h
+engineer\freertos.o: ../APPLICATION/catch/catch.h

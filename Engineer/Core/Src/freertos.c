@@ -26,12 +26,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "chassis.h"
-#include "arm.h"
-#include "shoot.h"
 #include "ins_task.h"
 #include "DJI_motor.h"
 #include "usb.h"
 #include "Test.h"
+#include "catch.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -56,7 +55,7 @@
 osThreadId ImuTaskHandle;
 osThreadId ChassisTaskHandle;
 osThreadId UsbTaskHandle;
-osThreadId ArmTaskHandle;
+osThreadId Catch_TaskHandle;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -66,7 +65,7 @@ osThreadId ArmTaskHandle;
 void ImuTask_f(void const * argument);
 void ChassisTask_f(void const * argument);
 void Usb_f(void const * argument);
-void ArmTask_f(void const * argument);
+void Start_catch(void const * argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -126,9 +125,9 @@ void MX_FREERTOS_Init(void) {
   osThreadDef(UsbTask, Usb_f, osPriorityAboveNormal, 0, 512);
   UsbTaskHandle = osThreadCreate(osThread(UsbTask), NULL);
 
-  /* definition and creation of ArmTask */
-  osThreadDef(ArmTask, ArmTask_f, osPriorityAboveNormal, 0, 512);
-  ArmTaskHandle = osThreadCreate(osThread(ArmTask), NULL);
+  /* definition and creation of Catch_Task */
+  osThreadDef(Catch_Task, Start_catch, osPriorityIdle, 0, 1024);
+  Catch_TaskHandle = osThreadCreate(osThread(Catch_Task), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -189,29 +188,29 @@ void Usb_f(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-		USB_ProcessTask();
+		//USB_ProcessTask();
     osDelay(1);
   }
   /* USER CODE END Usb_f */
 }
 
-/* USER CODE BEGIN Header_ArmTask_f */
+/* USER CODE BEGIN Header_Start_catch */
 /**
-* @brief Function implementing the ArmTask thread.
+* @brief Function implementing the Catch_Task thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_ArmTask_f */
-void ArmTask_f(void const * argument)
+/* USER CODE END Header_Start_catch */
+void Start_catch(void const * argument)
 {
-  /* USER CODE BEGIN ArmTask_f */
+  /* USER CODE BEGIN Start_catch */
   /* Infinite loop */
   for(;;)
   {
-//     ArmTask();
-//		 
+		catch_all();
+    osDelay(1);
   }
-  /* USER CODE END ArmTask_f */
+  /* USER CODE END Start_catch */
 }
 
 /* Private application code --------------------------------------------------*/

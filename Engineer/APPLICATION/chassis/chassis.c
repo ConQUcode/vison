@@ -52,7 +52,7 @@ void ChassisInit()
     };
     //  @todo: 当前还没有设置电机的正反转,仍然需要手动添加reference的正负号,需要电机module的支持,待修改.
     chassis_motor_config.can_init_config.tx_id                             = 4;
-    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
+    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_NORMAL;
        motor_lf                                                               = DJIMotorInit(&chassis_motor_config);
 
     chassis_motor_config.can_init_config.tx_id                             = 1;
@@ -175,7 +175,6 @@ void ChassisInit()
         .Derivative_LPF_RC = 0.01, // 0.01
     };
     PIDInit(&chassis_follow_pid, &chassis_follow_pid_conf);
-		nac_ctrl = NacInit(&huart1);
        chassis_ctrl_cmd.Chassis_IMU_data = INS_Init();
         chassis_ctrl_cmd.correct_mode =  IMU_CORRECT_HYBRID;
         chassis_ctrl_cmd.imu_enable = 1;                       // 使能IMU校准

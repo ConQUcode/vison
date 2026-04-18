@@ -76,6 +76,4 @@ engineer\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\limits.h
 engineer\main.o: ../MODULE/remote/remote.h
 engineer\main.o: ../APPLICATION/nac.h
 engineer\main.o: ../BSP/USART/bsp_usart.h
-engineer\main.o: ../APPLICATION/arm/arm.h
-engineer\main.o: ../APPLICATION/shoot/shoot.h
 engineer\main.o: ../APPLICATION/Test.h

@@ -53,8 +53,6 @@ engineer\test.o: ../MODULE/remote/remote.h
 engineer\test.o: ../Core/Inc/usart.h
 engineer\test.o: ../APPLICATION/nac.h
 engineer\test.o: ../BSP/USART/bsp_usart.h
-engineer\test.o: ../APPLICATION/shoot/shoot.h
-engineer\test.o: ../APPLICATION/arm/arm.h
 engineer\test.o: ../MODULE/motor/DJImotor/DJI_motor.h
 engineer\test.o: ../BSP/CAN/bsp_can.h
 engineer\test.o: ../Core/Inc/can.h
@@ -74,3 +72,4 @@ engineer\test.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
 engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_core.h
 engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h
 engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ctlreq.h
+engineer\test.o: ../APPLICATION/catch/catch.h

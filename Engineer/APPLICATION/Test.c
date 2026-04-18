@@ -1,6 +1,4 @@
 #include "chassis.h"
-#include "shoot.h"
-#include "arm.h"
 #include "DJI_motor.h"
 #include "bsp_dwt.h"
 #include "remote.h"
@@ -8,12 +6,13 @@
 #include "Test.h"
 #include "nac.h"
 #include "usb.h"
-
+#include "catch.h"
 
 
 //-----------------------------------------总体的初始化函数----------------------------
 void all_init_Task(){
 	ChassisInit();
+	 catch_init();
 	//ArmInit();
 	//ShootInit();
 		
