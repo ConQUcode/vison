@@ -1,0 +1,39 @@
+# Progress
+
+- 2026-07-24: Started the temporary stall-homing implementation.
+- 2026-07-24: Selected embedded project routing and driver-review workflows; classified the critical layer as DJI motor feedback/control semantics.
+- 2026-07-24: Reworked the arm application into independent M3508/M2006 stall-homing state machines; GM6020 remains registered and stopped, and PWM startup is inactive.
+- 2026-07-24: Reset PID runtime and timing state before each homing attempt to prevent stale integral or delta-time effects.
+- 2026-07-24: Added `g_arm_homing_abort` as a persistent Watch emergency stop; an explicit restart command is still required afterward.
+- 2026-07-24: Made abort discard any pending restart request so clearing abort cannot resume motion by itself.
+- 2026-07-24: Corrected abort recovery by adding a terminal `ARM_HOMING_ABORTED` state; only `g_arm_homing_restart=1` leaves it.
+- 2026-07-24: `arm.c` passed GCC syntax checking with `-Wall -Wextra -Wshadow -Wconversion` and no warnings; scoped `git diff --check` passed.
+- 2026-07-24: Confirmed the Keil project still contains the arm source entry and `APPLICATION/arm` include path. MDK CLI build was unavailable because Keil tools are not on PATH.
+- 2026-07-24: Moved the registered-but-disabled GM6020 ID1 from CAN2 to CAN1; no CubeMX changes were required.
+- 2026-07-24: Made `DJIMotorReset()` explicitly clear `measure.total_angle` after updating the software zero offset.
+- 2026-07-24: Added independent shoulder/elbow homing entry points and per-motor Watch diagnostics for stall condition, completion, zero execution, trigger measurements, and reset count.
+- 2026-07-24: Split M3508 and M2006 homing speed/current settings into four independently named Watch globals.
+- 2026-07-24: Disabled automatic homing timeout by default after identifying it as the likely source of stop-without-zero behavior; timeout remains opt-in with a nonzero value.
+- 2026-07-24: Added per-motor peak absolute current telemetry for homing threshold tuning.
+- 2026-07-24: Started replacing the temporary one-sided homing flow with sequential two-ended calibration, teaching, and non-driving 3DOF kinematics.
+- 2026-07-24: Replaced the old auto-start homing logic with explicit sequential two-ended shoulder/elbow calibration, RAM teaching, GM6020 front teaching, wrist-center FK, and non-driving IK.
+- 2026-07-24: Tightened maximum-end travel protection to measure from the minimum-end software zero and added runtime guards for invalid Watch-tuned ratios, speeds, currents, margins, and IK inputs.
+- 2026-07-24: Made a new calibration attempt clear stale joint limits, spans, directions, and teaching offsets while preserving an already taught GM6020 front zero.
+- 2026-07-24: Confirmed `arm.c` and `Test.c` pass ARM GCC syntax checking with `-Wall -Wextra -Wshadow -Wconversion`; scoped `git diff --check` passes apart from an existing line-ending notice in `DJI_motor.c`.
+- 2026-07-24: Completed a Keil ARMCC 5.06u7 build with project-local `TEMP/TMP`: code 48340 bytes, RO data 1492 bytes, RW data 1020 bytes, ZI data 96068 bytes, 0 errors and 0 warnings.
+- 2026-07-24: Verified FK reference poses and four-branch IK round trips independently; the general-pose reconstruction error was below `1e-12 mm` before joint-limit filtering.
+- 2026-07-24: Confirmed the MATLAB source uses `baseHeight=80 mm`, `L1=150 mm`, and `L2=179 mm`; firmware intentionally stops at the wrist center and excludes MATLAB's `L3/q4` tool-tip extension.
+- 2026-07-24: Replaced the Watch-triggered start with one-shot power-on automatic calibration after M3508/M2006 feedback remains online for 500 ms.
+- 2026-07-24: Removed Watch request globals for calibration start, pose teaching, GM6020 teaching, and IK solving; retained only public state/result structures and optional `g_arm_homing_abort` emergency stop.
+- 2026-07-24: Verified an abort or calibration failure cannot resume automatically after clearing the abort; another attempt requires reset or an explicit API call.
+- 2026-07-24: Rebuilt with Keil after the automatic-start simplification: code 45072 bytes, RO data 1492 bytes, RW data 928 bytes, ZI data 96040 bytes, 0 errors and 0 warnings.
+- 2026-07-24: Reordered automatic calibration so M2006 completes both endpoints first, then M3508 completes both endpoints, before entering `ARM_CAL_WAIT_KNOWN_POSE`.
+- 2026-07-24: Reversed only the M2006 calibration direction: its first-end scan now uses negative speed, while release and second-end scan use positive speed; M3508 direction is unchanged.
+- 2026-07-24: Reversed the M2006 calibration direction again at bench request: its first-end scan now uses positive speed, while release and second-end scan use negative speed; M3508 remains unchanged.
+- 2026-07-25: Split boot behavior into fast `ArmHomingStart()` single-reference homing and documented `ArmCalibrationStart()` maintenance full scanning, sharing one protected state machine.
+- 2026-07-25: Added a mandatory 2000 ms zero-torque settle state after each confirmed reference-stop stall before clearing `measure.total_angle`.
+- 2026-07-25: Compiled measured endpoints q2 `-9/188 deg`, q3 `132/-101 deg`, and measured motor spans `-5493.33936/-8517.4375 deg`; full scans recalculate RAM scale values from current spans.
+- 2026-07-25: Final GCC strict syntax check and Keil ARMCC build passed; image size code 45784 bytes, RO data 1492 bytes, RW data 928 bytes, ZI data 96048 bytes, 0 errors and 0 warnings.
+- 2026-07-25: Added a temporary isolated M3508 ratio test. It bypasses normal homing, keeps GM6020/M2006 disabled, settles and zeros M3508, then commands 1710 motor degrees at 90 motor-deg/s to test the 19:1 hypothesis.
+- 2026-07-25: Added ratio-test online, reverse-motion, overrun, 30 s timeout, and 200 ms sustained-stall shutdowns plus Watch-visible state/angle fields. Keil build passed with code 46636 bytes and 0 errors/0 warnings.
+- 2026-07-25: Increased the temporary M3508 ratio-test command from 90 to 342 motor-deg/s, giving a nominal 1710-degree test duration of 5.0 seconds and an assumed 19:1 output speed of 18 deg/s.

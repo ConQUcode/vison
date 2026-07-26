@@ -118,7 +118,7 @@ void DJIMotorOuterLoop(DJIMotor_Instance *motor, Closeloop_Type_e outer_loop);
 void DJIMotorSetRef(DJIMotor_Instance *motor, float ref);
 
 /**
-	* @brief 重置电机里的各种回馈值
+ * @brief 将当前位置设为软件零点并清零total_angle，保留total_round
  *        
  *
  * @param motor 要设置的电机

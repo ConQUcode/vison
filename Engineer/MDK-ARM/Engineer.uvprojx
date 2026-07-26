@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../MODULE/algorithm;../MODULE/C_comm;../MODULE/motor;../MODULE/motor/DJImotor;../MODULE/motor/DMmotor;../BSP/CAN;../BSP/DWT;../BSP/USART;../APPLICATION;../MODULE/remote;../Middlewares/Third_Party/FreeRTOS/Source/include;../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;../Middlewares/ST/ARM/DSP/Inc;../MODULE/daemon;../MODULE;../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS;../APPLICATION/dribble;../APPLICATION/chassis;../MODULE/imu;../APPLICATION/cmd;../MODULE/relay;./Engineer;../USB_DEVICE/App;../USB_DEVICE/Target;../Middlewares/ST/STM32_USB_Device_Library/Core/Inc;../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc;../MODULE/usb;../MODULE/protocol;../MODULE/feite_motor;../APPLICATION/catch</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../MODULE/algorithm;../MODULE/C_comm;../MODULE/motor;../MODULE/motor/DJImotor;../MODULE/motor/DMmotor;../BSP/CAN;../BSP/DWT;../BSP/USART;../APPLICATION;../MODULE/remote;../Middlewares/Third_Party/FreeRTOS/Source/include;../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;../Middlewares/ST/ARM/DSP/Inc;../MODULE/daemon;../MODULE;../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS;../APPLICATION/dribble;../APPLICATION/chassis;../MODULE/imu;../APPLICATION/cmd;../MODULE/relay;./Engineer;../USB_DEVICE/App;../USB_DEVICE/Target;../Middlewares/ST/STM32_USB_Device_Library/Core/Inc;../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc;../MODULE/usb;../MODULE/protocol;../MODULE/feite_motor;../APPLICATION/catch;../APPLICATION/arm</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -1274,6 +1274,11 @@
               <FileName>Test.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\APPLICATION\Test.c</FilePath>
+            </File>
+            <File>
+              <FileName>arm.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APPLICATION\arm\arm.c</FilePath>
             </File>
             <File>
               <FileName>catch.c</FileName>
@@ -2592,9 +2597,6 @@
           </Files>
         </Group>
         <Group>
-          <GroupName>::CMSIS</GroupName>
-        </Group>
-        <Group>
           <GroupName>Middlewares/Library/DSP Library/DSP Library</GroupName>
           <GroupOption>
             <CommonProperty>
@@ -2691,6 +2693,9 @@
               </FileOption>
             </File>
           </Files>
+        </Group>
+        <Group>
+          <GroupName>::CMSIS</GroupName>
         </Group>
       </Groups>
     </Target>

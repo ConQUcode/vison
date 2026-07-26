@@ -164,14 +164,16 @@ void DJIMotorSetRef(DJIMotor_Instance *motor, float ref)
 }
 	
 /**
-	* @brief 重置电机里的各种回馈值,主要是针对measure里的total_angle，total_round
+	* @brief 将当前位置设为软件零点并清零measure.total_angle，保留total_round保证编码器多圈连续性
  *        
  *
  * @param motor 要设置的电机
  */
 void DJIMotorReset(DJIMotor_Instance *motor)
 {
-     motor->measure.zero_offset = motor->measure.total_angle + motor->measure.zero_offset; // 更新偏移量
+     motor->measure.zero_offset = (float)motor->measure.total_round * 360.0f +
+                                  motor->measure.angle_single_round;
+     motor->measure.total_angle = 0.0f;
 }
 
 
@@ -208,7 +210,7 @@ void DJIMotorControl(void)
         // pid_ref会顺次通过被启用的闭环充当数据的载体
         // 计算位置环,只有启用位置环且外层闭环为位置时会计算速度环输出
         if ((motor_setting->close_loop_type & ANGLE_LOOP) && motor_setting->outer_loop_type == ANGLE_LOOP) {
-            if (motor_setting->angle_feedback_source == OTHER_FEED)
+            if (motor_setting->angle_feedback_source == OTHER_FEED && motor_controller->other_angle_feedback_ptr != NULL)
                 pid_measure = *motor_controller->other_angle_feedback_ptr;
             else
                 pid_measure = measure->total_angle; // MOTOR_FEED,对total angle闭环,防止在边界处出现突跃
@@ -218,10 +220,10 @@ void DJIMotorControl(void)
 
         // 计算速度环,(外层闭环为速度或位置)且(启用速度环)时会计算速度环
         if ((motor_setting->close_loop_type & SPEED_LOOP) && (motor_setting->outer_loop_type & (ANGLE_LOOP | SPEED_LOOP))) {
-            if (motor_setting->feedforward_flag & SPEED_FEEDFORWARD) { // 速度前馈控制
+            if ((motor_setting->feedforward_flag & SPEED_FEEDFORWARD) && motor_controller->speed_feedforward_ptr != NULL) { // 速度前馈控制
                 pid_ref += *motor_controller->speed_feedforward_ptr;
             }
-            if (motor_setting->speed_feedback_source == OTHER_FEED) { // 速度反馈
+            if (motor_setting->speed_feedback_source == OTHER_FEED && motor_controller->other_speed_feedback_ptr != NULL) { // 速度反馈
                 pid_measure = *motor_controller->other_speed_feedback_ptr;
             } else { // MOTOR_FEED
                 pid_measure = measure->speed_aps;
@@ -231,7 +233,7 @@ void DJIMotorControl(void)
         }
 
         // 计算电流环,目前只要启用了电流环就计算,不管外层闭环是什么,并且电流只有电机自身传感器的反馈
-        if (motor_setting->feedforward_flag & CURRENT_FEEDFORWARD) { // 电流前馈控制
+        if ((motor_setting->feedforward_flag & CURRENT_FEEDFORWARD) && motor_controller->current_feedforward_ptr != NULL) { // 电流前馈控制
             pid_ref += *motor_controller->current_feedforward_ptr;
         }
         if (motor_setting->close_loop_type & CURRENT_LOOP) { // 电流环
@@ -253,7 +255,8 @@ void DJIMotorControl(void)
 
         // 若该电机处于停止状态,直接将buff置零
         if (motor->stop_flag == MOTOR_STOP) {
-            memset(sender_assignment[group].tx_buff + 2 * num, 0, 16u);
+            sender_assignment[group].tx_buff[2 * num]     = 0u;
+            sender_assignment[group].tx_buff[2 * num + 1] = 0u;
         }
     }
 

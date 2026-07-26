@@ -31,6 +31,7 @@
 /* USER CODE BEGIN Includes */
 #include "chassis.h"
 #include "Test.h"
+#include "robot_cmd.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -80,7 +81,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+   HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -102,6 +103,7 @@ int main(void)
   MX_SPI1_Init();
   MX_TIM10_Init();
   MX_USART1_UART_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
 //	ChassisInit();
 //	ShootInit();

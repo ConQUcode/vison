@@ -57,6 +57,7 @@
 "engineer\chassis.o"
 "engineer\robot_cmd.o"
 "engineer\test.o"
+"engineer\arm.o"
 "engineer\catch.o"
 "engineer\croutine.o"
 "engineer\event_groups.o"

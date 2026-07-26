@@ -2,8 +2,8 @@
 #define __TEST_H
 
 
-void all_init_Task();
-void all_cmd_Task();
+void all_init_Task(void);
+void all_cmd_Task(void);
 
 
 

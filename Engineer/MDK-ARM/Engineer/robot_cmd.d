@@ -50,15 +50,4 @@ engineer\robot_cmd.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\limits.h
 engineer\robot_cmd.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdlib.h
 engineer\robot_cmd.o: ../MODULE/remote/remote.h
 engineer\robot_cmd.o: ../Core/Inc/usart.h
-engineer\robot_cmd.o: ../MODULE/motor/DMmotor/dmmotor.h
-engineer\robot_cmd.o: ../BSP/CAN/bsp_can.h
-engineer\robot_cmd.o: ../Core/Inc/can.h
-engineer\robot_cmd.o: ../MODULE/algorithm/controller.h
 engineer\robot_cmd.o: ../BSP/DWT/bsp_dwt.h
-engineer\robot_cmd.o: ../MODULE/algorithm/ramp_contorller.h
-engineer\robot_cmd.o: ../MODULE/motor/motor_def.h
-engineer\robot_cmd.o: ../MODULE/daemon/daemon.h
-engineer\robot_cmd.o: ../MODULE/motor/DJImotor/DJI_motor.h
-engineer\robot_cmd.o: ../APPLICATION/chassis/chassis.h
-engineer\robot_cmd.o: ../APPLICATION/nac.h
-engineer\robot_cmd.o: ../BSP/USART/bsp_usart.h

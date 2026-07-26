@@ -31,6 +31,7 @@
 #include "usb.h"
 #include "Test.h"
 #include "catch.h"
+#include "daemon.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -150,7 +151,6 @@ void ImuTask_f(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-		INS_Task();
     osDelay(1);
   }
   /* USER CODE END ImuTask_f */
@@ -189,7 +189,8 @@ void Usb_f(void const * argument)
   for(;;)
   {
 		//USB_ProcessTask();
-    osDelay(1);
+		DaemonTask();
+    osDelay(10);
   }
   /* USER CODE END Usb_f */
 }
@@ -207,7 +208,6 @@ void Start_catch(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-		catch_all();
     osDelay(1);
   }
   /* USER CODE END Start_catch */
