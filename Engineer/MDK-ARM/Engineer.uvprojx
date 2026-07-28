@@ -1281,6 +1281,16 @@
               <FilePath>..\APPLICATION\arm\arm.c</FilePath>
             </File>
             <File>
+              <FileName>arm_kinematics.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APPLICATION\arm\arm_kinematics.c</FilePath>
+            </File>
+            <File>
+              <FileName>arm_trajectory.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APPLICATION\arm\arm_trajectory.c</FilePath>
+            </File>
+            <File>
               <FileName>catch.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\APPLICATION\catch\catch.c</FilePath>

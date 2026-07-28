@@ -1,6 +1,8 @@
 engineer\arm.o: ..\APPLICATION\arm\arm.c
 engineer\arm.o: ..\APPLICATION\arm\arm.h
 engineer\arm.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+engineer\arm.o: ..\APPLICATION\arm\arm_kinematics.h
+engineer\arm.o: ..\APPLICATION\arm\arm_trajectory.h
 engineer\arm.o: ../MODULE/motor/DJImotor/DJI_motor.h
 engineer\arm.o: ../BSP/CAN/bsp_can.h
 engineer\arm.o: ../Core/Inc/can.h

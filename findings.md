@@ -1,5 +1,16 @@
 # Findings
 
+## 2026-07-27 Linear Motion Implementation
+
+- The live firmware already has verified one-sided homing, measured motor-to-joint mapping, angle-loop control, soft limits, and a 1 ms `ArmTask()` call followed by `DJIMotorControl()`.
+- Existing `ArmSetJointTargetDeg()` clears all three PID controllers every call, so continuous trajectory references require a separate no-reset update path.
+- Boot homing ends at q2=180 and q3=-180, outside the 5-degree software limits. Automatic motion therefore needs a one-time hard-limit exit corridor before normal trajectory checks apply.
+- The conservative loop points are numerically reachable with continuous IK branches: P1 `(27.13,-7.60,120.04)`, P2 `(49.31,14.61,117.82)`, P3 `(26.13,-20.57,99.34)` mm.
+- The repository is dirty from the complete arm bring-up and Keil outputs. Changes must remain additive and must not replace the tuned motor registration structures.
+- The closed P1-P2-P3-P1 path passes the firmware-equivalent 2 mm preflight over 53 samples. Maximum adjacent joint changes are `3.066/1.034/0.570 deg`, below the configured `5/2/2 deg` thresholds.
+- The reference FK self-test returns `(0,-7.6,34) mm` for `[0,180,-180] deg`, and all three target-point IK solutions round-trip to numerical precision.
+- MATLAB command-line batch mode still crashes on this host with exit `0xc0000409`; the script now contains the validation function, but automated MATLAB GUI execution remains unverified.
+
 - Current task is limited to the three DJI motors; PWM wrist behavior must remain inactive.
 - The repository is already dirty from CubeMX, Keil output, and the previous arm refactor, so edits must remain narrowly scoped.
 - `DJIMotorInit()` enables a motor by default, so GM6020 must be stopped immediately after registration and on every arm task iteration.

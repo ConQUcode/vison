@@ -1,4 +1,6 @@
 #include "arm.h"
+#include "arm_kinematics.h"
+#include "arm_trajectory.h"
 
 #include "DJI_motor.h"
 #include "can.h"
@@ -10,45 +12,63 @@
 #define ARM_PI                         3.14159265358979323846f
 #define ARM_DEG_TO_RAD                 (ARM_PI / 180.0f)
 #define ARM_RAD_TO_DEG                 (180.0f / ARM_PI)
-#define ARM_BASE_HEIGHT_MM             80.0f
-#define ARM_LINK_1_MM                  150.0f
-#define ARM_LINK_2_MM                  179.0f
 #define ARM_WRIST_PWM_MIN_US           1000u
 #define ARM_WRIST_PWM_MID_US           1500u
 #define ARM_WRIST_PWM_MAX_US           2000u
-#define ARM_SHOULDER_SPEED_OUTPUT_MAX  3500.0f
-#define ARM_ELBOW_SPEED_OUTPUT_MAX     2200.0f
 #define ARM_FLOAT_EPSILON              0.0001f
 #define ARM_RANGE_EPSILON_DEG          0.5f
-#define ARM_AUTO_START_ONLINE_MS        500u
-#define ARM_REFERENCE_SETTLE_MS        2000u
+#define ARM_AUTO_START_ONLINE_MS         20u
+#define ARM_STOP_SETTLE_MS             3000u
 #define ARM_SHOULDER_MIN_DIRECTION      1.0f
 #define ARM_ELBOW_MIN_DIRECTION         1.0f
+#define ARM_BASE_FRONT_RAW_DEG           190.369736f
+#define ARM_BASE_DIRECTION               1.0f
+#define ARM_BASE_ZERO_CONFIGURED         1u
+
+/* Joint commands and IK must stay 5 degrees inside the measured hard stops.
+ * Normal boot homing stops at the reference hard stops and does not
+ * automatically move either joint to these software limits. */
+#define ARM_SOFT_LIMIT_ENABLE             1u
+#define ARM_SOFT_LIMIT_MARGIN_DEG          5.0f
+#define ARM_SOFT_LIMIT_TARGET_SPEED_DPS         20.0f
+#define ARM_BASE_INIT_CURRENT              10000.0f
+#define ARM_BASE_INIT_TARGET_TOLERANCE_DEG     1.0f
+#define ARM_SOFT_LIMIT_OVERCURRENT_MS      200u
+#define ARM_SOFT_LIMIT_SETTLE_MS           300u
+#define ARM_SOFT_LIMIT_TIMEOUT_MS        45000u
+#define ARM_MOTION_TEST_ENABLE                0u
+#define ARM_MOTION_TEST_POSE_COUNT            3u
+#define ARM_MOTION_TEST_HOLD_MS            5000u
+#define ARM_MOTION_TEST_SETTLE_MS           300u
+#define ARM_MOTION_TEST_POSITION_TOL_DEG     2.0f
+#define ARM_MOTION_TEST_BASE_SPEED_TOL_DPS  10.0f
+#define ARM_MOTION_TEST_JOINT_SPEED_TOL_DPS  5.0f
 
 /*
- * Joint angles measured at the two mechanical stops. The reference stop is
- * the first stop reached during homing. A maintenance full scan re-measures
- * the motor span and updates the motor-to-joint scale from these endpoints.
+ * Model angles at the two mechanical stops. The reference stop is reached by
+ * the normal one-sided power-on homing sequence. Motor spans are the mean of
+ * three unloaded full scans with a 3 s settle at both ends.
  */
-#define ARM_SHOULDER_REFERENCE_DEG      (-9.0f)
-#define ARM_SHOULDER_OPPOSITE_DEG       188.0f
-#define ARM_ELBOW_REFERENCE_DEG         132.0f
-#define ARM_ELBOW_OPPOSITE_DEG          (-101.0f)
-#define ARM_SHOULDER_MEASURED_SPAN_DEG  (-5493.33936f)
-#define ARM_ELBOW_MEASURED_SPAN_DEG     (-8517.4375f)
+#define ARM_SHOULDER_REFERENCE_DEG      180.0f
+#define ARM_SHOULDER_OPPOSITE_DEG         0.0f
+#define ARM_ELBOW_REFERENCE_DEG        (-180.0f)
+#define ARM_ELBOW_OPPOSITE_DEG          (-85.0f)
+#define ARM_SHOULDER_MEASURED_SPAN_DEG  (-3461.26563f)
+#define ARM_ELBOW_MEASURED_SPAN_DEG     (-3548.73088f)
 
 /*
  * 0: normal boot, find only the two reference stops.
  * 1: maintenance boot, scan both stops and refresh mapping values in RAM.
- * Return this switch to 0 after maintenance; full-scan results are visible in
- * g_arm_calibration and can be copied back to the measured span constants.
+ * Full scanning remains a maintenance tool. Normal firmware performs only the
+ * M2006 then M3508 reference-stop homing sequence.
  */
 #define ARM_BOOT_FULL_SCAN              0u
 
 /*
- * Temporary M3508 gearbox test. While enabled, normal arm homing is bypassed,
- * GM6020/M2006 remain disabled, and M3508 rotates 19 * 90 = 1710 motor degrees.
- * Set this back to 0 after checking the output-shaft angle.
+ * Temporary M3508 gearbox test. Keep the implementation for later maintenance,
+ * but leave its runtime switch disabled during normal one-sided homing.
+ * When enabled, normal homing is bypassed, GM6020/M2006 remain disabled, and
+ * M3508 rotates 19 * 90 = 1710 motor degrees.
  */
 #define ARM_3508_RATIO_TEST_RATIO        19.0f
 #define ARM_3508_RATIO_TEST_OUTPUT_DEG   90.0f
@@ -80,29 +100,58 @@ static uint8_t arm_initialized;
 static uint8_t arm_auto_calibration_attempted;
 static uint8_t arm_auto_online_waiting;
 static uint32_t arm_auto_online_start_tick;
-static float arm_base_front_raw_deg;
-static float arm_base_direction = 1.0f;
+static float arm_base_front_raw_deg = ARM_BASE_FRONT_RAW_DEG;
+static float arm_base_direction = ARM_BASE_DIRECTION;
 static uint32_t arm_ratio_test_state_tick;
 static uint32_t arm_ratio_test_stall_tick;
-/* Temporary internal switch: set to 0 after the gearbox test. */
-static volatile uint8_t arm_3508_ratio_test_enable = 1u;
+static uint32_t arm_soft_limit_state_tick;
+static uint32_t arm_soft_limit_overcurrent_tick;
+static float arm_joint_hold_target_motor_deg[2];
+static float arm_base_last_target_error_deg;
+static uint8_t arm_base_target_error_valid;
+static uint8_t arm_small_angle_test_active;
+static uint8_t arm_motion_test_pose_index;
+static uint8_t arm_motion_test_target_reached;
+static uint32_t arm_motion_test_hold_start_tick;
+/* Disabled: normal firmware uses the one-sided homing sequence. */
+static volatile uint8_t arm_3508_ratio_test_enable = 0u;
+
+static const float arm_motion_test_pose_deg[ARM_MOTION_TEST_POSE_COUNT][3] = {
+    { 30.0f, 160.0f, -110.6f },
+    {-30.0f, 145.0f,  -95.6f },
+    {  0.0f, 170.0f, -120.6f },
+};
 
 static void ArmCalibrationFail(Arm_Calibration_State_e error_state);
+static void ArmSoftLimitEnterState(Arm_Soft_Limit_State_e state,
+                                   Arm_Soft_Limit_Axis_e axis,
+                                   uint32_t now);
+static void ArmUpdateSoftLimitTargets(void);
+static void ArmBaseInitHold(void);
+static void ArmSetAngleLoop(DJIMotor_Instance *motor);
+static float ArmSoftLimitJointToMotor(float joint_deg,
+                                      float reference_joint_deg,
+                                      float scale);
+static float ArmNearestBaseTotalTarget(float target_raw_deg);
+static float ArmWrapTo360(float angle_deg);
+static void ArmMotionTestStart(uint32_t now);
 
 Arm_State_s g_arm_state;
 Arm_Calibration_s g_arm_calibration;
+Arm_Soft_Limit_Debug_s g_arm_soft_limit_debug;
+Arm_Kinematics_Debug_s g_arm_kinematics_debug;
 
 /* Bench-tuned calibration constants. Change these in source when required. */
 static const float g_arm_shoulder_homing_speed_dps = 450.0f;
-static const float g_arm_shoulder_stall_current = 1300.0f;
+static const float g_arm_shoulder_stall_current = 1200.0f;
 static const float g_arm_elbow_homing_speed_dps = 800.0f;
 static const float g_arm_elbow_stall_current = 1400.0f;
 static const float g_arm_homing_stall_speed_dps = 20.0f;
 static const uint32_t g_arm_homing_spinup_ms = 500u;
 static const uint32_t g_arm_homing_stall_confirm_ms = 8u;
-static const float g_arm_shoulder_motor_to_joint_ratio = 27.88497f;
-static const float g_arm_elbow_motor_to_joint_ratio = 36.55553f;
-static const float g_arm_soft_limit_margin_deg = 3.0f;
+static const float g_arm_shoulder_motor_to_joint_ratio = 19.22925f;
+static const float g_arm_elbow_motor_to_joint_ratio = 37.35506f;
+static const float g_arm_soft_limit_margin_deg = ARM_SOFT_LIMIT_MARGIN_DEG;
 static const float g_arm_release_joint_deg = 1.0f;
 static const uint32_t g_arm_release_min_ms = 500u;
 static const uint32_t g_arm_shoulder_stage_timeout_ms = 45000u;
@@ -134,11 +183,6 @@ static float ArmWrapTo180(float angle_deg)
     return angle_deg;
 }
 
-static float ArmAngleDifference(float angle_deg, float reference_deg)
-{
-    return ArmWrapTo180(angle_deg - reference_deg);
-}
-
 static float ArmSign(float value)
 {
     return value >= 0.0f ? 1.0f : -1.0f;
@@ -149,29 +193,40 @@ static Motor_Init_Config_s ArmBaseMotorConfig(void)
     Motor_Init_Config_s config = {
         .can_init_config = {
             .can_handle = &hcan1,
-            .tx_id = 1,
+            .tx_id = 5,
         },
         .controller_param_init_config = {
             .angle_PID = {
-                .Kp = 12.0f,
-                .Ki = 0.2f,
+                .Kp = 13.5f,
+                .Ki = 1.8f,
+                .DeadBand = 1.0f,
                 .Improve = PID_Integral_Limit,
-                .IntegralLimit = 1000.0f,
-                .MaxOut = 12000.0f,
+                .IntegralLimit = 3000.0f,
+                .MaxOut = 2500.0f,
             },
             .speed_PID = {
-                .Kp = 30.0f,
+                .Kp = 7.0f,
                 .Ki = 1.0f,
                 .Improve = PID_Integral_Limit,
                 .IntegralLimit = 3000.0f,
-                .MaxOut = 12000.0f,
+                .MaxOut = 18000.0f,
+            },
+            .current_PID = {
+                .Kp = 1.4f,
+                .Ki = 0.01f,
+                .Kd = 0.0f,
+                .Improve = (PID_Improvement_e)(
+                    PID_Trapezoid_Intergral | PID_Integral_Limit),
+                .IntegralLimit = 3000.0f,
+                .MaxOut = 30000.0f,
             },
         },
         .controller_setting_init_config = {
             .angle_feedback_source = MOTOR_FEED,
             .speed_feedback_source = MOTOR_FEED,
             .outer_loop_type = ANGLE_LOOP,
-            .close_loop_type = (Closeloop_Type_e)(ANGLE_LOOP | SPEED_LOOP),
+            .close_loop_type =
+                (Closeloop_Type_e)(ANGLE_LOOP | SPEED_LOOP | CURRENT_LOOP),
             .motor_reverse_flag = MOTOR_DIRECTION_NORMAL,
             .feedback_reverse_flag = FEEDBACK_DIRECTION_NORMAL,
             .feedforward_flag = FEEDFORWARD_NONE,
@@ -189,12 +244,28 @@ static Motor_Init_Config_s ArmShoulderMotorConfig(void)
             .tx_id = 2,
         },
         .controller_param_init_config = {
+            .angle_PID = {
+                .Kp = 10.5f,
+                .Ki = 0.01f,
+                .Kd = 0.0f,
+                .DeadBand = 19.22925f,
+                .MaxOut = 2800.0f,
+            },
             .speed_PID = {
-                .Kp = 12.0f,
+                .Kp = 6.0f,
                 .Ki = 0.2f,
                 .Improve = PID_Integral_Limit,
-                .IntegralLimit = 1000.0f,
-                .MaxOut = ARM_SHOULDER_SPEED_OUTPUT_MAX,
+                .IntegralLimit = 3000.0f,
+                .MaxOut = 5500.0f,
+            },
+            .current_PID = {
+                .Kp = 1.2f,
+                .Ki = 0.01f,
+                .Kd = 0.0f,
+                .Improve = (PID_Improvement_e)(
+                    PID_Trapezoid_Intergral | PID_Integral_Limit),
+                .IntegralLimit = 3000.0f,
+                .MaxOut = 16000.0f,
             },
         },
         .controller_setting_init_config = {
@@ -219,12 +290,28 @@ static Motor_Init_Config_s ArmElbowMotorConfig(void)
             .tx_id = 3,
         },
         .controller_param_init_config = {
+            .angle_PID = {
+                .Kp = 5.5f,
+                .Ki = 0.5f,
+                .Kd = 0.0f,
+                .DeadBand = 100.0f,
+                .MaxOut = 2800.0f,
+            },
             .speed_PID = {
-                .Kp = 10.0f,
+                .Kp = 2.3f,
                 .Ki = 0.1f,
                 .Improve = PID_Integral_Limit,
-                .IntegralLimit = 700.0f,
-                .MaxOut = ARM_ELBOW_SPEED_OUTPUT_MAX,
+                .IntegralLimit = 5000.0f,
+                .MaxOut = 8200.0f,
+            },
+            .current_PID = {
+                .Kp = 1.2f,
+                .Ki = 0.01f,
+                .Kd = 0.0f,
+                .Improve = (PID_Improvement_e)(
+                    PID_Trapezoid_Intergral | PID_Integral_Limit),
+                .IntegralLimit = 5000.0f,
+                .MaxOut = 20000.0f,
             },
         },
         .controller_setting_init_config = {
@@ -281,6 +368,15 @@ static void ArmStopMotor(DJIMotor_Instance *motor)
     DJIMotorStop(motor);
 }
 
+static void ArmSetSpeedLoop(DJIMotor_Instance *motor)
+{
+    if (motor == NULL) {
+        return;
+    }
+    motor->motor_settings.outer_loop_type = SPEED_LOOP;
+    motor->motor_settings.close_loop_type = SPEED_LOOP;
+}
+
 static uint8_t ArmMotorFeedbackReady(const DJIMotor_Instance *motor)
 {
     return motor != NULL && motor->daemon != NULL && motor->feed_cnt != 0u &&
@@ -291,6 +387,9 @@ static void ArmUpdateCalibrationValid(void)
 {
     g_arm_calibration.calibration_valid =
         g_arm_calibration.base_calibrated && g_arm_calibration.joint_calibrated;
+    g_arm_state.base_calibrated = g_arm_calibration.base_calibrated;
+    g_arm_state.joint_calibrated = g_arm_calibration.joint_calibrated;
+    g_arm_state.kinematics_valid = g_arm_calibration.calibration_valid;
 }
 
 static float ArmBaseJointAngle(void)
@@ -325,14 +424,26 @@ static void ArmUpdateFeedback(void)
             g_arm_state.motor_current[i] = (float)arm_motors[i]->measure.real_current;
             g_arm_state.motor_speed_dps[i] = arm_motors[i]->measure.speed_aps;
             g_arm_state.motor_online[i] = ArmMotorFeedbackReady(arm_motors[i]);
+            g_arm_state.motor_enabled[i] =
+                arm_motors[i]->stop_flag == MOTOR_ENALBED;
         } else {
             g_arm_state.motor_total_angle_deg[i] = 0.0f;
             g_arm_state.motor_current[i] = 0.0f;
             g_arm_state.motor_speed_dps[i] = 0.0f;
             g_arm_state.motor_online[i] = 0u;
+            g_arm_state.motor_enabled[i] = 0u;
         }
     }
 
+    g_arm_state.base_raw_deg = arm_base_motor != NULL ?
+        arm_base_motor->measure.angle_single_round : 0.0f;
+    g_arm_state.shoulder_deg_per_motor_deg =
+        g_arm_calibration.shoulder_deg_per_motor_deg;
+    g_arm_state.elbow_deg_per_motor_deg =
+        g_arm_calibration.elbow_deg_per_motor_deg;
+    g_arm_state.base_calibrated = g_arm_calibration.base_calibrated;
+    g_arm_state.joint_calibrated = g_arm_calibration.joint_calibrated;
+    g_arm_state.kinematics_valid = g_arm_calibration.calibration_valid;
     g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW] = ArmBaseJointAngle();
     if (g_arm_calibration.joint_calibrated) {
         g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER] =
@@ -350,30 +461,6 @@ static void ArmUpdateFeedback(void)
     g_arm_state.q_feedback_deg[ARM_JOINT_WRIST] = 0.0f;
 }
 
-void ArmForwardKinematics3DOF(float q1_deg,
-                              float q2_deg,
-                              float q3_deg,
-                              Arm_Position_s *position)
-{
-    float q1;
-    float q2;
-    float q23;
-    float radial;
-
-    if (position == NULL) {
-        return;
-    }
-    q1 = q1_deg * ARM_DEG_TO_RAD;
-    q2 = q2_deg * ARM_DEG_TO_RAD;
-    q23 = (q2_deg + q3_deg) * ARM_DEG_TO_RAD;
-    radial = ARM_LINK_1_MM * cosf(q2) + ARM_LINK_2_MM * cosf(q23);
-    position->x_mm = radial * cosf(q1);
-    position->y_mm = radial * sinf(q1);
-    position->z_mm = ARM_BASE_HEIGHT_MM +
-                     ARM_LINK_1_MM * sinf(q2) +
-                     ARM_LINK_2_MM * sinf(q23);
-}
-
 static void ArmUpdateForwardKinematics(void)
 {
     ArmForwardKinematics3DOF(g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW],
@@ -383,6 +470,84 @@ static void ArmUpdateForwardKinematics(void)
     g_arm_state.end_pitch_deg =
         g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER] +
         g_arm_state.q_feedback_deg[ARM_JOINT_ELBOW];
+    g_arm_state.small_link_pitch_deg = g_arm_state.end_pitch_deg;
+}
+
+static void ArmUpdateKinematicsDebug(void)
+{
+    g_arm_kinematics_debug.kinematics_valid =
+        g_arm_state.kinematics_valid;
+    g_arm_kinematics_debug.base_calibrated =
+        g_arm_state.base_calibrated;
+    g_arm_kinematics_debug.joint_calibrated =
+        g_arm_state.joint_calibrated;
+    memcpy(g_arm_kinematics_debug.motor_online,
+           g_arm_state.motor_online,
+           sizeof(g_arm_kinematics_debug.motor_online));
+    memcpy(g_arm_kinematics_debug.motor_enabled,
+           g_arm_state.motor_enabled,
+           sizeof(g_arm_kinematics_debug.motor_enabled));
+    g_arm_kinematics_debug.base_raw_deg = g_arm_state.base_raw_deg;
+    memcpy(g_arm_kinematics_debug.q_feedback_deg,
+           g_arm_state.q_feedback_deg,
+           sizeof(g_arm_kinematics_debug.q_feedback_deg));
+    memcpy(g_arm_kinematics_debug.q_target_deg,
+           g_arm_state.q_target_deg,
+           sizeof(g_arm_kinematics_debug.q_target_deg));
+    g_arm_kinematics_debug.wrist_center_mm = g_arm_state.wrist_center;
+    g_arm_kinematics_debug.horizontal_radius_mm = sqrtf(
+        g_arm_state.wrist_center.x_mm * g_arm_state.wrist_center.x_mm +
+        g_arm_state.wrist_center.y_mm * g_arm_state.wrist_center.y_mm);
+    g_arm_kinematics_debug.planar_reach_from_shoulder_mm =
+        ARM_LINK_1_MM * cosf(
+            g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER] *
+            ARM_DEG_TO_RAD) +
+        ARM_LINK_2_MM * cosf(
+            (g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER] +
+             g_arm_state.q_feedback_deg[ARM_JOINT_ELBOW]) *
+            ARM_DEG_TO_RAD);
+    g_arm_kinematics_debug.wrist_height_from_shoulder_mm =
+        g_arm_state.wrist_center.z_mm - ARM_BASE_HEIGHT_MM;
+    g_arm_kinematics_debug.small_link_pitch_deg =
+        g_arm_state.small_link_pitch_deg;
+    g_arm_kinematics_debug.base_height_mm = ARM_BASE_HEIGHT_MM;
+    g_arm_kinematics_debug.link_1_mm = ARM_LINK_1_MM;
+    g_arm_kinematics_debug.link_2_mm = ARM_LINK_2_MM;
+    g_arm_kinematics_debug.shoulder_offset_forward_mm =
+        ARM_SHOULDER_OFFSET_FORWARD_MM;
+    g_arm_kinematics_debug.shoulder_offset_left_mm =
+        ARM_SHOULDER_OFFSET_LEFT_MM;
+    g_arm_kinematics_debug.shoulder_soft_limit_deg[0] =
+        g_arm_calibration.shoulder_soft_min_deg;
+    g_arm_kinematics_debug.shoulder_soft_limit_deg[1] =
+        g_arm_calibration.shoulder_soft_max_deg;
+    g_arm_kinematics_debug.elbow_soft_limit_deg[0] =
+        g_arm_calibration.elbow_soft_min_deg;
+    g_arm_kinematics_debug.elbow_soft_limit_deg[1] =
+        g_arm_calibration.elbow_soft_max_deg;
+    g_arm_kinematics_debug.reference_q_deg[0] = 0.0f;
+    g_arm_kinematics_debug.reference_q_deg[1] =
+        ARM_SHOULDER_REFERENCE_DEG;
+    g_arm_kinematics_debug.reference_q_deg[2] = ARM_ELBOW_REFERENCE_DEG;
+    ArmForwardKinematics3DOF(
+        g_arm_kinematics_debug.reference_q_deg[0],
+        g_arm_kinematics_debug.reference_q_deg[1],
+        g_arm_kinematics_debug.reference_q_deg[2],
+        &g_arm_kinematics_debug.reference_wrist_center_mm);
+    g_arm_kinematics_debug.reference_horizontal_radius_mm = sqrtf(
+        g_arm_kinematics_debug.reference_wrist_center_mm.x_mm *
+            g_arm_kinematics_debug.reference_wrist_center_mm.x_mm +
+        g_arm_kinematics_debug.reference_wrist_center_mm.y_mm *
+            g_arm_kinematics_debug.reference_wrist_center_mm.y_mm);
+    g_arm_kinematics_debug.reference_height_from_shoulder_mm =
+        g_arm_kinematics_debug.reference_wrist_center_mm.z_mm -
+        ARM_BASE_HEIGHT_MM;
+    g_arm_kinematics_debug.reference_planar_reach_from_shoulder_mm =
+        ARM_LINK_1_MM * cosf(ARM_SHOULDER_REFERENCE_DEG *
+                            ARM_DEG_TO_RAD) +
+        ARM_LINK_2_MM * cosf(
+            (ARM_SHOULDER_REFERENCE_DEG + ARM_ELBOW_REFERENCE_DEG) *
+            ARM_DEG_TO_RAD);
 }
 
 static uint8_t ArmCalibrationStateIsActive(Arm_Calibration_State_e state)
@@ -393,10 +558,14 @@ static uint8_t ArmCalibrationStateIsActive(Arm_Calibration_State_e state)
 
 static void ArmLoadMeasuredJointMapping(void)
 {
-    g_arm_calibration.shoulder_hard_min_deg = ARM_SHOULDER_REFERENCE_DEG;
-    g_arm_calibration.shoulder_hard_max_deg = ARM_SHOULDER_OPPOSITE_DEG;
-    g_arm_calibration.elbow_hard_min_deg = ARM_ELBOW_OPPOSITE_DEG;
-    g_arm_calibration.elbow_hard_max_deg = ARM_ELBOW_REFERENCE_DEG;
+    g_arm_calibration.shoulder_hard_min_deg =
+        fminf(ARM_SHOULDER_REFERENCE_DEG, ARM_SHOULDER_OPPOSITE_DEG);
+    g_arm_calibration.shoulder_hard_max_deg =
+        fmaxf(ARM_SHOULDER_REFERENCE_DEG, ARM_SHOULDER_OPPOSITE_DEG);
+    g_arm_calibration.elbow_hard_min_deg =
+        fminf(ARM_ELBOW_REFERENCE_DEG, ARM_ELBOW_OPPOSITE_DEG);
+    g_arm_calibration.elbow_hard_max_deg =
+        fmaxf(ARM_ELBOW_REFERENCE_DEG, ARM_ELBOW_OPPOSITE_DEG);
     g_arm_calibration.shoulder_soft_min_deg =
         g_arm_calibration.shoulder_hard_min_deg + g_arm_soft_limit_margin_deg;
     g_arm_calibration.shoulder_soft_max_deg =
@@ -441,8 +610,6 @@ static uint8_t ArmUpdateMappingFromFullScan(void)
 
 static void ArmFinishJointHoming(void)
 {
-    ArmStopMotor(arm_shoulder_motor);
-    ArmStopMotor(arm_elbow_motor);
     if (!g_arm_calibration.shoulder_reference_found ||
         !g_arm_calibration.elbow_reference_found ||
         (g_arm_state.homing_mode == ARM_HOMING_FULL_SCAN &&
@@ -452,10 +619,28 @@ static void ArmFinishJointHoming(void)
         ArmCalibrationFail(ARM_CAL_ERROR_TRAVEL);
         return;
     }
+    arm_joint_hold_target_motor_deg[0] =
+        arm_shoulder_motor->measure.total_angle;
+    arm_joint_hold_target_motor_deg[1] =
+        arm_elbow_motor->measure.total_angle;
+    ArmClearMotorController(arm_shoulder_motor);
+    ArmClearMotorController(arm_elbow_motor);
+    ArmSetAngleLoop(arm_shoulder_motor);
+    ArmSetAngleLoop(arm_elbow_motor);
+    DJIMotorSetRef(arm_shoulder_motor,
+                   arm_joint_hold_target_motor_deg[0]);
+    DJIMotorSetRef(arm_elbow_motor,
+                   arm_joint_hold_target_motor_deg[1]);
+    DJIMotorEnable(arm_shoulder_motor);
+    DJIMotorEnable(arm_elbow_motor);
     g_arm_calibration.joint_calibrated = 1u;
     ArmUpdateCalibrationValid();
     g_arm_state.calibration_state = ARM_CAL_VALID;
     g_arm_state.mode = ARM_MODE_READY;
+    if (g_arm_state.homing_mode == ARM_HOMING_SINGLE_REFERENCE &&
+        ARM_MOTION_TEST_ENABLE != 0u) {
+        ArmMotionTestStart(HAL_GetTick());
+    }
 }
 
 static void ArmEnterCalibrationState(Arm_Calibration_State_e state,
@@ -475,8 +660,12 @@ static void ArmEnterCalibrationState(Arm_Calibration_State_e state,
 
 static void ArmCalibrationFail(Arm_Calibration_State_e error_state)
 {
+    Arm_Soft_Limit_State_e init_error_state = ARM_SOFT_LIMIT_ERROR_LIMIT;
+
+    ArmStopMotor(arm_base_motor);
     ArmStopMotor(arm_shoulder_motor);
     ArmStopMotor(arm_elbow_motor);
+    ArmClearMotorController(arm_base_motor);
     ArmClearMotorController(arm_shoulder_motor);
     ArmClearMotorController(arm_elbow_motor);
     g_arm_calibration.joint_calibrated = 0u;
@@ -484,6 +673,16 @@ static void ArmCalibrationFail(Arm_Calibration_State_e error_state)
     g_arm_state.calibration_stall_condition = 0u;
     g_arm_state.calibration_state = error_state;
     g_arm_state.mode = ARM_MODE_SAFE;
+    if (error_state == ARM_CAL_ERROR_OFFLINE) {
+        init_error_state = ARM_SOFT_LIMIT_ERROR_OFFLINE;
+    } else if (error_state == ARM_CAL_ERROR_TIMEOUT) {
+        init_error_state = ARM_SOFT_LIMIT_ERROR_TIMEOUT;
+    } else if (error_state == ARM_CAL_ERROR_ABORT) {
+        init_error_state = ARM_SOFT_LIMIT_ABORTED;
+    }
+    ArmSoftLimitEnterState(init_error_state,
+                           g_arm_state.soft_limit_axis,
+                           HAL_GetTick());
 }
 
 static uint8_t ArmStallCondition(const DJIMotor_Instance *motor,
@@ -619,7 +818,7 @@ static void ArmRunFindReference(DJIMotor_Instance *motor,
         return;
     }
 
-    /* Remove torque immediately. The encoder zero is set after a 2 s settle. */
+    /* Remove torque immediately; zeroing waits for the configured settle time. */
     ArmStopMotor(motor);
     ArmClearMotorController(motor);
     ArmEnterCalibrationState(settle_state, motor, now);
@@ -634,7 +833,7 @@ static uint8_t ArmRunSettleReference(DJIMotor_Instance *motor,
     ArmStopMotor(inactive_motor);
     g_arm_state.calibration_stage_elapsed_ms =
         (uint32_t)(now - arm_cal_runtime.stage_start_tick);
-    if (g_arm_state.calibration_stage_elapsed_ms < ARM_REFERENCE_SETTLE_MS) {
+    if (g_arm_state.calibration_stage_elapsed_ms < ARM_STOP_SETTLE_MS) {
         return 0u;
     }
 
@@ -679,6 +878,32 @@ static void ArmRunReleaseReference(DJIMotor_Instance *motor,
     }
 }
 
+static void ArmRecordOppositeSpan(DJIMotor_Instance *motor,
+                                  Arm_Calibration_Motor_e channel,
+                                  float ratio,
+                                  Arm_Calibration_State_e done_state,
+                                  uint32_t now)
+{
+    float motor_span;
+
+    ArmStopMotor(motor);
+    motor_span = motor->measure.total_angle;
+    if (fabsf(motor_span) / ratio <=
+        2.0f * g_arm_soft_limit_margin_deg + ARM_RANGE_EPSILON_DEG) {
+        ArmCalibrationFail(ARM_CAL_ERROR_TRAVEL);
+        return;
+    }
+
+    if (channel == ARM_CAL_MOTOR_SHOULDER) {
+        g_arm_calibration.shoulder_motor_span_deg = motor_span;
+        g_arm_calibration.shoulder_opposite_found = 1u;
+    } else {
+        g_arm_calibration.elbow_motor_span_deg = motor_span;
+        g_arm_calibration.elbow_opposite_found = 1u;
+    }
+    ArmEnterCalibrationState(done_state, NULL, now);
+}
+
 static void ArmRunFindOpposite(DJIMotor_Instance *motor,
                                DJIMotor_Instance *inactive_motor,
                                Arm_Calibration_Motor_e channel,
@@ -688,11 +913,9 @@ static void ArmRunFindOpposite(DJIMotor_Instance *motor,
                                float ratio,
                                float max_joint_travel_deg,
                                uint32_t timeout_ms,
-                               Arm_Calibration_State_e done_state,
                                uint32_t now)
 {
     float max_motor_travel;
-    float motor_span;
 
     ArmStopMotor(inactive_motor);
     if (!isfinite(speed_dps) || !isfinite(current_threshold) ||
@@ -727,23 +950,32 @@ static void ArmRunFindOpposite(DJIMotor_Instance *motor,
         return;
     }
 
-    motor_span = motor->measure.total_angle;
     ArmStopMotor(motor);
     ArmClearMotorController(motor);
-    if (fabsf(motor_span) / ratio <=
-        2.0f * g_arm_soft_limit_margin_deg + ARM_RANGE_EPSILON_DEG) {
-        ArmCalibrationFail(ARM_CAL_ERROR_TRAVEL);
+    /* Record both motors from their unloaded position after settling. */
+    ArmEnterCalibrationState(
+        channel == ARM_CAL_MOTOR_SHOULDER ?
+            ARM_CAL_SHOULDER_SETTLE_OPPOSITE :
+            ARM_CAL_ELBOW_SETTLE_OPPOSITE,
+        motor, now);
+}
+
+static void ArmRunSettleOpposite(DJIMotor_Instance *motor,
+                                 DJIMotor_Instance *inactive_motor,
+                                 Arm_Calibration_Motor_e channel,
+                                 float ratio,
+                                 Arm_Calibration_State_e done_state,
+                                 uint32_t now)
+{
+    ArmStopMotor(motor);
+    ArmStopMotor(inactive_motor);
+    g_arm_state.calibration_stage_elapsed_ms =
+        (uint32_t)(now - arm_cal_runtime.stage_start_tick);
+    if (g_arm_state.calibration_stage_elapsed_ms < ARM_STOP_SETTLE_MS) {
         return;
     }
 
-    if (channel == ARM_CAL_MOTOR_SHOULDER) {
-        g_arm_calibration.shoulder_motor_span_deg = motor_span;
-        g_arm_calibration.shoulder_opposite_found = 1u;
-    } else {
-        g_arm_calibration.elbow_motor_span_deg = motor_span;
-        g_arm_calibration.elbow_opposite_found = 1u;
-    }
-    ArmEnterCalibrationState(done_state, NULL, now);
+    ArmRecordOppositeSpan(motor, channel, ratio, done_state, now);
 }
 
 static void ArmStartHomingMode(Arm_Homing_Mode_e mode)
@@ -751,7 +983,17 @@ static void ArmStartHomingMode(Arm_Homing_Mode_e mode)
     uint32_t now = HAL_GetTick();
 
     arm_auto_calibration_attempted = 1u;
-    ArmStop();
+    ArmStopMotor(arm_shoulder_motor);
+    ArmStopMotor(arm_elbow_motor);
+    if (g_arm_state.soft_limit_state == ARM_SOFT_LIMIT_WAIT_CALIBRATION ||
+        g_arm_state.soft_limit_state == ARM_SOFT_LIMIT_COMPLETE) {
+        ArmBaseInitHold();
+    } else {
+        ArmStopMotor(arm_base_motor);
+    }
+    ArmSetSpeedLoop(arm_shoulder_motor);
+    ArmSetSpeedLoop(arm_elbow_motor);
+    g_arm_state.soft_limit_state = ARM_SOFT_LIMIT_WAIT_CALIBRATION;
     ArmLoadMeasuredJointMapping();
     g_arm_state.homing_mode = mode;
     g_arm_calibration.joint_calibrated = 0u;
@@ -813,8 +1055,10 @@ static void ArmCalibrationTask(uint32_t now)
     Arm_Calibration_State_e state = g_arm_state.calibration_state;
 
     if (!ArmCalibrationStateIsActive(state)) {
-        ArmStopMotor(arm_shoulder_motor);
-        ArmStopMotor(arm_elbow_motor);
+        if (state != ARM_CAL_VALID) {
+            ArmStopMotor(arm_shoulder_motor);
+            ArmStopMotor(arm_elbow_motor);
+        }
         return;
     }
     if (!ArmMotorFeedbackReady(arm_shoulder_motor) ||
@@ -863,8 +1107,13 @@ static void ArmCalibrationTask(uint32_t now)
                                g_arm_elbow_stall_current,
                                g_arm_elbow_motor_to_joint_ratio,
                                g_arm_elbow_max_joint_travel_deg,
-                               g_arm_elbow_stage_timeout_ms,
-                               ARM_CAL_ELBOW_DONE, now);
+                               g_arm_elbow_stage_timeout_ms, now);
+            break;
+        case ARM_CAL_ELBOW_SETTLE_OPPOSITE:
+            ArmRunSettleOpposite(arm_elbow_motor, arm_shoulder_motor,
+                                 ARM_CAL_MOTOR_ELBOW,
+                                 g_arm_elbow_motor_to_joint_ratio,
+                                 ARM_CAL_ELBOW_DONE, now);
             break;
         case ARM_CAL_ELBOW_DONE:
             ArmStopMotor(arm_elbow_motor);
@@ -910,8 +1159,13 @@ static void ArmCalibrationTask(uint32_t now)
                                g_arm_shoulder_stall_current,
                                g_arm_shoulder_motor_to_joint_ratio,
                                g_arm_shoulder_max_joint_travel_deg,
-                               g_arm_shoulder_stage_timeout_ms,
-                               ARM_CAL_SHOULDER_DONE, now);
+                               g_arm_shoulder_stage_timeout_ms, now);
+            break;
+        case ARM_CAL_SHOULDER_SETTLE_OPPOSITE:
+            ArmRunSettleOpposite(arm_shoulder_motor, arm_elbow_motor,
+                                 ARM_CAL_MOTOR_SHOULDER,
+                                 g_arm_shoulder_motor_to_joint_ratio,
+                                 ARM_CAL_SHOULDER_DONE, now);
             break;
         case ARM_CAL_SHOULDER_DONE:
             ArmStopMotor(arm_shoulder_motor);
@@ -921,133 +1175,6 @@ static void ArmCalibrationTask(uint32_t now)
             ArmCalibrationFail(ARM_CAL_ERROR_ABORT);
             break;
     }
-}
-
-static uint8_t ArmCandidateWithinLimits(float q2_deg, float q3_deg)
-{
-    return q2_deg >= g_arm_calibration.shoulder_soft_min_deg &&
-           q2_deg <= g_arm_calibration.shoulder_soft_max_deg &&
-           q3_deg >= g_arm_calibration.elbow_soft_min_deg &&
-           q3_deg <= g_arm_calibration.elbow_soft_max_deg;
-}
-
-static float ArmCandidateScore(const float q_deg[3],
-                               const float current_q_deg[3])
-{
-    float shoulder_span = g_arm_calibration.shoulder_soft_max_deg -
-                          g_arm_calibration.shoulder_soft_min_deg;
-    float elbow_span = g_arm_calibration.elbow_soft_max_deg -
-                       g_arm_calibration.elbow_soft_min_deg;
-    float dq1 = ArmAngleDifference(q_deg[0], current_q_deg[0]) / 360.0f;
-    float dq2 = (q_deg[1] - current_q_deg[1]) / shoulder_span;
-    float dq3 = (q_deg[2] - current_q_deg[2]) / elbow_span;
-    return dq1 * dq1 + dq2 * dq2 + dq3 * dq3;
-}
-
-Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
-                                         const float current_q_deg[3],
-                                         Arm_IK_Result_s *result)
-{
-    float rho;
-    float z_planar;
-    float cos_q3;
-    float base_yaw;
-    float best_score = 0.0f;
-    uint8_t found = 0u;
-
-    if (result == NULL) {
-        return ARM_IK_INVALID_ARGUMENT;
-    }
-    memset(result, 0, sizeof(*result));
-    if (target == NULL || current_q_deg == NULL ||
-        !isfinite(target->x_mm) || !isfinite(target->y_mm) ||
-        !isfinite(target->z_mm) ||
-        !isfinite(current_q_deg[0]) || !isfinite(current_q_deg[1]) ||
-        !isfinite(current_q_deg[2])) {
-        result->status = ARM_IK_INVALID_ARGUMENT;
-        return result->status;
-    }
-    if (!g_arm_calibration.calibration_valid) {
-        result->status = ARM_IK_NOT_CALIBRATED;
-        return result->status;
-    }
-
-    rho = sqrtf(target->x_mm * target->x_mm +
-                target->y_mm * target->y_mm);
-    z_planar = target->z_mm - ARM_BASE_HEIGHT_MM;
-    cos_q3 = (rho * rho + z_planar * z_planar -
-              ARM_LINK_1_MM * ARM_LINK_1_MM -
-              ARM_LINK_2_MM * ARM_LINK_2_MM) /
-             (2.0f * ARM_LINK_1_MM * ARM_LINK_2_MM);
-    if (cos_q3 < -1.0f - ARM_FLOAT_EPSILON ||
-        cos_q3 > 1.0f + ARM_FLOAT_EPSILON) {
-        result->status = ARM_IK_OUT_OF_REACH;
-        return result->status;
-    }
-    cos_q3 = ArmClampFloat(cos_q3, -1.0f, 1.0f);
-    base_yaw = rho > ARM_FLOAT_EPSILON ?
-               atan2f(target->y_mm, target->x_mm) * ARM_RAD_TO_DEG :
-               current_q_deg[0];
-
-    for (uint8_t radial_index = 0u; radial_index < 2u; ++radial_index) {
-        float signed_radius;
-        float q1_deg;
-
-        if (rho <= ARM_FLOAT_EPSILON && radial_index == 1u) {
-            continue;
-        }
-        signed_radius = radial_index == 0u ? rho : -rho;
-        q1_deg = radial_index == 0u ? base_yaw : base_yaw + 180.0f;
-        q1_deg = ArmWrapTo180(q1_deg);
-
-        for (uint8_t elbow_index = 0u; elbow_index < 2u; ++elbow_index) {
-            float q3_rad = acosf(cos_q3);
-            float q2_rad;
-            float candidate[3];
-            float score;
-
-            if (elbow_index != 0u) {
-                q3_rad = -q3_rad;
-            }
-            q2_rad = atan2f(z_planar, signed_radius) -
-                     atan2f(ARM_LINK_2_MM * sinf(q3_rad),
-                            ARM_LINK_1_MM +
-                            ARM_LINK_2_MM * cosf(q3_rad));
-            candidate[0] = q1_deg;
-            candidate[1] = q2_rad * ARM_RAD_TO_DEG;
-            candidate[2] = q3_rad * ARM_RAD_TO_DEG;
-            if (!ArmCandidateWithinLimits(candidate[1], candidate[2])) {
-                continue;
-            }
-
-            result->candidate_count++;
-            score = ArmCandidateScore(candidate, current_q_deg);
-            if (!found || score < best_score) {
-                found = 1u;
-                best_score = score;
-                result->q_deg[0] = candidate[0];
-                result->q_deg[1] = candidate[1];
-                result->q_deg[2] = candidate[2];
-            }
-        }
-    }
-
-    if (!found) {
-        result->status = ARM_IK_NO_LIMITED_SOLUTION;
-        return result->status;
-    }
-
-    ArmForwardKinematics3DOF(result->q_deg[0], result->q_deg[1],
-                             result->q_deg[2], &result->fk_position);
-    result->position_error_mm =
-        sqrtf((result->fk_position.x_mm - target->x_mm) *
-              (result->fk_position.x_mm - target->x_mm) +
-              (result->fk_position.y_mm - target->y_mm) *
-              (result->fk_position.y_mm - target->y_mm) +
-              (result->fk_position.z_mm - target->z_mm) *
-              (result->fk_position.z_mm - target->z_mm));
-    result->status = ARM_IK_OK;
-    return result->status;
 }
 
 uint8_t ArmBaseTeachFront(void)
@@ -1063,14 +1190,157 @@ uint8_t ArmBaseTeachFront(void)
     return 1u;
 }
 
+uint8_t ArmSetJointTargetDeg(float q1_deg, float q2_deg, float q3_deg)
+{
+    float target_q_deg[3];
+
+    target_q_deg[0] = ArmClampFloat(q1_deg, -180.0f, 180.0f);
+    target_q_deg[1] = ArmClampFloat(
+        q2_deg, g_arm_calibration.shoulder_soft_min_deg,
+        g_arm_calibration.shoulder_soft_max_deg);
+    target_q_deg[2] = ArmClampFloat(
+        q3_deg, g_arm_calibration.elbow_soft_min_deg,
+        g_arm_calibration.elbow_soft_max_deg);
+    if (!ArmBeginJointMove(target_q_deg)) {
+        return 0u;
+    }
+    return ArmUpdateJointReference(target_q_deg);
+}
+
+uint8_t ArmUpdateJointReference(const float reference_q_deg[3])
+{
+    float base_target_raw_deg;
+    float base_target_motor_deg;
+    float shoulder_target_motor_deg;
+    float elbow_target_motor_deg;
+
+    if (reference_q_deg == NULL || !g_arm_calibration.calibration_valid ||
+        !ArmMotorFeedbackReady(arm_base_motor) ||
+        !ArmMotorFeedbackReady(arm_shoulder_motor) ||
+        !ArmMotorFeedbackReady(arm_elbow_motor) ||
+        !isfinite(reference_q_deg[0]) ||
+        !isfinite(reference_q_deg[1]) ||
+        !isfinite(reference_q_deg[2]) ||
+        reference_q_deg[0] < -180.0f || reference_q_deg[0] > 180.0f ||
+        reference_q_deg[1] < 0.0f || reference_q_deg[1] > 180.0f ||
+        reference_q_deg[2] < -180.0f || reference_q_deg[2] > -85.0f) {
+        return 0u;
+    }
+    base_target_raw_deg = ArmWrapTo360(
+        ARM_BASE_FRONT_RAW_DEG +
+        ArmSign(arm_base_direction) * reference_q_deg[0]);
+    base_target_motor_deg = ArmNearestBaseTotalTarget(base_target_raw_deg);
+    shoulder_target_motor_deg = ArmSoftLimitJointToMotor(
+        reference_q_deg[1], ARM_SHOULDER_REFERENCE_DEG,
+        g_arm_calibration.shoulder_deg_per_motor_deg);
+    elbow_target_motor_deg = ArmSoftLimitJointToMotor(
+        reference_q_deg[2], ARM_ELBOW_REFERENCE_DEG,
+        g_arm_calibration.elbow_deg_per_motor_deg);
+    if (!isfinite(base_target_motor_deg) ||
+        !isfinite(shoulder_target_motor_deg) ||
+        !isfinite(elbow_target_motor_deg)) {
+        return 0u;
+    }
+
+    g_arm_state.q_target_deg[ARM_JOINT_BASE_YAW] = reference_q_deg[0];
+    g_arm_state.q_target_deg[ARM_JOINT_SHOULDER] = reference_q_deg[1];
+    g_arm_state.q_target_deg[ARM_JOINT_ELBOW] = reference_q_deg[2];
+    g_arm_state.base_init_target_raw_deg = base_target_raw_deg;
+    g_arm_state.base_init_target_motor_deg = base_target_motor_deg;
+    arm_joint_hold_target_motor_deg[0] = shoulder_target_motor_deg;
+    arm_joint_hold_target_motor_deg[1] = elbow_target_motor_deg;
+
+    DJIMotorSetRef(arm_base_motor, base_target_motor_deg);
+    DJIMotorSetRef(arm_shoulder_motor, shoulder_target_motor_deg);
+    DJIMotorSetRef(arm_elbow_motor, elbow_target_motor_deg);
+    return 1u;
+}
+
+uint8_t ArmBeginJointMove(const float target_q_deg[3])
+{
+    float current_q_deg[3];
+
+    if (target_q_deg == NULL || !g_arm_calibration.calibration_valid ||
+        !ArmMotorFeedbackReady(arm_base_motor) ||
+        !ArmMotorFeedbackReady(arm_shoulder_motor) ||
+        !ArmMotorFeedbackReady(arm_elbow_motor) ||
+        !isfinite(target_q_deg[0]) || !isfinite(target_q_deg[1]) ||
+        !isfinite(target_q_deg[2]) || target_q_deg[0] < -180.0f ||
+        target_q_deg[0] > 180.0f || target_q_deg[1] < 0.0f ||
+        target_q_deg[1] > 180.0f || target_q_deg[2] < -180.0f ||
+        target_q_deg[2] > -85.0f) {
+        return 0u;
+    }
+    current_q_deg[0] = g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW];
+    current_q_deg[1] = g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER];
+    current_q_deg[2] = g_arm_state.q_feedback_deg[ARM_JOINT_ELBOW];
+    ArmClearMotorController(arm_base_motor);
+    ArmClearMotorController(arm_shoulder_motor);
+    ArmClearMotorController(arm_elbow_motor);
+    ArmSetAngleLoop(arm_base_motor);
+    ArmSetAngleLoop(arm_shoulder_motor);
+    ArmSetAngleLoop(arm_elbow_motor);
+    if (!ArmUpdateJointReference(current_q_deg)) {
+        return 0u;
+    }
+    g_arm_state.q_target_deg[ARM_JOINT_BASE_YAW] = target_q_deg[0];
+    g_arm_state.q_target_deg[ARM_JOINT_SHOULDER] = target_q_deg[1];
+    g_arm_state.q_target_deg[ARM_JOINT_ELBOW] = target_q_deg[2];
+    return 1u;
+}
+
+void ArmMotionStopMotors(void)
+{
+    ArmStopMotor(arm_base_motor);
+    ArmStopMotor(arm_shoulder_motor);
+    ArmStopMotor(arm_elbow_motor);
+    g_arm_state.mode = ARM_MODE_SAFE;
+}
+
+static void ArmMotionTestStart(uint32_t now)
+{
+    arm_motion_test_pose_index = 0u;
+    arm_motion_test_target_reached = 0u;
+    arm_motion_test_hold_start_tick = now;
+    arm_small_angle_test_active = ArmSetJointTargetDeg(
+        arm_motion_test_pose_deg[0][0],
+        arm_motion_test_pose_deg[0][1],
+        arm_motion_test_pose_deg[0][2]);
+}
+
 static void ArmAutoCalibrationTask(uint32_t now)
 {
-    if (arm_auto_calibration_attempted ||
+    if (arm_auto_calibration_attempted) {
+        return;
+    }
+    if (g_arm_state.soft_limit_state == ARM_SOFT_LIMIT_WAIT_CALIBRATION &&
+        g_arm_state.calibration_state == ARM_CAL_IDLE) {
+        if (!ArmMotorFeedbackReady(arm_shoulder_motor) ||
+            !ArmMotorFeedbackReady(arm_elbow_motor)) {
+            arm_auto_online_waiting = 0u;
+            return;
+        }
+        if (!arm_auto_online_waiting) {
+            arm_auto_online_waiting = 1u;
+            arm_auto_online_start_tick = now;
+            return;
+        }
+        if ((uint32_t)(now - arm_auto_online_start_tick) <
+            ARM_AUTO_START_ONLINE_MS) {
+            return;
+        }
+        if (ARM_BOOT_FULL_SCAN != 0u) {
+            ArmCalibrationStart();
+        } else {
+            ArmHomingStart();
+        }
+        return;
+    }
+    if (g_arm_state.soft_limit_state != ARM_SOFT_LIMIT_WAIT_ONLINE ||
         g_arm_state.calibration_state != ARM_CAL_IDLE) {
         return;
     }
-    if (!ArmMotorFeedbackReady(arm_shoulder_motor) ||
-        !ArmMotorFeedbackReady(arm_elbow_motor)) {
+    if (!ArmMotorFeedbackReady(arm_base_motor)) {
         arm_auto_online_waiting = 0u;
         return;
     }
@@ -1081,12 +1351,15 @@ static void ArmAutoCalibrationTask(uint32_t now)
     }
     if ((uint32_t)(now - arm_auto_online_start_tick) >=
         ARM_AUTO_START_ONLINE_MS) {
-        arm_auto_calibration_attempted = 1u;
-        if (ARM_BOOT_FULL_SCAN != 0u) {
-            ArmCalibrationStart();
-        } else {
-            ArmHomingStart();
-        }
+        ArmUpdateSoftLimitTargets();
+        ArmClearMotorController(arm_base_motor);
+        arm_base_last_target_error_deg =
+            g_arm_state.base_init_target_motor_deg -
+            arm_base_motor->measure.total_angle;
+        arm_base_target_error_valid = 1u;
+        arm_auto_online_waiting = 0u;
+        ArmSoftLimitEnterState(ARM_SOFT_LIMIT_BASE_MOVING,
+                               ARM_SOFT_LIMIT_AXIS_BASE, now);
     }
 }
 
@@ -1227,6 +1500,427 @@ static void Arm3508RatioTestTask(uint32_t now)
     }
 }
 
+static void ArmSoftLimitEnterState(Arm_Soft_Limit_State_e state,
+                                   Arm_Soft_Limit_Axis_e axis,
+                                   uint32_t now)
+{
+    g_arm_state.soft_limit_state = state;
+    g_arm_state.soft_limit_axis = axis;
+    g_arm_state.soft_limit_elapsed_ms = 0u;
+    arm_soft_limit_state_tick = now;
+    arm_soft_limit_overcurrent_tick = 0u;
+}
+
+static void ArmSoftLimitFail(Arm_Soft_Limit_State_e state, uint32_t now)
+{
+    Arm_Soft_Limit_Axis_e failed_axis = g_arm_state.soft_limit_axis;
+
+    ArmStopMotor(arm_base_motor);
+    ArmStopMotor(arm_shoulder_motor);
+    ArmStopMotor(arm_elbow_motor);
+    ArmClearMotorController(arm_base_motor);
+    ArmClearMotorController(arm_shoulder_motor);
+    ArmClearMotorController(arm_elbow_motor);
+    ArmSoftLimitEnterState(state, failed_axis, now);
+    g_arm_state.mode = ARM_MODE_SAFE;
+}
+
+static float ArmSoftLimitJointToMotor(float joint_deg,
+                                      float reference_joint_deg,
+                                      float scale)
+{
+    if (!isfinite(scale) || fabsf(scale) <= ARM_FLOAT_EPSILON) {
+        return 0.0f;
+    }
+    return (joint_deg - reference_joint_deg) / scale;
+}
+
+static float ArmWrapTo360(float angle_deg)
+{
+    while (angle_deg >= 360.0f) {
+        angle_deg -= 360.0f;
+    }
+    while (angle_deg < 0.0f) {
+        angle_deg += 360.0f;
+    }
+    return angle_deg;
+}
+
+static float ArmNearestBaseTotalTarget(float target_raw_deg)
+{
+    float raw_delta_deg;
+    float best_delta_deg;
+    float candidate_delta_deg;
+
+    if (arm_base_motor == NULL) {
+        return 0.0f;
+    }
+
+    raw_delta_deg = target_raw_deg -
+                    arm_base_motor->measure.angle_single_round;
+    best_delta_deg = raw_delta_deg;
+    candidate_delta_deg = raw_delta_deg - 360.0f;
+    if (fabsf(candidate_delta_deg) < fabsf(best_delta_deg)) {
+        best_delta_deg = candidate_delta_deg;
+    }
+    candidate_delta_deg = raw_delta_deg + 360.0f;
+    if (fabsf(candidate_delta_deg) < fabsf(best_delta_deg)) {
+        best_delta_deg = candidate_delta_deg;
+    }
+
+    return arm_base_motor->measure.total_angle + best_delta_deg;
+}
+
+static void ArmUpdateSoftLimitTargets(void)
+{
+    g_arm_state.soft_limit_target_joint_deg[0] =
+        ARM_SHOULDER_REFERENCE_DEG - ARM_SOFT_LIMIT_MARGIN_DEG;
+    g_arm_state.soft_limit_target_joint_deg[1] =
+        ARM_ELBOW_REFERENCE_DEG + ARM_SOFT_LIMIT_MARGIN_DEG;
+    g_arm_state.soft_limit_target_motor_deg[0] =
+        ArmSoftLimitJointToMotor(
+            g_arm_state.soft_limit_target_joint_deg[0],
+            ARM_SHOULDER_REFERENCE_DEG,
+            g_arm_calibration.shoulder_deg_per_motor_deg);
+    g_arm_state.soft_limit_target_motor_deg[1] =
+        ArmSoftLimitJointToMotor(
+            g_arm_state.soft_limit_target_joint_deg[1],
+            ARM_ELBOW_REFERENCE_DEG,
+            g_arm_calibration.elbow_deg_per_motor_deg);
+    g_arm_state.base_init_target_raw_deg = ARM_BASE_FRONT_RAW_DEG;
+    if (arm_base_motor != NULL &&
+        g_arm_state.soft_limit_state != ARM_SOFT_LIMIT_BASE_MOVING &&
+        g_arm_state.soft_limit_state != ARM_SOFT_LIMIT_BASE_SETTLE &&
+        g_arm_state.soft_limit_state != ARM_SOFT_LIMIT_WAIT_CALIBRATION &&
+        g_arm_state.soft_limit_state != ARM_SOFT_LIMIT_COMPLETE) {
+        g_arm_state.base_init_target_motor_deg =
+            ArmNearestBaseTotalTarget(ARM_BASE_FRONT_RAW_DEG);
+    }
+}
+
+static void ArmUpdateSoftLimitDebug(void)
+{
+    DJIMotor_Instance *active_motor = NULL;
+
+    if (g_arm_state.soft_limit_axis == ARM_SOFT_LIMIT_AXIS_BASE) {
+        active_motor = arm_base_motor;
+    } else if (g_arm_state.soft_limit_axis == ARM_SOFT_LIMIT_AXIS_SHOULDER) {
+        active_motor = arm_shoulder_motor;
+    } else if (g_arm_state.soft_limit_axis == ARM_SOFT_LIMIT_AXIS_ELBOW) {
+        active_motor = arm_elbow_motor;
+    }
+    g_arm_soft_limit_debug.arm_mode = g_arm_state.mode;
+    g_arm_soft_limit_debug.calibration_state =
+        g_arm_state.calibration_state;
+    g_arm_soft_limit_debug.active_axis = g_arm_state.soft_limit_axis;
+    g_arm_soft_limit_debug.state = g_arm_state.soft_limit_state;
+    g_arm_soft_limit_debug.homing_abort = g_arm_homing_abort;
+    g_arm_soft_limit_debug.base_calibrated = g_arm_state.base_calibrated;
+    g_arm_soft_limit_debug.joint_calibrated = g_arm_state.joint_calibrated;
+    g_arm_soft_limit_debug.kinematics_valid = g_arm_state.kinematics_valid;
+    memcpy(g_arm_soft_limit_debug.motor_online, g_arm_state.motor_online,
+           sizeof(g_arm_soft_limit_debug.motor_online));
+    memcpy(g_arm_soft_limit_debug.motor_enabled, g_arm_state.motor_enabled,
+           sizeof(g_arm_soft_limit_debug.motor_enabled));
+    memcpy(g_arm_soft_limit_debug.q_feedback_deg,
+           g_arm_state.q_feedback_deg,
+           sizeof(g_arm_soft_limit_debug.q_feedback_deg));
+    memcpy(g_arm_soft_limit_debug.motor_total_angle_deg,
+           g_arm_state.motor_total_angle_deg,
+           sizeof(g_arm_soft_limit_debug.motor_total_angle_deg));
+    memcpy(g_arm_soft_limit_debug.motor_current, g_arm_state.motor_current,
+           sizeof(g_arm_soft_limit_debug.motor_current));
+    memcpy(g_arm_soft_limit_debug.motor_speed_dps,
+           g_arm_state.motor_speed_dps,
+           sizeof(g_arm_soft_limit_debug.motor_speed_dps));
+    memcpy(g_arm_soft_limit_debug.target_joint_deg,
+           g_arm_state.soft_limit_target_joint_deg,
+           sizeof(g_arm_soft_limit_debug.target_joint_deg));
+    memcpy(g_arm_soft_limit_debug.target_motor_deg,
+           g_arm_state.soft_limit_target_motor_deg,
+           sizeof(g_arm_soft_limit_debug.target_motor_deg));
+    g_arm_soft_limit_debug.final_joint_deg[0] =
+        g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER];
+    g_arm_soft_limit_debug.final_joint_deg[1] =
+        g_arm_state.q_feedback_deg[ARM_JOINT_ELBOW];
+    g_arm_soft_limit_debug.final_motor_deg[0] =
+        g_arm_state.motor_total_angle_deg[1];
+    g_arm_soft_limit_debug.final_motor_deg[1] =
+        g_arm_state.motor_total_angle_deg[2];
+    g_arm_soft_limit_debug.base_target_raw_deg =
+        g_arm_state.base_init_target_raw_deg;
+    g_arm_soft_limit_debug.base_target_motor_deg =
+        g_arm_state.base_init_target_motor_deg;
+    g_arm_soft_limit_debug.base_angle_error_deg =
+        ArmWrapTo180(g_arm_state.base_init_target_raw_deg -
+                     g_arm_state.base_raw_deg);
+    g_arm_soft_limit_debug.small_angle_test_active =
+        arm_small_angle_test_active;
+    g_arm_soft_limit_debug.command_target_joint_deg[0] =
+        g_arm_state.q_target_deg[ARM_JOINT_BASE_YAW];
+    g_arm_soft_limit_debug.command_target_joint_deg[1] =
+        g_arm_state.q_target_deg[ARM_JOINT_SHOULDER];
+    g_arm_soft_limit_debug.command_target_joint_deg[2] =
+        g_arm_state.q_target_deg[ARM_JOINT_ELBOW];
+    g_arm_soft_limit_debug.command_target_motor_deg[0] =
+        g_arm_state.base_init_target_motor_deg;
+    g_arm_soft_limit_debug.command_target_motor_deg[1] =
+        arm_joint_hold_target_motor_deg[0];
+    g_arm_soft_limit_debug.command_target_motor_deg[2] =
+        arm_joint_hold_target_motor_deg[1];
+    g_arm_soft_limit_debug.base_angle_pid_output_dps =
+        arm_base_motor != NULL ?
+            arm_base_motor->motor_controller.angle_PID.Output : 0.0f;
+    g_arm_soft_limit_debug.base_speed_pid_output =
+        arm_base_motor != NULL ?
+            arm_base_motor->motor_controller.speed_PID.Output : 0.0f;
+    g_arm_soft_limit_debug.angle_ref_deg[0] =
+        arm_shoulder_motor != NULL ?
+            arm_shoulder_motor->motor_controller.pid_ref : 0.0f;
+    g_arm_soft_limit_debug.angle_ref_deg[1] =
+        arm_elbow_motor != NULL ?
+            arm_elbow_motor->motor_controller.pid_ref : 0.0f;
+    g_arm_soft_limit_debug.angle_pid_output_dps[0] =
+        arm_shoulder_motor != NULL ?
+            arm_shoulder_motor->motor_controller.angle_PID.Output : 0.0f;
+    g_arm_soft_limit_debug.angle_pid_output_dps[1] =
+        arm_elbow_motor != NULL ?
+            arm_elbow_motor->motor_controller.angle_PID.Output : 0.0f;
+    g_arm_soft_limit_debug.speed_pid_output[0] =
+        arm_shoulder_motor != NULL ?
+            arm_shoulder_motor->motor_controller.speed_PID.Output : 0.0f;
+    g_arm_soft_limit_debug.speed_pid_output[1] =
+        arm_elbow_motor != NULL ?
+            arm_elbow_motor->motor_controller.speed_PID.Output : 0.0f;
+    g_arm_soft_limit_debug.current_pid_output[0] =
+        arm_base_motor != NULL ?
+            arm_base_motor->motor_controller.current_PID.Output : 0.0f;
+    g_arm_soft_limit_debug.current_pid_output[1] =
+        arm_shoulder_motor != NULL ?
+            arm_shoulder_motor->motor_controller.current_PID.Output : 0.0f;
+    g_arm_soft_limit_debug.current_pid_output[2] =
+        arm_elbow_motor != NULL ?
+            arm_elbow_motor->motor_controller.current_PID.Output : 0.0f;
+    g_arm_soft_limit_debug.motion_test_pose_index =
+        arm_motion_test_pose_index;
+    g_arm_soft_limit_debug.motion_test_target_reached =
+        arm_motion_test_target_reached;
+    g_arm_soft_limit_debug.motion_test_hold_elapsed_ms =
+        arm_motion_test_target_reached ?
+            (uint32_t)(HAL_GetTick() - arm_motion_test_hold_start_tick) : 0u;
+    g_arm_soft_limit_debug.state_elapsed_ms =
+        g_arm_state.soft_limit_elapsed_ms;
+    if (active_motor != NULL) {
+        g_arm_soft_limit_debug.active_angle_ref_deg =
+            active_motor->motor_controller.pid_ref;
+        g_arm_soft_limit_debug.active_angle_pid_output_dps =
+            active_motor->motor_controller.angle_PID.Output;
+        g_arm_soft_limit_debug.active_speed_pid_output =
+            active_motor->motor_controller.speed_PID.Output;
+    } else {
+        g_arm_soft_limit_debug.active_angle_ref_deg = 0.0f;
+        g_arm_soft_limit_debug.active_angle_pid_output_dps = 0.0f;
+        g_arm_soft_limit_debug.active_speed_pid_output = 0.0f;
+    }
+}
+
+static uint8_t ArmSoftLimitOvercurrent(DJIMotor_Instance *motor,
+                                       float limit,
+                                       uint32_t now)
+{
+    if (fabsf((float)motor->measure.real_current) < limit) {
+        arm_soft_limit_overcurrent_tick = 0u;
+        return 0u;
+    }
+    if (arm_soft_limit_overcurrent_tick == 0u) {
+        arm_soft_limit_overcurrent_tick = now;
+        return 0u;
+    }
+    return (uint32_t)(now - arm_soft_limit_overcurrent_tick) >=
+           ARM_SOFT_LIMIT_OVERCURRENT_MS;
+}
+
+static void ArmSetAngleLoop(DJIMotor_Instance *motor)
+{
+    if (motor == NULL) {
+        return;
+    }
+    motor->motor_settings.outer_loop_type = ANGLE_LOOP;
+    motor->motor_settings.close_loop_type =
+        (Closeloop_Type_e)(ANGLE_LOOP | SPEED_LOOP | CURRENT_LOOP);
+}
+
+static void ArmBaseResetControllerOnTargetCross(void)
+{
+    float target_error_deg;
+
+    if (arm_base_motor == NULL) {
+        return;
+    }
+    target_error_deg = g_arm_state.base_init_target_motor_deg -
+                       arm_base_motor->measure.total_angle;
+    if (arm_base_target_error_valid &&
+        ((arm_base_last_target_error_deg > 0.05f &&
+          target_error_deg < -0.05f) ||
+         (arm_base_last_target_error_deg < -0.05f &&
+          target_error_deg > 0.05f))) {
+        ArmClearMotorController(arm_base_motor);
+    }
+    if (fabsf(target_error_deg) > 0.05f) {
+        arm_base_last_target_error_deg = target_error_deg;
+        arm_base_target_error_valid = 1u;
+    }
+}
+
+static uint8_t ArmBaseInitMove(uint32_t now)
+{
+    float raw_error_deg;
+
+    if (!isfinite(g_arm_state.base_init_target_motor_deg)) {
+        ArmSoftLimitFail(ARM_SOFT_LIMIT_ERROR_LIMIT, now);
+        return 0u;
+    }
+    if (!ArmMotorFeedbackReady(arm_base_motor)) {
+        ArmSoftLimitFail(ARM_SOFT_LIMIT_ERROR_OFFLINE, now);
+        return 0u;
+    }
+    g_arm_state.soft_limit_elapsed_ms =
+        (uint32_t)(now - arm_soft_limit_state_tick);
+    if (g_arm_state.soft_limit_elapsed_ms >= ARM_SOFT_LIMIT_TIMEOUT_MS) {
+        ArmSoftLimitFail(ARM_SOFT_LIMIT_ERROR_TIMEOUT, now);
+        return 0u;
+    }
+    if (ArmSoftLimitOvercurrent(arm_base_motor,
+                                ARM_BASE_INIT_CURRENT, now)) {
+        ArmSoftLimitFail(ARM_SOFT_LIMIT_ERROR_OVERCURRENT, now);
+        return 0u;
+    }
+
+    ArmStopMotor(arm_shoulder_motor);
+    ArmStopMotor(arm_elbow_motor);
+    ArmBaseResetControllerOnTargetCross();
+    ArmSetAngleLoop(arm_base_motor);
+    DJIMotorSetRef(arm_base_motor,
+                   g_arm_state.base_init_target_motor_deg);
+    DJIMotorEnable(arm_base_motor);
+    raw_error_deg = ArmWrapTo180(
+        ARM_BASE_FRONT_RAW_DEG - arm_base_motor->measure.angle_single_round);
+    if (fabsf(raw_error_deg) <= ARM_BASE_INIT_TARGET_TOLERANCE_DEG &&
+        fabsf(arm_base_motor->measure.speed_aps) <=
+            ARM_SOFT_LIMIT_TARGET_SPEED_DPS) {
+        return 1u;
+    }
+    g_arm_state.mode = ARM_MODE_SOFT_LIMIT;
+    return 0u;
+}
+
+static void ArmBaseInitHold(void)
+{
+    ArmBaseResetControllerOnTargetCross();
+    ArmSetAngleLoop(arm_base_motor);
+    DJIMotorSetRef(arm_base_motor,
+                   g_arm_state.base_init_target_motor_deg);
+    DJIMotorEnable(arm_base_motor);
+}
+
+static void ArmSoftLimitTask(uint32_t now)
+{
+    if (ARM_SOFT_LIMIT_ENABLE == 0u) {
+        g_arm_state.soft_limit_state = ARM_SOFT_LIMIT_DISABLED;
+        return;
+    }
+    ArmUpdateSoftLimitTargets();
+
+    switch (g_arm_state.soft_limit_state) {
+        case ARM_SOFT_LIMIT_WAIT_ONLINE:
+            ArmStopMotor(arm_base_motor);
+            ArmStopMotor(arm_shoulder_motor);
+            ArmStopMotor(arm_elbow_motor);
+            break;
+
+        case ARM_SOFT_LIMIT_BASE_MOVING:
+            if (ArmBaseInitMove(now)) {
+                ArmSoftLimitEnterState(ARM_SOFT_LIMIT_BASE_SETTLE,
+                                       ARM_SOFT_LIMIT_AXIS_BASE, now);
+            }
+            break;
+
+        case ARM_SOFT_LIMIT_BASE_SETTLE:
+            ArmStopMotor(arm_shoulder_motor);
+            ArmStopMotor(arm_elbow_motor);
+            ArmBaseInitHold();
+            g_arm_state.soft_limit_elapsed_ms =
+                (uint32_t)(now - arm_soft_limit_state_tick);
+            if (g_arm_state.soft_limit_elapsed_ms >=
+                ARM_SOFT_LIMIT_SETTLE_MS) {
+                ArmSoftLimitEnterState(ARM_SOFT_LIMIT_WAIT_CALIBRATION,
+                                       ARM_SOFT_LIMIT_AXIS_BASE, now);
+            }
+            break;
+
+        case ARM_SOFT_LIMIT_WAIT_CALIBRATION:
+            ArmBaseInitHold();
+            if (g_arm_calibration.joint_calibrated &&
+                g_arm_state.calibration_state == ARM_CAL_VALID) {
+                ArmSoftLimitEnterState(ARM_SOFT_LIMIT_COMPLETE,
+                                       ARM_SOFT_LIMIT_AXIS_BASE, now);
+            }
+            break;
+
+        case ARM_SOFT_LIMIT_COMPLETE:
+            if (!ArmMotorFeedbackReady(arm_base_motor) ||
+                !ArmMotorFeedbackReady(arm_shoulder_motor) ||
+                !ArmMotorFeedbackReady(arm_elbow_motor)) {
+                /* A temporary feedback loss must not disable the other axes.
+                   Keep the last references and resume when feedback returns. */
+                break;
+            }
+            if (ArmTrajectoryOwnsControl()) {
+                /* Trajectory owns the references, but all three motors must
+                   remain enabled throughout staging, motion and settling. */
+                ArmSetAngleLoop(arm_base_motor);
+                ArmSetAngleLoop(arm_shoulder_motor);
+                ArmSetAngleLoop(arm_elbow_motor);
+                DJIMotorEnable(arm_base_motor);
+                DJIMotorEnable(arm_shoulder_motor);
+                DJIMotorEnable(arm_elbow_motor);
+                g_arm_state.mode = ARM_MODE_READY;
+                break;
+            }
+            if (!ArmTrajectoryMotorHoldAllowed()) {
+                ArmMotionStopMotors();
+                break;
+            }
+            ArmSetAngleLoop(arm_shoulder_motor);
+            ArmSetAngleLoop(arm_elbow_motor);
+            DJIMotorSetRef(arm_shoulder_motor,
+                           arm_joint_hold_target_motor_deg[0]);
+            DJIMotorSetRef(arm_elbow_motor,
+                           arm_joint_hold_target_motor_deg[1]);
+            DJIMotorEnable(arm_shoulder_motor);
+            DJIMotorEnable(arm_elbow_motor);
+            ArmBaseInitHold();
+            g_arm_state.mode = ARM_MODE_READY;
+            break;
+
+        case ARM_SOFT_LIMIT_ERROR_OFFLINE:
+        case ARM_SOFT_LIMIT_ERROR_LIMIT:
+        case ARM_SOFT_LIMIT_ERROR_OVERCURRENT:
+        case ARM_SOFT_LIMIT_ERROR_TIMEOUT:
+        case ARM_SOFT_LIMIT_ABORTED:
+            ArmStopMotor(arm_base_motor);
+            ArmStopMotor(arm_shoulder_motor);
+            ArmStopMotor(arm_elbow_motor);
+            g_arm_state.mode = ARM_MODE_SAFE;
+            break;
+
+        case ARM_SOFT_LIMIT_DISABLED:
+        default:
+            ArmSoftLimitFail(ARM_SOFT_LIMIT_ERROR_LIMIT, now);
+            break;
+    }
+}
+
 void ArmWristPWMInit(void)
 {
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
@@ -1260,6 +1954,8 @@ void ArmInit(void)
 
     memset(&g_arm_state, 0, sizeof(g_arm_state));
     memset(&g_arm_calibration, 0, sizeof(g_arm_calibration));
+    memset(&g_arm_soft_limit_debug, 0, sizeof(g_arm_soft_limit_debug));
+    memset(&g_arm_kinematics_debug, 0, sizeof(g_arm_kinematics_debug));
     arm_base_motor = DJIMotorInit(&base_config);
     arm_shoulder_motor = DJIMotorInit(&shoulder_config);
     arm_elbow_motor = DJIMotorInit(&elbow_config);
@@ -1273,13 +1969,40 @@ void ArmInit(void)
     arm_auto_calibration_attempted = 0u;
     arm_auto_online_waiting = 0u;
     arm_auto_online_start_tick = 0u;
-    arm_base_front_raw_deg = 0.0f;
-    arm_base_direction = 1.0f;
+    arm_base_front_raw_deg = ARM_BASE_FRONT_RAW_DEG;
+    arm_base_direction = ARM_BASE_DIRECTION;
+    g_arm_calibration.base_calibrated = ARM_BASE_ZERO_CONFIGURED != 0u;
+    ArmLoadMeasuredJointMapping();
+    ArmUpdateCalibrationValid();
     arm_ratio_test_state_tick = HAL_GetTick();
     arm_ratio_test_stall_tick = 0u;
+    arm_soft_limit_state_tick = HAL_GetTick();
+    arm_soft_limit_overcurrent_tick = 0u;
+    arm_joint_hold_target_motor_deg[0] = 0.0f;
+    arm_joint_hold_target_motor_deg[1] = 0.0f;
+    arm_base_last_target_error_deg = 0.0f;
+    arm_base_target_error_valid = 0u;
+    arm_small_angle_test_active = 0u;
+    arm_motion_test_pose_index = 0u;
+    arm_motion_test_target_reached = 0u;
+    arm_motion_test_hold_start_tick = 0u;
+    g_arm_state.q_target_deg[ARM_JOINT_BASE_YAW] = 0.0f;
+    g_arm_state.q_target_deg[ARM_JOINT_SHOULDER] =
+        ARM_SHOULDER_REFERENCE_DEG;
+    g_arm_state.q_target_deg[ARM_JOINT_ELBOW] =
+        ARM_ELBOW_REFERENCE_DEG;
     g_arm_state.ratio_test_state = arm_3508_ratio_test_enable != 0u ?
         ARM_RATIO_TEST_WAIT_ONLINE : ARM_RATIO_TEST_DISABLED;
+    g_arm_state.soft_limit_axis = ARM_SOFT_LIMIT_AXIS_NONE;
+    g_arm_state.soft_limit_state = ARM_SOFT_LIMIT_ENABLE != 0u ?
+        ARM_SOFT_LIMIT_WAIT_ONLINE : ARM_SOFT_LIMIT_DISABLED;
+    ArmUpdateSoftLimitTargets();
     ArmStop();
+    ArmUpdateFeedback();
+    ArmUpdateForwardKinematics();
+    ArmUpdateKinematicsDebug();
+    ArmUpdateSoftLimitDebug();
+    ArmTrajectoryInit();
     arm_initialized = 1u;
 }
 
@@ -1298,18 +2021,25 @@ void ArmTask(void)
     if (!arm_initialized) {
         return;
     }
-    ArmStopMotor(arm_base_motor);
     ArmUpdateFeedback();
 
     if (g_arm_homing_abort) {
         arm_auto_calibration_attempted = 1u;
+        ArmAbortMotion(ARM_MOTION_FAULT_ABORT);
         if (arm_3508_ratio_test_enable != 0u) {
             ArmRatioTestFail(ARM_RATIO_TEST_ABORTED, now);
         } else {
-            ArmCalibrationAbort();
+            if (ArmCalibrationStateIsActive(
+                    g_arm_state.calibration_state)) {
+                ArmCalibrationAbort();
+            } else {
+                ArmSoftLimitFail(ARM_SOFT_LIMIT_ABORTED, now);
+            }
         }
         ArmUpdateFeedback();
         ArmUpdateForwardKinematics();
+        ArmUpdateKinematicsDebug();
+        ArmUpdateSoftLimitDebug();
         return;
     }
 
@@ -1317,15 +2047,29 @@ void ArmTask(void)
         Arm3508RatioTestTask(now);
         ArmUpdateFeedback();
         ArmUpdateForwardKinematics();
+        ArmUpdateKinematicsDebug();
+        ArmUpdateSoftLimitDebug();
         return;
     }
 
     ArmAutoCalibrationTask(now);
     ArmCalibrationTask(now);
     ArmUpdateFeedback();
+    ArmSoftLimitTask(now);
+    ArmUpdateFeedback();
     ArmUpdateForwardKinematics();
+    ArmUpdateKinematicsDebug();
+    ArmTrajectoryTask(now);
 
-    if (g_arm_calibration.joint_calibrated &&
+    if (g_arm_state.soft_limit_state >= ARM_SOFT_LIMIT_ERROR_OFFLINE &&
+        g_arm_state.soft_limit_state <= ARM_SOFT_LIMIT_ABORTED) {
+        g_arm_state.mode = ARM_MODE_SAFE;
+    } else if (g_arm_state.soft_limit_state ==
+                   ARM_SOFT_LIMIT_BASE_MOVING ||
+               g_arm_state.soft_limit_state ==
+                   ARM_SOFT_LIMIT_BASE_SETTLE) {
+        g_arm_state.mode = ARM_MODE_SOFT_LIMIT;
+    } else if (g_arm_calibration.joint_calibrated &&
         g_arm_state.calibration_state == ARM_CAL_VALID) {
         g_arm_state.mode = ARM_MODE_READY;
     } else if (ArmCalibrationStateIsActive(g_arm_state.calibration_state)) {
@@ -1333,6 +2077,7 @@ void ArmTask(void)
     } else {
         g_arm_state.mode = ARM_MODE_SAFE;
     }
+    ArmUpdateSoftLimitDebug();
 }
 
 const Arm_State_s *ArmGetState(void)

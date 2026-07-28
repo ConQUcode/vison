@@ -1,5 +1,15 @@
 # Progress
 
+- 2026-07-27: Started the complete 3DOF FK/IK and Cartesian linear-motion implementation from the confirmed `(-29,-7.6,34) mm`, `L1=150 mm`, `L2=179 mm` model.
+- 2026-07-27: Confirmed the existing motor tuning and homing code will remain unchanged; identified repeated PID clearing in `ArmSetJointTargetDeg()` as the main control-interface issue to split.
+- 2026-07-27: Added the pure `arm_kinematics` module with the confirmed offset geometry, reference-pose self-test, soft-limit check, conservative automatic region, four-branch analytic IK, continuity scoring, and FK round-trip error.
+- 2026-07-27: Added `arm_trajectory` with the three-stage hard-limit exit corridor, quintic joint staging, 2 mm Cartesian preflight, 5 ms online IK, 1 ms reference interpolation, settling, hold, continuous P1-P2-P3 cycling, and fault shutdown.
+- 2026-07-27: Split movement startup from continuous reference updates so PID state is cleared only once at the beginning of a new move.
+- 2026-07-27: Prevented the legacy READY hold path from writing references or clearing the base controller while the trajectory layer owns the three motors.
+- 2026-07-27: Added runtime timeout coverage for staging/running, fixed the final zero-duration IK-segment edge case, and populated staging Cartesian debug targets.
+- 2026-07-27: Added both new source files explicitly to `Engineer.uvprojx`; a full Keil Clean Build passed with 0 errors. It reports 49 pre-existing warnings in unrelated legacy modules; the three arm source files add no warnings. The final incremental build is code 59892 bytes with 0 errors and 0 warnings.
+- 2026-07-27: Added MATLAB closed-loop path validation. Independent parity validation passed 53 samples with maximum FK error `1.10e-13 mm` and maximum joint step `[3.066,1.034,0.570] deg`.
+
 - 2026-07-24: Started the temporary stall-homing implementation.
 - 2026-07-24: Selected embedded project routing and driver-review workflows; classified the critical layer as DJI motor feedback/control semantics.
 - 2026-07-24: Reworked the arm application into independent M3508/M2006 stall-homing state machines; GM6020 remains registered and stopped, and PWM startup is inactive.

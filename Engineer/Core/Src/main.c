@@ -105,8 +105,7 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-//	ChassisInit();
-//	ShootInit();
+//	ChassisInit();+*
 //	ArmInit();
 	RobotCMDInit();
 	all_init_Task();
