@@ -29,11 +29,28 @@ typedef struct {
     float stage_start_motor_angle_deg;
 } Arm_Calibration_Runtime_s;
 
+typedef struct {
+    uint32_t state_start_tick;
+    uint32_t stable_start_tick;
+    float speed_pid_sum;
+    float speed_pid_square_sum;
+    float real_current_sum;
+    float q2_sum;
+    float peak_abs_current;
+    float original_gain_current;
+    float original_bias_current;
+    uint32_t sample_count;
+    uint8_t feedforward_allowed;
+    uint8_t original_saved;
+    uint8_t staging_index;
+} Arm_FF_Identify_Runtime_s;
+
 static DJIMotor_Instance *arm_base_motor;
 static DJIMotor_Instance *arm_shoulder_motor;
 static DJIMotor_Instance *arm_elbow_motor;
 static DJIMotor_Instance *arm_motors[3];
 static Arm_Calibration_Runtime_s arm_cal_runtime;
+static Arm_FF_Identify_Runtime_s arm_ff_ident_runtime;
 static uint8_t arm_initialized;
 static uint8_t arm_auto_calibration_attempted;
 static uint8_t arm_auto_online_waiting;
@@ -49,6 +66,7 @@ static float arm_base_last_target_error_deg;
 static uint8_t arm_base_target_error_valid;
 static uint8_t arm_teach_mode_entered;
 static uint8_t arm_homing_speed_pid_loaded;
+static uint8_t arm_joint_angle_deadband_entered[2];
 static PID_Init_Config_s arm_shoulder_normal_speed_pid;
 static PID_Init_Config_s arm_elbow_normal_speed_pid;
 
@@ -117,12 +135,26 @@ static float ArmWrapTo360(float angle_deg);
 static void ArmUpdateTeachPoint(void);
 static void ArmRestoreNormalSpeedPids(void);
 static void ArmUpdateShoulderGravityFeedforward(void);
+static void ArmClearCascadeIntegralOnDeadbandEntry(void);
+static void ArmShoulderFFIdentifyTask(uint32_t now);
 
 Arm_State_s g_arm_state;
 Arm_Calibration_s g_arm_calibration;
 Arm_Soft_Limit_Debug_s g_arm_soft_limit_debug;
 Arm_Kinematics_Debug_s g_arm_kinematics_debug;
 Arm_Teach_Point_s g_arm_teach_point;
+Arm_Control_Debug_s g_arm_control_debug;
+Arm_Shoulder_FF_Identify_Debug_s g_arm_shoulder_ff_ident_debug;
+
+#if ARM_BOOT_MODE == ARM_BOOT_MODE_SHOULDER_FF_IDENTIFY
+static const float arm_ff_ident_q2_deg[ARM_FF_IDENT_POINT_COUNT] = {
+    35.0f, 45.0f, 55.0f, 65.0f, 75.0f, 85.0f,
+};
+static const float arm_ff_ident_staging_q_deg[2][3] = {
+    {0.0f, 175.0f, -127.0f},
+    {0.0f, 145.0f, -95.0f},
+};
+#endif
 
 /* 下列别名只为缩短标定状态机代码，实际调参统一在 arm_config.h。 */
 static const float g_arm_shoulder_homing_speed_dps =
@@ -260,8 +292,11 @@ static Motor_Init_Config_s ArmShoulderMotorConfig(void)
             .speed_PID = {
                 .Kp = 7.5f,
                 .Ki = 0.2f,
-                .Improve = PID_Integral_Limit,
+                .Improve = (PID_Improvement_e)(
+                    PID_Integral_Limit | PID_ChangingIntegrationRate),
                 .IntegralLimit = 3000.0f,
+                .CoefA = 600.0f,
+                .CoefB = 100.0f,
                 .MaxOut = 7500.0f,
             },
             .current_PID = {
@@ -311,8 +346,11 @@ static Motor_Init_Config_s ArmElbowMotorConfig(void)
             .speed_PID = {
                 .Kp = 2.3f,
                 .Ki = 0.1f,
-                .Improve = PID_Integral_Limit,
+                .Improve = (PID_Improvement_e)(
+                    PID_Integral_Limit | PID_ChangingIntegrationRate),
                 .IntegralLimit = 5000.0f,
+                .CoefA = 800.0f,
+                .CoefB = 150.0f,
                 .MaxOut = 8200.0f,
             },
             .current_PID = {
@@ -368,6 +406,71 @@ static void ArmClearMotorController(DJIMotor_Instance *motor)
     ArmClearPidRuntime(&motor->motor_controller.angle_PID);
     ArmClearPidRuntime(&motor->motor_controller.speed_PID);
     ArmClearPidRuntime(&motor->motor_controller.current_PID);
+}
+
+void ArmUpdateControllerDebugSnapshot(Arm_Control_Debug_s *debug)
+{
+    if (debug == NULL) {
+        return;
+    }
+    for (uint8_t i = 0u; i < 3u; ++i) {
+        DJIMotor_Instance *motor = arm_motors[i];
+
+        if (motor == NULL) {
+            debug->angle_pid_output[i] = 0.0f;
+            debug->speed_pid_output[i] = 0.0f;
+            debug->current_pid_output[i] = 0.0f;
+            debug->pid_saturated[i] = 0u;
+            continue;
+        }
+        debug->angle_pid_output[i] =
+            motor->motor_controller.angle_PID.Output;
+        debug->speed_pid_output[i] =
+            motor->motor_controller.speed_PID.Output;
+        debug->current_pid_output[i] =
+            motor->motor_controller.current_PID.Output;
+        debug->pid_saturated[i] =
+            fabsf(motor->motor_controller.angle_PID.Output) >=
+                motor->motor_controller.angle_PID.MaxOut - 0.5f ||
+            fabsf(motor->motor_controller.speed_PID.Output) >=
+                motor->motor_controller.speed_PID.MaxOut - 0.5f ||
+            fabsf(motor->motor_controller.current_PID.Output) >=
+                motor->motor_controller.current_PID.MaxOut - 0.5f;
+    }
+}
+
+/*
+ * 角度环首次进入DeadBand时清一次速度环旧积分，消除上一段运动留下的Iout。
+ * 只在“外 -> 内”的边沿执行，保持阶段允许速度环重新积累抵消重力/摩擦。
+ */
+static void ArmClearCascadeIntegralOnDeadbandEntry(void)
+{
+    DJIMotor_Instance *joint_motor[2] = {
+        arm_shoulder_motor,
+        arm_elbow_motor,
+    };
+
+    for (uint8_t i = 0u; i < 2u; ++i) {
+        PID_Instance *angle_pid;
+        PID_Instance *speed_pid;
+        uint8_t inside_deadband;
+
+        if (joint_motor[i] == NULL ||
+            joint_motor[i]->stop_flag != MOTOR_ENALBED ||
+            joint_motor[i]->motor_settings.outer_loop_type != ANGLE_LOOP) {
+            arm_joint_angle_deadband_entered[i] = 0u;
+            continue;
+        }
+        angle_pid = &joint_motor[i]->motor_controller.angle_PID;
+        speed_pid = &joint_motor[i]->motor_controller.speed_PID;
+        inside_deadband = fabsf(angle_pid->Err) <= angle_pid->DeadBand;
+        if (inside_deadband && !arm_joint_angle_deadband_entered[i]) {
+            speed_pid->Iout = 0.0f;
+            speed_pid->ITerm = 0.0f;
+            speed_pid->Last_ITerm = 0.0f;
+        }
+        arm_joint_angle_deadband_entered[i] = inside_deadband;
+    }
 }
 
 static void ArmCopyPidConfig(const PID_Instance *pid,
@@ -553,11 +656,18 @@ static void ArmUpdateShoulderGravityFeedforward(void)
         g_arm_homing_abort == 0u &&
         ARM_BOOT_MODE != ARM_BOOT_MODE_TEACH_POINT &&
         ARM_BOOT_MODE != ARM_BOOT_MODE_FULL_CALIBRATION &&
-        ARM_BOOT_MODE != ARM_BOOT_MODE_SHOULDER_RATIO_TEST;
+        ARM_BOOT_MODE != ARM_BOOT_MODE_SHOULDER_RATIO_TEST &&
+        (ARM_BOOT_MODE != ARM_BOOT_MODE_SHOULDER_FF_IDENTIFY ||
+         arm_ff_ident_runtime.feedforward_allowed != 0u);
 
     g_arm_shoulder_feedforward.q2_deg = q2_deg;
     g_arm_shoulder_feedforward.q2_plus_q3_deg = q2_deg + q3_deg;
-    if (!isfinite(q2_deg) || !isfinite(q3_deg)) {
+    if (!isfinite(q2_deg) || !isfinite(q3_deg) ||
+        !isfinite(g_arm_shoulder_feedforward.shoulder_gain_current) ||
+        !isfinite(g_arm_shoulder_feedforward.link_load_gain_current) ||
+        !isfinite(g_arm_shoulder_feedforward.bias_current) ||
+        !isfinite(g_arm_shoulder_feedforward.max_current) ||
+        !isfinite(start_deg) || !isfinite(off_deg)) {
         g_arm_shoulder_feedforward.angle_window_scale = 0.0f;
         g_arm_shoulder_feedforward.cos_q2 = 0.0f;
         g_arm_shoulder_feedforward.cos_q2_plus_q3 = 0.0f;
@@ -609,6 +719,380 @@ static void ArmUpdateShoulderGravityFeedforward(void)
     g_arm_shoulder_feedforward.output_current = ArmClampFloat(
         g_arm_shoulder_feedforward.raw_current, -limit, limit);
     g_arm_shoulder_feedforward.active = 1u;
+}
+
+static void ArmFFIdentifySetState(Arm_Shoulder_FF_Identify_State_e state,
+                                  uint32_t now)
+{
+    g_arm_shoulder_ff_ident_debug.state = state;
+    g_arm_shoulder_ff_ident_debug.state_elapsed_ms = 0u;
+    arm_ff_ident_runtime.state_start_tick = now;
+    arm_ff_ident_runtime.stable_start_tick = 0u;
+}
+
+static void ArmFFIdentifyRestoreOriginal(uint8_t mark_error,
+                                         uint32_t now)
+{
+    if (!arm_ff_ident_runtime.original_saved) {
+        if (mark_error) {
+            ArmFFIdentifySetState(ARM_FF_IDENT_ERROR_FIT, now);
+        }
+        return;
+    }
+    g_arm_shoulder_feedforward.shoulder_gain_current =
+        arm_ff_ident_runtime.original_gain_current;
+    g_arm_shoulder_feedforward.bias_current =
+        arm_ff_ident_runtime.original_bias_current;
+    arm_ff_ident_runtime.feedforward_allowed = 1u;
+    g_arm_shoulder_ff_ident_debug.result_valid = 0u;
+    g_arm_shoulder_ff_ident_debug.restored_original = 1u;
+    if (mark_error) {
+        ArmFFIdentifySetState(ARM_FF_IDENT_ERROR_FIT, now);
+    }
+}
+
+#if ARM_BOOT_MODE == ARM_BOOT_MODE_SHOULDER_FF_IDENTIFY
+static uint8_t ArmFFIdentifyPoseStable(const float target_q_deg[3],
+                                       uint32_t now)
+{
+    uint8_t stable =
+        fabsf(g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW] -
+              target_q_deg[0]) <= ARM_FF_IDENT_SETTLE_TOL_DEG &&
+        fabsf(g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER] -
+              target_q_deg[1]) <= ARM_FF_IDENT_SETTLE_TOL_DEG &&
+        fabsf(g_arm_state.q_feedback_deg[ARM_JOINT_ELBOW] -
+              target_q_deg[2]) <= ARM_FF_IDENT_SETTLE_TOL_DEG &&
+        fabsf(g_arm_state.motor_speed_dps[ARM_JOINT_SHOULDER]) <=
+              ARM_FF_IDENT_SETTLE_SPEED_DEG_S;
+
+    if (!stable) {
+        arm_ff_ident_runtime.stable_start_tick = 0u;
+        return 0u;
+    }
+    if (arm_ff_ident_runtime.stable_start_tick == 0u) {
+        arm_ff_ident_runtime.stable_start_tick = now;
+        return 0u;
+    }
+    return (uint32_t)(now - arm_ff_ident_runtime.stable_start_tick) >=
+           ARM_FF_IDENT_SETTLE_MS;
+}
+
+static uint8_t ArmFFIdentifyFit(void)
+{
+    float sum_x = 0.0f;
+    float sum_y = 0.0f;
+    float sum_xx = 0.0f;
+    float sum_xy = 0.0f;
+    float max_peak_current = 0.0f;
+    float denominator;
+    float residual_square_sum = 0.0f;
+    float gain;
+    float bias;
+    const float point_count = (float)ARM_FF_IDENT_POINT_COUNT;
+
+    for (uint8_t i = 0u; i < ARM_FF_IDENT_POINT_COUNT; ++i) {
+        float x = cosf(g_arm_shoulder_ff_ident_debug.sample_q2_deg[i] *
+                       ARM_DEG_TO_RAD);
+        float y = g_arm_shoulder_ff_ident_debug.mean_speed_pid_current[i];
+
+        if (!isfinite(x) || !isfinite(y)) {
+            return 0u;
+        }
+        sum_x += x;
+        sum_y += y;
+        sum_xx += x * x;
+        sum_xy += x * y;
+        max_peak_current = fmaxf(max_peak_current,
+            g_arm_shoulder_ff_ident_debug.peak_abs_current[i]);
+    }
+    denominator = point_count * sum_xx - sum_x * sum_x;
+    if (fabsf(denominator) <= ARM_FLOAT_EPSILON) {
+        return 0u;
+    }
+    gain = (point_count * sum_xy - sum_x * sum_y) / denominator;
+    bias = (sum_y - gain * sum_x) / point_count;
+    for (uint8_t i = 0u; i < ARM_FF_IDENT_POINT_COUNT; ++i) {
+        float prediction = gain * cosf(
+            g_arm_shoulder_ff_ident_debug.sample_q2_deg[i] *
+            ARM_DEG_TO_RAD) + bias;
+        float residual =
+            g_arm_shoulder_ff_ident_debug.mean_speed_pid_current[i] -
+            prediction;
+
+        residual_square_sum += residual * residual;
+    }
+    g_arm_shoulder_ff_ident_debug.fitted_gain_current = gain;
+    g_arm_shoulder_ff_ident_debug.fitted_bias_current = bias;
+    g_arm_shoulder_ff_ident_debug.fit_rms_residual = sqrtf(
+        residual_square_sum / point_count);
+    g_arm_shoulder_ff_ident_debug.fit_allowed_residual = fmaxf(
+        ARM_FF_IDENT_MIN_RESIDUAL_CURRENT,
+        max_peak_current * ARM_FF_IDENT_RESIDUAL_RATIO);
+    return isfinite(gain) && isfinite(bias) &&
+           fabsf(gain) <= g_arm_shoulder_feedforward.max_current * 4.0f &&
+           fabsf(bias) <= g_arm_shoulder_feedforward.max_current * 2.0f &&
+           g_arm_shoulder_ff_ident_debug.fit_rms_residual <=
+               g_arm_shoulder_ff_ident_debug.fit_allowed_residual;
+}
+
+static void ArmFFIdentifyBeginSample(void)
+{
+    arm_ff_ident_runtime.speed_pid_sum = 0.0f;
+    arm_ff_ident_runtime.speed_pid_square_sum = 0.0f;
+    arm_ff_ident_runtime.real_current_sum = 0.0f;
+    arm_ff_ident_runtime.q2_sum = 0.0f;
+    arm_ff_ident_runtime.peak_abs_current = 0.0f;
+    arm_ff_ident_runtime.sample_count = 0u;
+}
+
+static void ArmFFIdentifyStoreSample(void)
+{
+    uint8_t index = g_arm_shoulder_ff_ident_debug.current_point;
+    float count = (float)arm_ff_ident_runtime.sample_count;
+    float mean;
+    float variance;
+
+    if (index >= ARM_FF_IDENT_POINT_COUNT || count <= 0.0f) {
+        return;
+    }
+    mean = arm_ff_ident_runtime.speed_pid_sum / count;
+    variance = arm_ff_ident_runtime.speed_pid_square_sum / count -
+               mean * mean;
+    if (variance < 0.0f) {
+        variance = 0.0f;
+    }
+    g_arm_shoulder_ff_ident_debug.sample_q2_deg[index] =
+        arm_ff_ident_runtime.q2_sum / count;
+    g_arm_shoulder_ff_ident_debug.mean_speed_pid_current[index] = mean;
+    g_arm_shoulder_ff_ident_debug.mean_real_current[index] =
+        arm_ff_ident_runtime.real_current_sum / count;
+    g_arm_shoulder_ff_ident_debug.stddev_speed_pid_current[index] =
+        sqrtf(variance);
+    g_arm_shoulder_ff_ident_debug.peak_abs_current[index] =
+        arm_ff_ident_runtime.peak_abs_current;
+    g_arm_shoulder_ff_ident_debug.sample_count =
+        arm_ff_ident_runtime.sample_count;
+}
+#endif
+
+static void ArmShoulderFFIdentifyTask(uint32_t now)
+{
+#if ARM_BOOT_MODE == ARM_BOOT_MODE_SHOULDER_FF_IDENTIFY
+    float target_q_deg[3];
+    float target_q2;
+
+    g_arm_shoulder_ff_ident_debug.state_elapsed_ms =
+        (uint32_t)(now - arm_ff_ident_runtime.state_start_tick);
+    if (!g_arm_state.motor_online[0] || !g_arm_state.motor_online[1] ||
+        !g_arm_state.motor_online[2]) {
+        if (g_arm_shoulder_ff_ident_debug.state != ARM_FF_IDENT_WAIT_READY &&
+            g_arm_shoulder_ff_ident_debug.state != ARM_FF_IDENT_DISABLED) {
+            ArmFFIdentifyRestoreOriginal(0u, now);
+            ArmFFIdentifySetState(ARM_FF_IDENT_ERROR_OFFLINE, now);
+        }
+        return;
+    }
+
+    switch (g_arm_shoulder_ff_ident_debug.state) {
+        case ARM_FF_IDENT_DISABLED:
+            arm_ff_ident_runtime.original_gain_current =
+                g_arm_shoulder_feedforward.shoulder_gain_current;
+            arm_ff_ident_runtime.original_bias_current =
+                g_arm_shoulder_feedforward.bias_current;
+            arm_ff_ident_runtime.original_saved = 1u;
+            arm_ff_ident_runtime.feedforward_allowed = 1u;
+            ArmFFIdentifySetState(ARM_FF_IDENT_WAIT_READY, now);
+            break;
+
+        case ARM_FF_IDENT_WAIT_READY:
+            if (g_arm_state.soft_limit_state == ARM_SOFT_LIMIT_COMPLETE &&
+                g_arm_calibration.calibration_valid) {
+                g_arm_shoulder_ff_ident_debug.current_point = 0u;
+                arm_ff_ident_runtime.staging_index = 0u;
+                g_arm_shoulder_ff_ident_debug.target_q2_deg =
+                    arm_ff_ident_staging_q_deg[0][1];
+                ArmFFIdentifySetState(ARM_FF_IDENT_MOVE_TO_POINT, now);
+            }
+            break;
+
+        case ARM_FF_IDENT_MOVE_TO_POINT:
+            if (arm_ff_ident_runtime.staging_index < 2u) {
+                memcpy(target_q_deg,
+                       arm_ff_ident_staging_q_deg[
+                           arm_ff_ident_runtime.staging_index],
+                       sizeof(target_q_deg));
+                target_q2 = target_q_deg[1];
+            } else {
+                target_q2 = arm_ff_ident_q2_deg[
+                    g_arm_shoulder_ff_ident_debug.current_point];
+                target_q_deg[0] = ARM_FF_IDENT_Q1_DEG;
+                target_q_deg[1] = target_q2;
+                target_q_deg[2] = ARM_FF_IDENT_Q3_DEG;
+            }
+            g_arm_shoulder_ff_ident_debug.target_q2_deg = target_q2;
+            if (ArmTrajectoryMoveJoint(target_q_deg) ==
+                ARM_MOTION_RESULT_OK) {
+                ArmFFIdentifySetState(ARM_FF_IDENT_SETTLING, now);
+            } else if ((uint32_t)(now - arm_ff_ident_runtime.state_start_tick) >=
+                       ARM_FF_IDENT_MOVE_TIMEOUT_MS) {
+                ArmFFIdentifyRestoreOriginal(0u, now);
+                ArmFFIdentifySetState(ARM_FF_IDENT_ERROR_TIMEOUT, now);
+            }
+            break;
+
+        case ARM_FF_IDENT_SETTLING:
+            if (arm_ff_ident_runtime.staging_index < 2u) {
+                memcpy(target_q_deg,
+                       arm_ff_ident_staging_q_deg[
+                           arm_ff_ident_runtime.staging_index],
+                       sizeof(target_q_deg));
+                target_q2 = target_q_deg[1];
+            } else {
+                target_q2 = arm_ff_ident_q2_deg[
+                    g_arm_shoulder_ff_ident_debug.current_point];
+                target_q_deg[0] = ARM_FF_IDENT_Q1_DEG;
+                target_q_deg[1] = target_q2;
+                target_q_deg[2] = ARM_FF_IDENT_Q3_DEG;
+            }
+            if (!ArmTrajectoryIsBusy() &&
+                ArmFFIdentifyPoseStable(target_q_deg, now)) {
+                if (arm_ff_ident_runtime.staging_index < 2u) {
+                    arm_ff_ident_runtime.staging_index++;
+                    ArmFFIdentifySetState(ARM_FF_IDENT_MOVE_TO_POINT, now);
+                    break;
+                }
+                g_arm_shoulder_ff_ident_debug.baseline_peak_tracking_error_deg =
+                    fmaxf(g_arm_shoulder_ff_ident_debug.
+                              baseline_peak_tracking_error_deg,
+                          g_arm_control_debug.
+                              peak_tracking_error_deg[ARM_JOINT_SHOULDER]);
+                arm_ff_ident_runtime.feedforward_allowed = 0u;
+                g_arm_shoulder_feedforward.output_current = 0.0f;
+                g_arm_shoulder_feedforward.active = 0u;
+                ArmFFIdentifyBeginSample();
+                ArmFFIdentifySetState(ARM_FF_IDENT_SAMPLING, now);
+            } else if ((uint32_t)(now - arm_ff_ident_runtime.state_start_tick) >=
+                       ARM_FF_IDENT_MOVE_TIMEOUT_MS) {
+                ArmFFIdentifyRestoreOriginal(0u, now);
+                ArmFFIdentifySetState(ARM_FF_IDENT_ERROR_TIMEOUT, now);
+            }
+            break;
+
+        case ARM_FF_IDENT_SAMPLING:
+        {
+            float speed_output =
+                arm_shoulder_motor->motor_controller.speed_PID.Output;
+            float real_current =
+                (float)arm_shoulder_motor->measure.real_current;
+
+            if ((uint32_t)(now - arm_ff_ident_runtime.state_start_tick) <
+                ARM_FF_IDENT_FF_OFF_SETTLE_MS) {
+                break;
+            }
+            arm_ff_ident_runtime.speed_pid_sum += speed_output;
+            arm_ff_ident_runtime.speed_pid_square_sum +=
+                speed_output * speed_output;
+            arm_ff_ident_runtime.real_current_sum += real_current;
+            arm_ff_ident_runtime.q2_sum +=
+                g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER];
+            arm_ff_ident_runtime.peak_abs_current = fmaxf(
+                arm_ff_ident_runtime.peak_abs_current,
+                fabsf(real_current));
+            arm_ff_ident_runtime.sample_count++;
+            if ((uint32_t)(now - arm_ff_ident_runtime.state_start_tick) >=
+                ARM_FF_IDENT_FF_OFF_SETTLE_MS + ARM_FF_IDENT_SAMPLE_MS) {
+                ArmFFIdentifyStoreSample();
+                if (++g_arm_shoulder_ff_ident_debug.current_point >=
+                    ARM_FF_IDENT_POINT_COUNT) {
+                    ArmFFIdentifySetState(ARM_FF_IDENT_FITTING, now);
+                } else {
+                    arm_ff_ident_runtime.feedforward_allowed = 1u;
+                    ArmFFIdentifySetState(ARM_FF_IDENT_MOVE_TO_POINT, now);
+                }
+            }
+            break;
+        }
+
+        case ARM_FF_IDENT_FITTING:
+            if (!ArmFFIdentifyFit()) {
+                ArmFFIdentifyRestoreOriginal(1u, now);
+                break;
+            }
+            g_arm_shoulder_feedforward.shoulder_gain_current =
+                g_arm_shoulder_ff_ident_debug.fitted_gain_current;
+            g_arm_shoulder_feedforward.bias_current =
+                g_arm_shoulder_ff_ident_debug.fitted_bias_current;
+            arm_ff_ident_runtime.feedforward_allowed = 1u;
+            g_arm_shoulder_ff_ident_debug.current_point =
+                ARM_FF_IDENT_POINT_COUNT - 1u;
+            g_arm_shoulder_ff_ident_debug.reverse_verification = 1u;
+            ArmFFIdentifySetState(ARM_FF_IDENT_VERIFY_MOVE, now);
+            break;
+
+        case ARM_FF_IDENT_VERIFY_MOVE:
+            target_q2 = arm_ff_ident_q2_deg[
+                g_arm_shoulder_ff_ident_debug.current_point];
+            target_q_deg[0] = ARM_FF_IDENT_Q1_DEG;
+            target_q_deg[1] = target_q2;
+            target_q_deg[2] = ARM_FF_IDENT_Q3_DEG;
+            g_arm_shoulder_ff_ident_debug.target_q2_deg = target_q2;
+            if (ArmTrajectoryMoveJoint(target_q_deg) ==
+                ARM_MOTION_RESULT_OK) {
+                ArmFFIdentifySetState(ARM_FF_IDENT_VERIFY_SETTLING, now);
+            } else if ((uint32_t)(now - arm_ff_ident_runtime.state_start_tick) >=
+                       ARM_FF_IDENT_MOVE_TIMEOUT_MS) {
+                ArmFFIdentifyRestoreOriginal(0u, now);
+                ArmFFIdentifySetState(ARM_FF_IDENT_ERROR_TIMEOUT, now);
+            }
+            break;
+
+        case ARM_FF_IDENT_VERIFY_SETTLING:
+            target_q2 = arm_ff_ident_q2_deg[
+                g_arm_shoulder_ff_ident_debug.current_point];
+            target_q_deg[0] = ARM_FF_IDENT_Q1_DEG;
+            target_q_deg[1] = target_q2;
+            target_q_deg[2] = ARM_FF_IDENT_Q3_DEG;
+            if (!ArmTrajectoryIsBusy() &&
+                ArmFFIdentifyPoseStable(target_q_deg, now)) {
+                g_arm_shoulder_ff_ident_debug.
+                    verification_peak_tracking_error_deg = fmaxf(
+                        g_arm_shoulder_ff_ident_debug.
+                            verification_peak_tracking_error_deg,
+                        g_arm_control_debug.
+                            peak_tracking_error_deg[ARM_JOINT_SHOULDER]);
+                if (g_arm_shoulder_ff_ident_debug.current_point > 0u) {
+                    g_arm_shoulder_ff_ident_debug.current_point--;
+                    ArmFFIdentifySetState(ARM_FF_IDENT_VERIFY_MOVE, now);
+                } else if (g_arm_shoulder_ff_ident_debug.
+                               verification_peak_tracking_error_deg >
+                           fmaxf(ARM_FF_IDENT_SETTLE_TOL_DEG,
+                                g_arm_shoulder_ff_ident_debug.
+                                    baseline_peak_tracking_error_deg *
+                                    ARM_FF_IDENT_VERIFY_DEGRADE_RATIO)) {
+                    ArmFFIdentifyRestoreOriginal(1u, now);
+                } else {
+                    g_arm_shoulder_ff_ident_debug.result_valid = 1u;
+                    g_arm_shoulder_ff_ident_debug.restored_original = 0u;
+                    ArmFFIdentifySetState(ARM_FF_IDENT_COMPLETE, now);
+                }
+            } else if ((uint32_t)(now - arm_ff_ident_runtime.state_start_tick) >=
+                       ARM_FF_IDENT_MOVE_TIMEOUT_MS) {
+                ArmFFIdentifyRestoreOriginal(0u, now);
+                ArmFFIdentifySetState(ARM_FF_IDENT_ERROR_TIMEOUT, now);
+            }
+            break;
+
+        case ARM_FF_IDENT_COMPLETE:
+        case ARM_FF_IDENT_ERROR_OFFLINE:
+        case ARM_FF_IDENT_ERROR_TIMEOUT:
+        case ARM_FF_IDENT_ERROR_FIT:
+        case ARM_FF_IDENT_ABORTED:
+        default:
+            break;
+    }
+#else
+    (void)now;
+#endif
 }
 
 static void ArmUpdateForwardKinematics(void)
@@ -1416,7 +1900,10 @@ uint8_t ArmUpdateJointReference(const float reference_q_deg[3])
         !isfinite(reference_q_deg[2]) ||
         reference_q_deg[0] < -180.0f || reference_q_deg[0] > 180.0f ||
         reference_q_deg[1] < 0.0f || reference_q_deg[1] > 180.0f ||
-        reference_q_deg[2] < -180.0f || reference_q_deg[2] > -85.0f) {
+        reference_q_deg[2] < fminf(ARM_ELBOW_REFERENCE_DEG,
+                                   ARM_ELBOW_OPPOSITE_DEG) ||
+        reference_q_deg[2] > fmaxf(ARM_ELBOW_REFERENCE_DEG,
+                                   ARM_ELBOW_OPPOSITE_DEG)) {
         return 0u;
     }
     base_target_raw_deg = ArmWrapTo360(
@@ -1460,8 +1947,11 @@ uint8_t ArmBeginJointMove(const float target_q_deg[3])
         !isfinite(target_q_deg[0]) || !isfinite(target_q_deg[1]) ||
         !isfinite(target_q_deg[2]) || target_q_deg[0] < -180.0f ||
         target_q_deg[0] > 180.0f || target_q_deg[1] < 0.0f ||
-        target_q_deg[1] > 180.0f || target_q_deg[2] < -180.0f ||
-        target_q_deg[2] > -85.0f) {
+        target_q_deg[1] > 180.0f ||
+        target_q_deg[2] < fminf(ARM_ELBOW_REFERENCE_DEG,
+                                ARM_ELBOW_OPPOSITE_DEG) ||
+        target_q_deg[2] > fmaxf(ARM_ELBOW_REFERENCE_DEG,
+                                ARM_ELBOW_OPPOSITE_DEG)) {
         return 0u;
     }
     current_q_deg[0] = g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW];
@@ -1758,7 +2248,9 @@ static void ArmUpdateSoftLimitTargets(void)
     g_arm_state.soft_limit_target_joint_deg[0] =
         ARM_SHOULDER_REFERENCE_DEG - ARM_SOFT_LIMIT_MARGIN_DEG;
     g_arm_state.soft_limit_target_joint_deg[1] =
-        ARM_ELBOW_REFERENCE_DEG + ARM_SOFT_LIMIT_MARGIN_DEG;
+        ARM_ELBOW_REFERENCE_DEG +
+        ArmSign(ARM_ELBOW_OPPOSITE_DEG - ARM_ELBOW_REFERENCE_DEG) *
+        ARM_SOFT_LIMIT_MARGIN_DEG;
     g_arm_state.soft_limit_target_motor_deg[0] =
         ArmSoftLimitJointToMotor(
             g_arm_state.soft_limit_target_joint_deg[0],
@@ -2124,6 +2616,13 @@ void ArmInit(void)
     memset(&g_arm_soft_limit_debug, 0, sizeof(g_arm_soft_limit_debug));
     memset(&g_arm_kinematics_debug, 0, sizeof(g_arm_kinematics_debug));
     memset(&g_arm_teach_point, 0, sizeof(g_arm_teach_point));
+    memset(&g_arm_control_debug, 0, sizeof(g_arm_control_debug));
+    memset(&g_arm_shoulder_ff_ident_debug, 0,
+           sizeof(g_arm_shoulder_ff_ident_debug));
+    memset(&arm_ff_ident_runtime, 0, sizeof(arm_ff_ident_runtime));
+    g_arm_shoulder_ff_ident_debug.state =
+        ARM_BOOT_MODE == ARM_BOOT_MODE_SHOULDER_FF_IDENTIFY ?
+        ARM_FF_IDENT_DISABLED : ARM_FF_IDENT_DISABLED;
     g_arm_shoulder_feedforward.active = 0u;
     g_arm_shoulder_feedforward.q2_deg = 0.0f;
     g_arm_shoulder_feedforward.q2_plus_q3_deg = 0.0f;
@@ -2163,6 +2662,8 @@ void ArmInit(void)
     arm_base_target_error_valid = 0u;
     arm_teach_mode_entered = 0u;
     arm_homing_speed_pid_loaded = 0u;
+    memset(arm_joint_angle_deadband_entered, 0,
+           sizeof(arm_joint_angle_deadband_entered));
     g_arm_state.q_target_deg[ARM_JOINT_BASE_YAW] = 0.0f;
     g_arm_state.q_target_deg[ARM_JOINT_SHOULDER] =
         ARM_SHOULDER_REFERENCE_DEG;
@@ -2208,6 +2709,10 @@ void ArmTask(void)
         if (ARM_BOOT_MODE == ARM_BOOT_MODE_SHOULDER_RATIO_TEST) {
             ArmRatioTestFail(ARM_RATIO_TEST_ABORTED, now);
         } else {
+            if (ARM_BOOT_MODE == ARM_BOOT_MODE_SHOULDER_FF_IDENTIFY) {
+                ArmFFIdentifyRestoreOriginal(0u, now);
+                ArmFFIdentifySetState(ARM_FF_IDENT_ABORTED, now);
+            }
             if (ArmCalibrationStateIsActive(
                     g_arm_state.calibration_state)) {
                 ArmCalibrationAbort();
@@ -2247,7 +2752,9 @@ void ArmTask(void)
     ArmUpdateForwardKinematics();
     ArmUpdateKinematicsDebug();
     ArmTrajectoryTask(now);
+    ArmShoulderFFIdentifyTask(now);
     ArmUpdateFeedback();
+    ArmClearCascadeIntegralOnDeadbandEntry();
     ArmUpdateForwardKinematics();
     ArmUpdateTeachPoint();
 
@@ -2355,7 +2862,7 @@ Arm_Command_Result_e ArmSubmitCartesianCommand(
     }
     speed_mm_s = command->max_speed_mm_s > 0.0f ?
         command->max_speed_mm_s : ARM_LINEAR_DEFAULT_SPEED_MM_S;
-    if (speed_mm_s > ARM_LINEAR_DEFAULT_SPEED_MM_S) {
+    if (speed_mm_s > ARM_LINEAR_MAX_SPEED_MM_S) {
         return ARM_COMMAND_INVALID;
     }
 
@@ -2405,6 +2912,29 @@ Arm_Command_Result_e ArmSubmitJointCommand(
         ArmTrajectoryMoveJoint(command->q_deg);
     return ArmConvertMotionResult(result);
 #endif
+}
+
+Arm_Command_Result_e ArmSubmitRealtimeCartesianTarget(
+    const Arm_Realtime_Cartesian_Target_s *target)
+{
+#if ARM_BOOT_MODE != ARM_BOOT_MODE_NORMAL
+    (void)target;
+    return ARM_COMMAND_MODE_DENIED;
+#else
+    if (!ArmApplicationCommandAllowed()) {
+        return ARM_COMMAND_NOT_READY;
+    }
+    return ArmTrajectorySubmitRealtimeTarget(target);
+#endif
+}
+
+void ArmStopRealtimeTracking(void)
+{
+    if (ARM_BOOT_MODE != ARM_BOOT_MODE_NORMAL ||
+        !ArmApplicationCommandAllowed()) {
+        return;
+    }
+    ArmTrajectoryStopRealtime();
 }
 
 void ArmCancelMotion(void)

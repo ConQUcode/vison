@@ -96,6 +96,15 @@ typedef enum {
 } Arm_IK_Status_e;
 
 typedef enum {
+    ARM_REALTIME_REJECT_NONE = 0,
+    ARM_REALTIME_REJECT_IK,
+    ARM_REALTIME_REJECT_FK_ERROR,
+    ARM_REALTIME_REJECT_SOFT_LIMIT,
+    ARM_REALTIME_REJECT_AUTO_REGION,
+    ARM_REALTIME_REJECT_CONTINUITY
+} Arm_Realtime_Reject_Reason_e;
+
+typedef enum {
     ARM_MOTION_IDLE = 0,
     ARM_MOTION_BOOT_DELAY,
     ARM_MOTION_STAGING,
@@ -153,6 +162,22 @@ typedef enum {
     ARM_COMMAND_PREFLIGHT_FAILED
 } Arm_Command_Result_e;
 
+typedef enum {
+    ARM_FF_IDENT_DISABLED = 0,
+    ARM_FF_IDENT_WAIT_READY,
+    ARM_FF_IDENT_MOVE_TO_POINT,
+    ARM_FF_IDENT_SETTLING,
+    ARM_FF_IDENT_SAMPLING,
+    ARM_FF_IDENT_FITTING,
+    ARM_FF_IDENT_VERIFY_MOVE,
+    ARM_FF_IDENT_VERIFY_SETTLING,
+    ARM_FF_IDENT_COMPLETE,
+    ARM_FF_IDENT_ERROR_OFFLINE,
+    ARM_FF_IDENT_ERROR_TIMEOUT,
+    ARM_FF_IDENT_ERROR_FIT,
+    ARM_FF_IDENT_ABORTED
+} Arm_Shoulder_FF_Identify_State_e;
+
 typedef struct {
     float x_mm;
     float y_mm;
@@ -175,7 +200,7 @@ typedef struct {
     /* DIRECT直接下发合法IK角；LINEAR先预检整条空间直线再执行。 */
     Arm_Move_Type_e move_type;
     Arm_Position_s target_mm;
-    /* 0使用默认200mm/s；有效范围为(0,200]mm/s。 */
+    /* 0使用默认200mm/s；离散命令允许显式请求到400mm/s。 */
     float max_speed_mm_s;
     /* q4尚未接入，本轮必须为0，否则返回ARM_COMMAND_UNSUPPORTED。 */
     uint8_t tool_pitch_valid;
@@ -187,6 +212,13 @@ typedef struct {
     Arm_Move_Type_e move_type;
     float q_deg[3];
 } Arm_Joint_Command_s;
+
+typedef struct {
+    uint32_t command_id;
+    Arm_Position_s target_mm;
+    float max_speed_mm_s;
+    float max_acceleration_mm_s2;
+} Arm_Realtime_Cartesian_Target_s;
 
 typedef struct {
     uint8_t ready;
@@ -363,6 +395,8 @@ typedef struct {
     Arm_IK_Status_e ik_status;
     uint8_t path_preflight_passed;
     uint8_t command_accepted;
+    Arm_Realtime_Reject_Reason_e realtime_reject_reason;
+    Arm_Realtime_Reject_Reason_e last_realtime_reject_reason;
     uint32_t command_reject_count;
     float trajectory_progress;
     uint32_t trajectory_duration_ms;
@@ -396,6 +430,55 @@ typedef struct {
     float output_current;
 } Arm_Shoulder_Feedforward_s;
 
+typedef struct {
+    Arm_Shoulder_FF_Identify_State_e state;
+    uint8_t current_point;
+    uint8_t reverse_verification;
+    uint8_t result_valid;
+    uint8_t restored_original;
+    float target_q2_deg;
+    float sample_q2_deg[6];
+    float mean_speed_pid_current[6];
+    float mean_real_current[6];
+    float stddev_speed_pid_current[6];
+    float peak_abs_current[6];
+    float fitted_gain_current;
+    float fitted_bias_current;
+    float fit_rms_residual;
+    float fit_allowed_residual;
+    float baseline_peak_tracking_error_deg;
+    float verification_peak_tracking_error_deg;
+    uint32_t sample_count;
+    uint32_t state_elapsed_ms;
+} Arm_Shoulder_FF_Identify_Debug_s;
+
+typedef struct {
+    float current_q_deg[3];
+    float reference_q_deg[3];
+    float target_q_deg[3];
+    float tracking_error_deg[3];
+    float peak_tracking_error_deg[3];
+    float overshoot_deg[3];
+    float motor_speed_deg_s[3];
+    float motor_current[3];
+    float angle_pid_output[3];
+    float speed_pid_output[3];
+    float current_pid_output[3];
+    uint8_t pid_saturated[3];
+    uint8_t tracking_error_warning[3];
+    uint32_t tracking_error_duration_ms[3];
+    float shoulder_feedforward_current;
+    float trajectory_speed_mm_s;
+    float trajectory_acceleration_mm_s2;
+    uint32_t trajectory_elapsed_ms;
+    uint32_t trajectory_duration_ms;
+    uint32_t settling_time_ms;
+    uint32_t command_age_ms;
+    uint8_t realtime_active;
+    uint8_t realtime_timed_out;
+    uint32_t realtime_command_id;
+} Arm_Control_Debug_s;
+
 extern Arm_State_s g_arm_state;
 extern Arm_Calibration_s g_arm_calibration;
 extern Arm_Soft_Limit_Debug_s g_arm_soft_limit_debug;
@@ -403,6 +486,8 @@ extern Arm_Kinematics_Debug_s g_arm_kinematics_debug;
 extern Arm_Motion_Debug_s g_arm_motion_debug;
 /* Watch调参时只需展开该结构体；M2006本轮仍不启用重力补偿。 */
 extern Arm_Shoulder_Feedforward_s g_arm_shoulder_feedforward;
+extern Arm_Shoulder_FF_Identify_Debug_s g_arm_shoulder_ff_ident_debug;
+extern Arm_Control_Debug_s g_arm_control_debug;
 /* 打点模式只需在Watch中展开此变量，其余结构用于内部维护诊断。 */
 extern Arm_Teach_Point_s g_arm_teach_point;
 extern volatile uint8_t g_arm_homing_abort;
@@ -417,6 +502,9 @@ Arm_Command_Result_e ArmSubmitCartesianCommand(
     const Arm_Cartesian_Command_s *command);
 Arm_Command_Result_e ArmSubmitJointCommand(
     const Arm_Joint_Command_s *command);
+Arm_Command_Result_e ArmSubmitRealtimeCartesianTarget(
+    const Arm_Realtime_Cartesian_Target_s *target);
+void ArmStopRealtimeTracking(void);
 /* 普通取消：以当前反馈姿态继续角度闭环保持，不失能、不清标定。 */
 void ArmCancelMotion(void);
 /* 唯一会在正常运行期间主动失能三台电机的应用层接口。 */

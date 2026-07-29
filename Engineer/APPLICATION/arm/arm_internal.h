@@ -10,6 +10,7 @@
 uint8_t ArmBeginJointMove(const float target_q_deg[3]);
 uint8_t ArmUpdateJointReference(const float reference_q_deg[3]);
 uint8_t ArmSetJointTargetDeg(float q1_deg, float q2_deg, float q3_deg);
+void ArmUpdateControllerDebugSnapshot(Arm_Control_Debug_s *debug);
 void ArmMotionStopMotors(void);
 void ArmAbortMotion(Arm_Motion_Fault_e reason);
 Arm_Motion_Result_e ArmSetCartesianTarget(const Arm_Position_s *target,
