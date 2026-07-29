@@ -50,6 +50,7 @@ engineer\test.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\limits.h
 engineer\test.o: ../MODULE/motor/motor_def.h
 engineer\test.o: ../MODULE/algorithm/ramp_contorller.h
 engineer\test.o: ../MODULE/daemon/daemon.h
+engineer\test.o: ../MODULE/motor/DMmotor/dmmotor.h
 engineer\test.o: ..\APPLICATION\Test.h
 engineer\test.o: ../APPLICATION/arm/arm.h
 engineer\test.o: ../APPLICATION/arm/arm_config.h

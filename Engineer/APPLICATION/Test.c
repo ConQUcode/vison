@@ -1,4 +1,5 @@
 #include "DJI_motor.h"
+#include "dmmotor.h"
 #include "Test.h"
 #include "arm_config.h"
 #include "math.h"
@@ -180,5 +181,6 @@ void all_cmd_Task(void)
 	ArmTask();
 	ArmApiPointTestTask();
 	ArmRealtimeHostSimulatorTask();
+	DMMotorControl(HAL_GetTick());
 	DJIMotorControl();
 }

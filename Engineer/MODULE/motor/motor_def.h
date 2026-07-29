@@ -119,6 +119,7 @@ typedef enum {
     LK9025,
     HT04,
     DM4310,
+    DM4340,
     DM6006,
     DM8006,
 } Motor_Type_e;

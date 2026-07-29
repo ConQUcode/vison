@@ -15,7 +15,6 @@
  * 五次曲线10t^3-15t^4+6t^5保证起止速度和加速度均为0。
  */
 
-#define ARM_CARTESIAN_BOOT_DELAY_MS        1u
 #define ARM_LINEAR_MIN_DISTANCE_MM         0.01f
 #define ARM_LINEAR_MIN_SPEED_MM_S          1.0f
 #define ARM_LINEAR_MIN_ACCEL_MM_S2         1.0f
@@ -25,14 +24,6 @@
 #define ARM_LINEAR_Q1_STEP_MAX_DEG         5.0f
 #define ARM_LINEAR_Q2_STEP_MAX_DEG         2.0f
 #define ARM_LINEAR_Q3_STEP_MAX_DEG         2.0f
-/*
- * M2006当前角度环DeadBand=100 motor-deg，按实测映射约等于2.68 joint-deg。
- * 中间安全姿态若仍使用2deg到位阈值，会出现电机已进入死区但状态机永远
- * 等不到“到位”的矛盾。这里取4deg，只用于安全脱限中间点，不影响最终
- * 目标精度；真正的目标轨迹仍从实时反馈姿态重新做整段IK预检。
- */
-#define ARM_STAGING_SETTLE_TOLERANCE_DEG   4.0f
-#define ARM_STAGING_SETTLE_TIMEOUT_MS   8000u
 
 typedef enum {
     ARM_TRAJECTORY_PATH_NONE = 0,
@@ -48,14 +39,10 @@ typedef struct {
     uint16_t sample_count;
     uint8_t kinematics_self_test_passed;
     uint8_t reference_update_rejected;
-    uint8_t pending_cartesian_valid;
-    uint8_t pending_realtime_valid;
     uint8_t online_ik_valid;
     uint8_t realtime_active;
     uint8_t realtime_timed_out;
     Arm_Trajectory_Path_e path_type;
-    Arm_Cartesian_Command_s pending_cartesian;
-    Arm_Realtime_Cartesian_Target_s pending_realtime;
     Arm_Position_s start_position;
     Arm_Position_s target_position;
     Arm_Position_s realtime_reference_position;
@@ -82,17 +69,6 @@ typedef struct {
 Arm_Motion_Debug_s g_arm_motion_debug;
 static Arm_Cartesian_Runtime_s arm_cartesian_runtime;
 
-static const Arm_Position_s arm_cartesian_test_point[3] = {
-    {ARM_AUTO_TEST_POINT_1_X_MM, ARM_AUTO_TEST_POINT_1_Y_MM,
-     ARM_AUTO_TEST_POINT_1_Z_MM},
-    {ARM_AUTO_TEST_POINT_2_X_MM, ARM_AUTO_TEST_POINT_2_Y_MM,
-     ARM_AUTO_TEST_POINT_2_Z_MM},
-    {ARM_AUTO_TEST_POINT_3_X_MM, ARM_AUTO_TEST_POINT_3_Y_MM,
-     ARM_AUTO_TEST_POINT_3_Z_MM},
-};
-
-static const float arm_safe_staging_q_deg[3] = {0.0f, 60.0f, -95.0f};
-
 static float ArmCartesianClamp(float value, float min_value, float max_value)
 {
     if (value < min_value) {
@@ -113,11 +89,6 @@ static float ArmCartesianWrapTo180(float angle_deg)
         angle_deg += 360.0f;
     }
     return angle_deg;
-}
-
-static float ArmCartesianSign(float value)
-{
-    return value >= 0.0f ? 1.0f : -1.0f;
 }
 
 static float ArmCartesianPositionDistance(const Arm_Position_s *a,
@@ -155,8 +126,11 @@ static float ArmCartesianQuinticAcceleration(float normalized_time)
 
 static uint8_t ArmCartesianMotorsReady(void)
 {
-    return g_arm_calibration.calibration_valid &&
-           g_arm_state.soft_limit_state == ARM_SOFT_LIMIT_COMPLETE &&
+    return g_arm_state.config_valid && g_arm_state.kinematics_valid &&
+           g_arm_state.all_targets_synced &&
+           g_arm_state.start_state == ARM_START_READY &&
+           g_arm_state.mode == ARM_MODE_READY &&
+           g_arm_state.fault_latched == ARM_FAULT_NONE &&
            g_arm_state.motor_online[0] && g_arm_state.motor_online[1] &&
            g_arm_state.motor_online[2];
 }
@@ -252,8 +226,6 @@ static void ArmCartesianUpdateControlDebug(uint32_t now_ms,
         }
     }
 
-    g_arm_control_debug.shoulder_feedforward_current =
-        g_arm_shoulder_feedforward.output_current;
     if (arm_cartesian_runtime.realtime_active) {
         float dv[3];
         float dt_s = (float)task_delta_ms * 0.001f;
@@ -349,76 +321,6 @@ static uint8_t ArmCartesianJointStepContinuous(const float previous_q_deg[3],
                ARM_LINEAR_Q2_STEP_MAX_DEG &&
            fabsf(next_q_deg[2] - previous_q_deg[2]) <=
                ARM_LINEAR_Q3_STEP_MAX_DEG;
-}
-
-static uint8_t ArmCartesianRealtimeStepContinuous(
-    const float previous_q_deg[3],
-    const float next_q_deg[3])
-{
-    /* 100Hz命令间隔约10ms，按配置关节限速并留2倍调度余量。 */
-    const float interval_s = 0.02f;
-
-    return fabsf(ArmCartesianWrapTo180(next_q_deg[0] -
-                                       previous_q_deg[0])) <=
-               ARM_LINEAR_Q1_MAX_SPEED_DEG_S * interval_s &&
-           fabsf(next_q_deg[1] - previous_q_deg[1]) <=
-               ARM_LINEAR_Q2_MAX_SPEED_DEG_S * interval_s &&
-           fabsf(next_q_deg[2] - previous_q_deg[2]) <=
-               ARM_LINEAR_Q3_MAX_SPEED_DEG_S * interval_s;
-}
-
-/*
- * 仅做计算，不改变PID、使能状态和电机参考值。
- * 用于首次命令：在机械臂还位于硬限位时，先确认安全姿态到最终目标
- * 的整条直线都有连续合法IK，确认后才允许开始脱离硬限位。
- */
-static Arm_Motion_Result_e ArmCartesianPreflightFromPose(
-    const float start_q_deg[3],
-    const Arm_Position_s *target)
-{
-    Arm_IK_Result_s ik_result;
-    Arm_Position_s start_position;
-    Arm_Position_s sample_position;
-    float previous_q_deg[3];
-    float path_length_mm;
-    uint16_t sample_count;
-
-    ArmForwardKinematics3DOF(start_q_deg[0], start_q_deg[1], start_q_deg[2],
-                             &start_position);
-    path_length_mm = ArmCartesianPositionDistance(&start_position, target);
-    if (!isfinite(path_length_mm)) {
-        return ARM_MOTION_RESULT_INVALID;
-    }
-    sample_count = (uint16_t)ceilf(path_length_mm /
-                                  ARM_LINEAR_SAMPLE_SPACING_MM) + 1u;
-    if (sample_count < 2u) {
-        sample_count = 2u;
-    }
-    if (sample_count > ARM_LINEAR_MAX_SAMPLES) {
-        return ARM_MOTION_RESULT_PREFLIGHT_FAILED;
-    }
-    memcpy(previous_q_deg, start_q_deg, sizeof(previous_q_deg));
-    for (uint16_t i = 1u; i < sample_count; ++i) {
-        float ratio = (float)i / (float)(sample_count - 1u);
-
-        sample_position.x_mm = start_position.x_mm +
-            ratio * (target->x_mm - start_position.x_mm);
-        sample_position.y_mm = start_position.y_mm +
-            ratio * (target->y_mm - start_position.y_mm);
-        sample_position.z_mm = start_position.z_mm +
-            ratio * (target->z_mm - start_position.z_mm);
-        if (ArmInverseKinematics3DOF(&sample_position, previous_q_deg,
-                                    &ik_result) != ARM_IK_OK ||
-            ik_result.position_error_mm > ARM_LINEAR_FK_ERROR_MAX_MM ||
-            !ArmJointPoseWithinSoftLimits(ik_result.q_deg) ||
-            !ArmAutoPoseIsSafe(ik_result.q_deg) ||
-            !ArmCartesianJointStepContinuous(previous_q_deg,
-                                             ik_result.q_deg)) {
-            return ARM_MOTION_RESULT_PREFLIGHT_FAILED;
-        }
-        memcpy(previous_q_deg, ik_result.q_deg, sizeof(previous_q_deg));
-    }
-    return ARM_MOTION_RESULT_OK;
 }
 
 static uint32_t ArmCartesianDurationMs(float path_length_mm,
@@ -675,90 +577,17 @@ static void ArmCartesianStartPreparedTrajectory(
     ArmCartesianSetState(motion_state, now_ms);
 }
 
-static Arm_Motion_Result_e ArmCartesianStartBootStaging(
-    const Arm_Position_s *target)
-{
-    Arm_IK_Result_s result;
-    float start_q_deg[3];
-    float shoulder_hard_min_deg;
-    float shoulder_hard_max_deg;
-    float elbow_hard_min_deg;
-    float elbow_hard_max_deg;
-    float shoulder_inward_direction;
-    float elbow_inward_direction;
-    float shoulder_delta_deg;
-    float elbow_delta_deg;
-    uint32_t duration_ms;
-    uint32_t now_ms = HAL_GetTick();
-
-    memset(&result, 0, sizeof(result));
-    if (!ArmCartesianMotorsReady()) {
-        ArmCartesianRecordRejected(ARM_IK_INVALID_ARGUMENT);
-        return ARM_MOTION_RESULT_NOT_READY;
-    }
-    start_q_deg[0] = g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW];
-    start_q_deg[1] = g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER];
-    start_q_deg[2] = g_arm_state.q_feedback_deg[ARM_JOINT_ELBOW];
-    if (ArmInverseKinematics3DOF(target, start_q_deg, &result) != ARM_IK_OK ||
-        result.position_error_mm > ARM_LINEAR_FK_ERROR_MAX_MM ||
-        !ArmJointPoseWithinSoftLimits(result.q_deg) ||
-        !ArmAutoPoseIsSafe(result.q_deg)) {
-        ArmCartesianRecordRejected(result.status);
-        return ARM_MOTION_RESULT_PREFLIGHT_FAILED;
-    }
-    shoulder_hard_min_deg = fminf(ARM_SHOULDER_REFERENCE_DEG,
-                                  ARM_SHOULDER_OPPOSITE_DEG);
-    shoulder_hard_max_deg = fmaxf(ARM_SHOULDER_REFERENCE_DEG,
-                                  ARM_SHOULDER_OPPOSITE_DEG);
-    elbow_hard_min_deg = fminf(ARM_ELBOW_REFERENCE_DEG,
-                               ARM_ELBOW_OPPOSITE_DEG);
-    elbow_hard_max_deg = fmaxf(ARM_ELBOW_REFERENCE_DEG,
-                               ARM_ELBOW_OPPOSITE_DEG);
-    shoulder_inward_direction = ArmCartesianSign(
-        ARM_SHOULDER_OPPOSITE_DEG - ARM_SHOULDER_REFERENCE_DEG);
-    elbow_inward_direction = ArmCartesianSign(
-        ARM_ELBOW_OPPOSITE_DEG - ARM_ELBOW_REFERENCE_DEG);
-    shoulder_delta_deg = result.q_deg[1] - start_q_deg[1];
-    elbow_delta_deg = result.q_deg[2] - start_q_deg[2];
-    if (start_q_deg[0] < ARM_AUTO_Q1_MIN_DEG ||
-        start_q_deg[0] > ARM_AUTO_Q1_MAX_DEG ||
-        start_q_deg[1] < shoulder_hard_min_deg ||
-        start_q_deg[1] > shoulder_hard_max_deg ||
-        start_q_deg[2] < elbow_hard_min_deg ||
-        start_q_deg[2] > elbow_hard_max_deg ||
-        shoulder_delta_deg * shoulder_inward_direction < -0.1f ||
-        elbow_delta_deg * elbow_inward_direction < -0.1f) {
-        ArmCartesianRecordRejected(ARM_IK_COLLISION_RISK);
-        return ARM_MOTION_RESULT_PREFLIGHT_FAILED;
-    }
-
-    arm_cartesian_runtime.sample_count = 2u;
-    memcpy(arm_cartesian_runtime.sample_q_deg[0], start_q_deg,
-           sizeof(start_q_deg));
-    memcpy(arm_cartesian_runtime.sample_q_deg[1], result.q_deg,
-           sizeof(result.q_deg));
-    arm_cartesian_runtime.start_position = g_arm_state.wrist_center;
-    duration_ms = ArmCartesianDurationMs(0.0f,
-        ARM_LINEAR_DEFAULT_SPEED_MM_S, ARM_LINEAR_MAX_ACCEL_MM_S2,
-        arm_cartesian_runtime.sample_count);
-    if (!ArmBeginJointMove(result.q_deg)) {
-        ArmCartesianRecordRejected(ARM_IK_INVALID_ARGUMENT);
-        return ARM_MOTION_RESULT_NOT_READY;
-    }
-    ArmCartesianStartPreparedTrajectory(
-        target, duration_ms, ARM_LINEAR_DEFAULT_SPEED_MM_S,
-        ARM_LINEAR_MAX_ACCEL_MM_S2, ARM_TRAJECTORY_PATH_JOINT_STAGING,
-        ARM_MOTION_STAGING, now_ms);
-    return ARM_MOTION_RESULT_OK;
-}
-
 void ArmAbortMotion(Arm_Motion_Fault_e reason)
 {
     g_arm_motion_debug.fault_code = reason;
-    if (reason == ARM_MOTION_FAULT_ABORT) {
-        g_arm_motion_debug.motion_state = ARM_MOTION_ABORTED;
-        ArmMotionStopMotors();
-    }
+    g_arm_motion_debug.motion_state = ARM_MOTION_ABORTED;
+    g_arm_motion_debug.command_accepted = 0u;
+    arm_cartesian_runtime.realtime_active = 0u;
+    arm_cartesian_runtime.realtime_timed_out = 0u;
+    arm_cartesian_runtime.online_ik_valid = 0u;
+    arm_cartesian_runtime.sample_count = 0u;
+    memset(arm_cartesian_runtime.realtime_velocity_mm_s, 0,
+           sizeof(arm_cartesian_runtime.realtime_velocity_mm_s));
 }
 
 uint8_t ArmTrajectoryMotorHoldAllowed(void)
@@ -804,8 +633,6 @@ void ArmTrajectoryCancel(void)
     g_arm_motion_debug.trajectory_progress = 1.0f;
     g_arm_motion_debug.command_accepted = 1u;
     g_arm_motion_debug.fault_code = ARM_MOTION_FAULT_NONE;
-    arm_cartesian_runtime.pending_cartesian_valid = 0u;
-    arm_cartesian_runtime.pending_realtime_valid = 0u;
     arm_cartesian_runtime.realtime_active = 0u;
     arm_cartesian_runtime.realtime_timed_out = 0u;
     memset(arm_cartesian_runtime.realtime_velocity_mm_s, 0,
@@ -854,7 +681,6 @@ Arm_Command_Result_e ArmTrajectorySubmitRealtimeTarget(
     const Arm_Realtime_Cartesian_Target_s *target)
 {
     Arm_IK_Result_s result;
-    Arm_Cartesian_Command_s staged_command;
     float seed_q_deg[3];
     float speed_mm_s;
     float accel_mm_s2;
@@ -886,41 +712,7 @@ Arm_Command_Result_e ArmTrajectorySubmitRealtimeTarget(
     }
     if (!ArmJointPoseWithinSoftLimits(g_arm_state.q_feedback_deg) ||
         !ArmAutoPoseIsSafe(g_arm_state.q_feedback_deg)) {
-        Arm_Position_s staging_position;
-
-        /*
-         * 单边初始化结束时机械臂仍位于硬限位端，例如当前机构的小臂参考端
-         * 是q3=-131deg，而正常软限位从-126deg开始。实时上位机第一次发坐标
-         * 时不能直接因为起点不在软限位内拒绝，否则看起来会“初始化后不动”。
-         * 这里复用普通坐标命令的安全中间姿态流程：先从硬限位单调进入
-         * arm_safe_staging_q_deg，再执行目标点。后续实时流在电机进入安全区
-         * 后会自然接管。
-         */
-        if (ArmTrajectoryIsBusy()) {
-            return ARM_COMMAND_BUSY;
-        }
-        ArmForwardKinematics3DOF(arm_safe_staging_q_deg[0],
-                                 arm_safe_staging_q_deg[1],
-                                 arm_safe_staging_q_deg[2],
-                                 &staging_position);
-        if (ArmCartesianStartBootStaging(&staging_position) !=
-            ARM_MOTION_RESULT_OK) {
-            return ARM_COMMAND_PREFLIGHT_FAILED;
-        }
-        memset(&staged_command, 0, sizeof(staged_command));
-        staged_command.command_id = target->command_id;
-        staged_command.control_point = ARM_CONTROL_POINT_WRIST_CENTER;
-        staged_command.move_type = ARM_MOVE_LINEAR;
-        staged_command.target_mm = target->target_mm;
-        staged_command.max_speed_mm_s = speed_mm_s;
-        arm_cartesian_runtime.pending_cartesian = staged_command;
-        arm_cartesian_runtime.pending_cartesian_valid = 1u;
-        arm_cartesian_runtime.pending_realtime = *target;
-        arm_cartesian_runtime.pending_realtime.max_speed_mm_s = speed_mm_s;
-        arm_cartesian_runtime.pending_realtime.max_acceleration_mm_s2 =
-            accel_mm_s2;
-        arm_cartesian_runtime.pending_realtime_valid = 1u;
-        return ARM_COMMAND_OK;
+        return ARM_COMMAND_NOT_READY;
     }
 
     if (arm_cartesian_runtime.realtime_active) {
@@ -959,7 +751,6 @@ Arm_Command_Result_e ArmTrajectorySubmitRealtimeTarget(
         if (!ArmBeginJointMove(result.q_deg)) {
             return ARM_COMMAND_NOT_READY;
         }
-        arm_cartesian_runtime.pending_cartesian_valid = 0u;
         arm_cartesian_runtime.realtime_reference_position =
             g_arm_state.wrist_center;
         arm_cartesian_runtime.realtime_last_valid_position =
@@ -1268,32 +1059,21 @@ Arm_Motion_Result_e ArmMoveLinear(const Arm_Position_s *target,
 Arm_Motion_Result_e ArmTrajectoryStageCartesianCommand(
     const Arm_Cartesian_Command_s *command)
 {
-    Arm_Motion_Result_e result;
-    Arm_Position_s staging_position;
-
     if (command == NULL) {
         return ARM_MOTION_RESULT_INVALID;
     }
     if (ArmTrajectoryIsBusy()) {
         return ARM_MOTION_RESULT_BUSY;
     }
-    arm_cartesian_runtime.pending_realtime_valid = 0u;
-    result = ArmCartesianPreflightFromPose(arm_safe_staging_q_deg,
-                                           &command->target_mm);
-    if (result != ARM_MOTION_RESULT_OK) {
-        return result;
+    if (!ArmCartesianMotorsReady()) {
+        return ARM_MOTION_RESULT_NOT_READY;
     }
-    arm_cartesian_runtime.pending_cartesian = *command;
-    arm_cartesian_runtime.pending_cartesian_valid = 1u;
-    ArmForwardKinematics3DOF(arm_safe_staging_q_deg[0],
-                             arm_safe_staging_q_deg[1],
-                             arm_safe_staging_q_deg[2],
-                             &staging_position);
-    result = ArmCartesianStartBootStaging(&staging_position);
-    if (result != ARM_MOTION_RESULT_OK) {
-        arm_cartesian_runtime.pending_cartesian_valid = 0u;
+    if (command->move_type == ARM_MOVE_DIRECT) {
+        return ArmSetCartesianTarget(&command->target_mm, NULL);
     }
-    return result;
+    return ArmMoveLinear(&command->target_mm,
+        command->max_speed_mm_s > 0.0f ? command->max_speed_mm_s :
+                                         ARM_LINEAR_DEFAULT_SPEED_MM_S);
 }
 
 void ArmTrajectoryInit(void)
@@ -1368,11 +1148,7 @@ static void ArmCartesianRunPreparedTrajectory(uint32_t now_ms)
                arm_cartesian_runtime.sample_q_deg[last_index],
                sizeof(g_arm_motion_debug.trajectory_q_deg));
         g_arm_motion_debug.trajectory_progress = 1.0f;
-        if (arm_cartesian_runtime.pending_cartesian_valid) {
-            ArmCartesianSetState(ARM_MOTION_SETTLING, now_ms);
-        } else {
-            ArmCartesianSetState(ARM_MOTION_HOLDING, now_ms);
-        }
+        ArmCartesianSetState(ARM_MOTION_HOLDING, now_ms);
     }
 }
 
@@ -1533,20 +1309,10 @@ static void ArmCartesianRunRealtime(uint32_t now_ms, uint32_t task_delta_ms)
 
 void ArmTrajectoryTask(uint32_t now_ms)
 {
-    Arm_Motion_Result_e result;
-#if ARM_BOOT_MODE == ARM_BOOT_MODE_AUTO_TEST
-    uint8_t next_index;
-#endif
     uint32_t task_delta_ms =
         (uint32_t)(now_ms - arm_cartesian_runtime.last_task_tick);
 
     arm_cartesian_runtime.last_task_tick = now_ms;
-    if (g_arm_homing_abort) {
-        ArmAbortMotion(ARM_MOTION_FAULT_ABORT);
-        ArmCartesianUpdateDebug();
-        ArmCartesianUpdateControlDebug(now_ms, task_delta_ms);
-        return;
-    }
     if (!arm_cartesian_runtime.kinematics_self_test_passed) {
         ArmCartesianUpdateDebug();
         ArmCartesianUpdateControlDebug(now_ms, task_delta_ms);
@@ -1579,23 +1345,8 @@ void ArmTrajectoryTask(uint32_t now_ms)
 
     switch (g_arm_motion_debug.motion_state) {
         case ARM_MOTION_IDLE:
-#if ARM_BOOT_MODE == ARM_BOOT_MODE_AUTO_TEST
-            ArmCartesianSetState(ARM_MOTION_BOOT_DELAY, now_ms);
-#endif
-            break;
-
         case ARM_MOTION_BOOT_DELAY:
-            if ((uint32_t)(now_ms - arm_cartesian_runtime.state_start_tick) <
-                ARM_CARTESIAN_BOOT_DELAY_MS) {
-                break;
-            }
-            result = ArmCartesianStartBootStaging(
-                &arm_cartesian_test_point[0]);
-            if (result == ARM_MOTION_RESULT_OK) {
-                g_arm_motion_debug.sequence_index = 0u;
-            } else {
-                arm_cartesian_runtime.state_start_tick = now_ms;
-            }
+            ArmCartesianSetState(ARM_MOTION_HOLDING, now_ms);
             break;
 
         case ARM_MOTION_STAGING:
@@ -1604,87 +1355,7 @@ void ArmTrajectoryTask(uint32_t now_ms)
             break;
 
         case ARM_MOTION_SETTLING:
-        {
-            uint8_t staging_reached =
-                fabsf(ArmCartesianWrapTo180(
-                    arm_safe_staging_q_deg[0] -
-                    g_arm_state.q_feedback_deg[0])) <=
-                    ARM_STAGING_SETTLE_TOLERANCE_DEG &&
-                fabsf(arm_safe_staging_q_deg[1] -
-                      g_arm_state.q_feedback_deg[1]) <=
-                    ARM_STAGING_SETTLE_TOLERANCE_DEG &&
-                fabsf(arm_safe_staging_q_deg[2] -
-                      g_arm_state.q_feedback_deg[2]) <=
-                    ARM_STAGING_SETTLE_TOLERANCE_DEG;
-            uint8_t staging_timeout =
-                (uint32_t)(now_ms - arm_cartesian_runtime.state_start_tick) >=
-                ARM_STAGING_SETTLE_TIMEOUT_MS;
-
-            /*
-             * 正常到位后立即继续。若因机械死区未精确到中间点，超时后只有
-             * 当前反馈仍在软限位和保守区域内才允许继续；ArmMoveLinear会从
-             * 当前真实姿态重新预检整条路径，因此不会沿用理想中间点硬走。
-             */
-            if (staging_reached ||
-                (staging_timeout &&
-                 ArmJointPoseWithinSoftLimits(g_arm_state.q_feedback_deg) &&
-                 ArmAutoPoseIsSafe(g_arm_state.q_feedback_deg))) {
-                Arm_Cartesian_Command_s pending_command =
-                    arm_cartesian_runtime.pending_cartesian;
-                Arm_Realtime_Cartesian_Target_s pending_realtime =
-                    arm_cartesian_runtime.pending_realtime;
-                Arm_Motion_Result_e pending_result;
-
-                arm_cartesian_runtime.pending_cartesian_valid = 0u;
-                if (arm_cartesian_runtime.pending_realtime_valid) {
-                    arm_cartesian_runtime.pending_realtime_valid = 0u;
-                    if (ArmTrajectorySubmitRealtimeTarget(&pending_realtime) !=
-                        ARM_COMMAND_OK) {
-                        ArmCartesianSetState(ARM_MOTION_HOLDING, now_ms);
-                    }
-                    break;
-                } else if (pending_command.move_type == ARM_MOVE_DIRECT) {
-                    pending_result = ArmSetCartesianTarget(
-                        &pending_command.target_mm, NULL);
-                } else {
-                    pending_result = ArmMoveLinear(
-                        &pending_command.target_mm,
-                        pending_command.max_speed_mm_s);
-                }
-                if (pending_result != ARM_MOTION_RESULT_OK) {
-                    /* 拒绝新目标时保持安全中间姿态，绝不失能电机。 */
-                    ArmCartesianSetState(ARM_MOTION_HOLDING, now_ms);
-                }
-            } else if (staging_timeout) {
-                arm_cartesian_runtime.pending_cartesian_valid = 0u;
-                ArmCartesianRecordRejected(ARM_IK_COLLISION_RISK);
-                ArmCartesianSetState(ARM_MOTION_HOLDING, now_ms);
-            }
-            break;
-        }
-
         case ARM_MOTION_HOLDING:
-#if ARM_BOOT_MODE == ARM_BOOT_MODE_AUTO_TEST
-            if ((uint32_t)(now_ms - arm_cartesian_runtime.state_start_tick) <
-                ARM_LINEAR_HOLD_MS) {
-                break;
-            }
-            next_index = g_arm_motion_debug.sequence_index + 1u;
-            if (next_index >= 3u) {
-                if (ARM_AUTO_TEST_LOOP == 0u) {
-                    ArmCartesianSetState(ARM_MOTION_COMPLETE, now_ms);
-                    break;
-                }
-                next_index = 0u;
-            }
-            result = ArmMoveLinear(&arm_cartesian_test_point[next_index],
-                                   ARM_LINEAR_DEFAULT_SPEED_MM_S);
-            if (result == ARM_MOTION_RESULT_OK) {
-                g_arm_motion_debug.sequence_index = next_index;
-            } else {
-                arm_cartesian_runtime.state_start_tick = now_ms;
-            }
-#endif
             break;
 
         case ARM_MOTION_ABORTED:

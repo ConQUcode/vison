@@ -6,7 +6,7 @@ engineer\arm.o: ..\APPLICATION\arm\arm_internal.h
 engineer\arm.o: ..\APPLICATION\arm\arm_kinematics.h
 engineer\arm.o: ..\APPLICATION\arm\arm_trajectory.h
 engineer\arm.o: ..\APPLICATION\arm\arm_wrist.h
-engineer\arm.o: ../MODULE/motor/DJImotor/DJI_motor.h
+engineer\arm.o: ../MODULE/motor/DMmotor/dmmotor.h
 engineer\arm.o: ../BSP/CAN/bsp_can.h
 engineer\arm.o: ../Core/Inc/can.h
 engineer\arm.o: ../Core/Inc/main.h
@@ -45,14 +45,14 @@ engineer\arm.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 engineer\arm.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd.h
 engineer\arm.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_usb.h
 engineer\arm.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd_ex.h
-engineer\arm.o: ../MODULE/algorithm/controller.h
+engineer\arm.o: ../MODULE/daemon/daemon.h
 engineer\arm.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
+engineer\arm.o: ../MODULE/motor/motor_def.h
+engineer\arm.o: ../MODULE/algorithm/controller.h
 engineer\arm.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdlib.h
 engineer\arm.o: ../BSP/DWT/bsp_dwt.h
 engineer\arm.o: ../Middlewares/ST/ARM/DSP/Inc/arm_math.h
 engineer\arm.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\math.h
 engineer\arm.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\float.h
 engineer\arm.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\limits.h
-engineer\arm.o: ../MODULE/motor/motor_def.h
 engineer\arm.o: ../MODULE/algorithm/ramp_contorller.h
-engineer\arm.o: ../MODULE/daemon/daemon.h

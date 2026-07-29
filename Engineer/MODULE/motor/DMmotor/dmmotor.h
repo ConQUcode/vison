@@ -1,102 +1,115 @@
 #ifndef DMMOTOR_H
 #define DMMOTOR_H
-#include <stdint.h>
-#include "bsp_can.h"
-#include "controller.h"
-#include "ramp_contorller.h"
-#include "motor_def.h"
-#include "daemon.h"
 
-#define DM_MOTOR_CNT 5
+#include <stdint.h>
+
+#include "bsp_can.h"
+#include "daemon.h"
+#include "motor_def.h"
+
+#define DM_MOTOR_CNT                   5u
+#define DM_FEEDBACK_TIMEOUT_MS       100u
+#define DM_CONTROL_PERIOD_MS           2u
+#define DM_MAX_CONSECUTIVE_TX_FAIL     5u
+#define DM_STATE_DISABLED              0u
+#define DM_STATE_MOTOR_MODE            1u
 
 #define DM_P_MIN     (-12.5f)
-#define DM_P_MAX     12.5f
+#define DM_P_MAX       12.5f
 #define DM_V_MIN     (-30.0f)
-#define DM_V_MAX     30.0f
+#define DM_V_MAX       30.0f
 #define DM_T_MIN     (-10.0f)
-#define DM_T_MAX     10.0f
-#define DM_KP_MIN    0.0f
-#define DM_KP_MAX    500.0f
-#define DM_KD_MIN    0.0f
-#define DM_KD_MAX    5.0f
-
-typedef struct
-{
-    uint8_t id;
-    uint8_t state;
-    float velocity;
-    float last_position;
-    float position;
-    float angle_single_round;
-    float total_angle;
-    float half_angle;
-    float torque;
-    float T_Mos;
-    float T_Rotor;
-    int32_t total_round;
-} DM_Motor_Measure_s;
-
-typedef struct
-{
-    uint16_t position_mit;    // MIT模式下的位置值
-    uint16_t velocity_mit;    // MIT模式下的速度值
-    uint16_t position_torque; // MIT力控模式下的位置值
-    uint16_t velocity_torque; // MIT力控模式下的速度值
-    float position_sp;        // 位置速度模式下的位置值
-    float velocity_sp;        // 位置速度模式下的速度值
-    uint16_t torque_des;
-    uint16_t Kp;
-    uint16_t Kd;
-} DMMotor_Send_s;
-
-typedef struct
-{
-    DM_Motor_Measure_s measure;
-    Motor_Control_Setting_s motor_settings;
-    Motor_Controller_s motor_controller; // 电机设置
-    float pid_out;
-
-    PID_Instance torque_PID;
-    PID_Instance speed_PID;
-    PID_Instance angle_PID;
-    float *other_angle_feedback_ptr;
-    float *other_speed_feedback_ptr;
-    float *speed_feedforward_ptr;
-    float *current_feedforward_ptr;
-    float pid_ref;
-    float speed_ref;   // 位置速度模式下的速度参考
-    /* MIT模式下PID */ // T_kef = mit_kp * (p_des - θ_m) + mit_kd * (v_des - dθ) + t_ff
-    float mit_kp;
-    float mit_kd; // ! kd = 0不能在kd = 0时，否则会出现震荡甚至失控 ！！！
-    RampController_Instance angle_ramp;
-    Motor_Controll_Type_e control_type;
-    Motor_Working_Type_e stop_flag;
-    CAN_Instance *motor_can_instace;
-    Daemon_Instance *motor_daemon;
-    uint32_t lost_cnt;
-} DM_MotorInstance; // 达妙电机实例
+#define DM_T_MAX       10.0f
 
 typedef enum {
-    DM_CMD_MOTOR_MODE    = 0xfc, // 使能,会响应指令
-    DM_CMD_RESET_MODE    = 0xfd, // 停止
-    DM_CMD_ZERO_POSITION = 0xfe, // 将当前的位置设置为编码器零位
-    DM_CMD_CLEAR_ERROR   = 0xfb  // 清除电机过热错误
+    DM_INIT_OK = 0,
+    DM_INIT_ERROR_ARGUMENT,
+    DM_INIT_ERROR_CAPACITY,
+    DM_INIT_ERROR_ID,
+    DM_INIT_ERROR_MODE,
+    DM_INIT_ERROR_DUPLICATE,
+    DM_INIT_ERROR_ALLOC,
+    DM_INIT_ERROR_CAN_REGISTER
+} DM_Init_Error_e;
+
+typedef enum {
+    DM_CMD_MOTOR_MODE    = 0xfcu,
+    DM_CMD_RESET_MODE    = 0xfdu,
+    DM_CMD_ZERO_POSITION = 0xfeu,
+    DM_CMD_CLEAR_ERROR   = 0xfbu
 } DMMotor_Mode_e;
 
-DM_MotorInstance *DMMotorInit(Motor_Init_Config_s *config);
+typedef struct {
+    CAN_HandleTypeDef *can_handle;
+    uint16_t motor_id;
+    uint16_t master_id;
+    Motor_Type_e motor_type;
+    Motor_Controll_Type_e control_type;
+    Motor_Reverse_Flag_e direction;
+} DM_Motor_Init_Config_s;
 
-void DMMotorSetRef(DM_MotorInstance *motor, float ref);
-void DMMotorSetSpeedRef(DM_MotorInstance *motor, float ref);
+typedef struct {
+    uint8_t motor_id;
+    uint8_t state;
+    float position_rad;
+    float velocity_rad_s;
+    float torque_nm;
+    float mos_temperature_c;
+    float rotor_temperature_c;
+    uint8_t feedback_valid;
+    uint32_t rx_count;
+    uint32_t invalid_rx_count;
+    uint32_t last_feedback_tick;
+} DM_Motor_Measure_s;
 
-void DMMotorOuterLoop(DM_MotorInstance *motor, Closeloop_Type_e closeloop_type);
+typedef struct {
+    volatile DM_Motor_Measure_s measure;
+    CAN_Instance *motor_can_instance;
+    Daemon_Instance *motor_daemon;
 
-void DMMotorEnable(DM_MotorInstance *motor);
+    uint16_t motor_id;
+    uint16_t master_id;
+    uint16_t command_id;
+    Motor_Type_e motor_type;
+    Motor_Controll_Type_e control_type;
+    Motor_Reverse_Flag_e direction;
 
-void DMMotorStop(DM_MotorInstance *motor);
-void DMMotorCaliEncoder(DM_MotorInstance *motor);
-void DMMotorClearErr(DM_MotorInstance *motor);
-void DMMotorControlInit(void);
-void DMMotorRampEnable(DM_MotorInstance *motor);
-void DMMotorRampDisable(DM_MotorInstance *motor);
-uint8_t DMMotorPositionCheck(DM_MotorInstance *motor, float ref);
-#endif // !DMMOTOR
+    volatile float position_ref_rad;
+    volatile float velocity_limit_rad_s;
+    volatile uint8_t target_synced;
+    volatile uint8_t control_enabled;
+    volatile uint8_t mode_request_pending;
+    volatile uint8_t mode_entered;
+    volatile uint8_t fault_latched;
+    volatile uint8_t offline_latched;
+    volatile uint8_t tx_fault_latched;
+
+    volatile uint32_t tx_count;
+    volatile uint32_t tx_fail_count;
+    volatile uint32_t consecutive_tx_fail;
+    volatile uint32_t mode_command_count;
+    volatile uint32_t mode_request_rx_count;
+    volatile uint16_t last_mode_tx_id;
+} DM_MotorInstance;
+
+extern volatile DM_Init_Error_e g_dm_motor_last_init_error;
+
+DM_MotorInstance *DMMotorInit(const DM_Motor_Init_Config_s *config);
+void DMMotorControl(uint32_t now_ms);
+
+uint8_t DMMotorSetPositionSpeed(DM_MotorInstance *motor,
+                                float position_rad,
+                                float velocity_limit_rad_s);
+uint8_t DMMotorHoldCurrentPosition(DM_MotorInstance *motor);
+uint8_t DMMotorEnterMode(DM_MotorInstance *motor);
+uint8_t DMMotorEnterModeAndHoldOpenLoop(DM_MotorInstance *motor);
+uint8_t DMMotorDisable(DM_MotorInstance *motor);
+uint8_t DMMotorClearFault(DM_MotorInstance *motor);
+void DMMotorResetSoftwareFault(DM_MotorInstance *motor);
+
+uint8_t DMMotorFeedbackValid(const DM_MotorInstance *motor);
+uint8_t DMMotorIsOnline(const DM_MotorInstance *motor, uint32_t now_ms);
+uint8_t DMMotorModeConfirmed(const DM_MotorInstance *motor);
+uint8_t DMMotorHasActiveStateFault(const DM_MotorInstance *motor);
+
+#endif

@@ -11,9 +11,12 @@
 
 /*
  * 三自由度运动学说明：
- * q1为底座偏航，q2为大臂绝对俯仰，q3为小臂相对大臂角。
+ * q1为底座偏航，q2为大臂绝对俯仰。
+ * q3采用机械定义：q3 = -两杆物理内夹角。
+ * 两杆物理夹角90deg时q3=-90deg，两杆完全伸直180deg时q3=-180deg。
+ * 标准二连杆内部有向转角q3_math = -180deg - q3。
  * 当前输出点是腕部舵机安装轴心，不包含q4和末端工具长度。
- * 肩部轴心相对GM6020旋转中心存在固定(-29,-7.6,34)mm偏移。
+ * 底座、大臂、小臂转轴无Y向偏移；肩轴高度为250mm。
  */
 
 static float ArmKinematicsClamp(float value, float min_value, float max_value)
@@ -43,13 +46,21 @@ static float ArmKinematicsAngleDifference(float target_deg, float current_deg)
     return ArmKinematicsWrapTo180(target_deg - current_deg);
 }
 
+static float ArmElbowMechanicalToMathDeg(float q3_mech_deg)
+{
+    return -180.0f - q3_mech_deg;
+}
+
+static float ArmElbowMathToMechanicalDeg(float q3_math_deg)
+{
+    return -180.0f - q3_math_deg;
+}
+
 static float ArmKinematicsCandidateScore(const float q_deg[3],
                                           const float seed_q_deg[3])
 {
-    float shoulder_span = g_arm_calibration.shoulder_soft_max_deg -
-                          g_arm_calibration.shoulder_soft_min_deg;
-    float elbow_span = g_arm_calibration.elbow_soft_max_deg -
-                       g_arm_calibration.elbow_soft_min_deg;
+    float shoulder_span = ARM_Q2_SOFT_MAX_DEG - ARM_Q2_SOFT_MIN_DEG;
+    float elbow_span = ARM_Q3_SOFT_MAX_DEG - ARM_Q3_SOFT_MIN_DEG;
     float dq1;
     float dq2;
     float dq3;
@@ -69,16 +80,12 @@ uint8_t ArmJointPoseWithinSoftLimits(const float q_deg[3])
         !isfinite(q_deg[2])) {
         return 0u;
     }
-    return q_deg[0] >= -180.0f - ARM_KIN_LIMIT_EPSILON_DEG &&
-           q_deg[0] <= 180.0f + ARM_KIN_LIMIT_EPSILON_DEG &&
-           q_deg[1] >= g_arm_calibration.shoulder_soft_min_deg -
-                           ARM_KIN_LIMIT_EPSILON_DEG &&
-           q_deg[1] <= g_arm_calibration.shoulder_soft_max_deg +
-                           ARM_KIN_LIMIT_EPSILON_DEG &&
-           q_deg[2] >= g_arm_calibration.elbow_soft_min_deg -
-                           ARM_KIN_LIMIT_EPSILON_DEG &&
-           q_deg[2] <= g_arm_calibration.elbow_soft_max_deg +
-                           ARM_KIN_LIMIT_EPSILON_DEG;
+    return q_deg[0] >= ARM_Q1_SOFT_MIN_DEG - ARM_LIMIT_TOLERANCE_DEG &&
+           q_deg[0] <= ARM_Q1_SOFT_MAX_DEG + ARM_LIMIT_TOLERANCE_DEG &&
+           q_deg[1] >= ARM_Q2_SOFT_MIN_DEG - ARM_LIMIT_TOLERANCE_DEG &&
+           q_deg[1] <= ARM_Q2_SOFT_MAX_DEG + ARM_LIMIT_TOLERANCE_DEG &&
+           q_deg[2] >= ARM_Q3_SOFT_MIN_DEG - ARM_LIMIT_TOLERANCE_DEG &&
+           q_deg[2] <= ARM_Q3_SOFT_MAX_DEG + ARM_LIMIT_TOLERANCE_DEG;
 }
 
 uint8_t ArmAutoPoseIsSafe(const float q_deg[3])
@@ -111,7 +118,8 @@ void ArmForwardKinematics3DOF(float q1_deg,
     }
     q1 = q1_deg * ARM_KIN_DEG_TO_RAD;
     q2 = q2_deg * ARM_KIN_DEG_TO_RAD;
-    q23 = (q2_deg + q3_deg) * ARM_KIN_DEG_TO_RAD;
+    q23 = (q2_deg + ArmElbowMechanicalToMathDeg(q3_deg)) *
+        ARM_KIN_DEG_TO_RAD;
     /* 先在机械臂竖直平面内计算肩部到腕部的径向长度。 */
     link_radial = ARM_LINK_1_MM * cosf(q2) +
                   ARM_LINK_2_MM * cosf(q23);
@@ -131,16 +139,11 @@ uint8_t ArmKinematicsSelfTest(float *error_mm)
     Arm_Position_s expected;
     float error;
 
-    ArmForwardKinematics3DOF(0.0f, 180.0f, -180.0f, &position);
-    /*
-     * 参考姿态q=[0,180,-180]时，大臂沿-X、末端小臂沿+X。
-     * 期望坐标必须由当前几何参数推导，不能再把旧机构的x=0硬编码进自检，
-     * 否则修改肩部固定偏移后会被误判为运动学故障。
-     */
-    expected.x_mm = ARM_SHOULDER_OFFSET_FORWARD_MM - ARM_LINK_1_MM +
-                    ARM_LINK_2_MM;
-    expected.y_mm = ARM_SHOULDER_OFFSET_LEFT_MM;
-    expected.z_mm = ARM_BASE_HEIGHT_MM;
+    ArmForwardKinematics3DOF(ARM_SAFE_Q1_DEG, ARM_SAFE_Q2_DEG,
+                             ARM_SAFE_Q3_DEG, &position);
+    expected.x_mm = ARM_LINK_2_MM;
+    expected.y_mm = 0.0f;
+    expected.z_mm = ARM_BASE_HEIGHT_MM + ARM_LINK_1_MM;
     error = sqrtf(
         (position.x_mm - expected.x_mm) *
             (position.x_mm - expected.x_mm) +
@@ -178,15 +181,6 @@ Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
         result->status = ARM_IK_INVALID_ARGUMENT;
         return result->status;
     }
-    if (!g_arm_calibration.joint_calibrated) {
-        result->status = ARM_IK_JOINT_NOT_CALIBRATED;
-        return result->status;
-    }
-    if (!g_arm_calibration.base_calibrated) {
-        result->status = ARM_IK_BASE_NOT_CALIBRATED;
-        return result->status;
-    }
-
     rho = sqrtf(target->x_mm * target->x_mm +
                 target->y_mm * target->y_mm);
     z_planar = target->z_mm - ARM_BASE_HEIGHT_MM;
@@ -249,6 +243,7 @@ Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
             float q2_rad;
             float candidate[3];
             float score;
+            float q3_math_deg;
 
             if (elbow_index != 0u) {
                 q3_rad = -q3_rad;
@@ -257,9 +252,10 @@ Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
                      atan2f(ARM_LINK_2_MM * sinf(q3_rad),
                             ARM_LINK_1_MM +
                             ARM_LINK_2_MM * cosf(q3_rad));
+            q3_math_deg = q3_rad * ARM_KIN_RAD_TO_DEG;
             candidate[0] = q1_deg;
             candidate[1] = q2_rad * ARM_KIN_RAD_TO_DEG;
-            candidate[2] = q3_rad * ARM_KIN_RAD_TO_DEG;
+            candidate[2] = ArmElbowMathToMechanicalDeg(q3_math_deg);
             if (!ArmJointPoseWithinSoftLimits(candidate)) {
                 continue;
             }
