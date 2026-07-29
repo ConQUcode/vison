@@ -9,6 +9,13 @@
 #define ARM_KIN_EPSILON               0.0001f
 #define ARM_KIN_LIMIT_EPSILON_DEG     0.001f
 
+/*
+ * 三自由度运动学说明：
+ * q1为底座偏航，q2为大臂绝对俯仰，q3为小臂相对大臂角。
+ * 当前输出点是腕部舵机安装轴心，不包含q4和末端工具长度。
+ * 肩部轴心相对GM6020旋转中心存在固定(-29,-7.6,34)mm偏移。
+ */
+
 static float ArmKinematicsClamp(float value, float min_value, float max_value)
 {
     if (value < min_value) {
@@ -105,10 +112,12 @@ void ArmForwardKinematics3DOF(float q1_deg,
     q1 = q1_deg * ARM_KIN_DEG_TO_RAD;
     q2 = q2_deg * ARM_KIN_DEG_TO_RAD;
     q23 = (q2_deg + q3_deg) * ARM_KIN_DEG_TO_RAD;
+    /* 先在机械臂竖直平面内计算肩部到腕部的径向长度。 */
     link_radial = ARM_LINK_1_MM * cosf(q2) +
                   ARM_LINK_2_MM * cosf(q23);
     local_x = ARM_SHOULDER_OFFSET_FORWARD_MM + link_radial;
     local_y = ARM_SHOULDER_OFFSET_LEFT_MM;
+    /* 将肩部固定偏移和连杆径向位置随q1旋转到小车坐标系。 */
     position->x_mm = local_x * cosf(q1) - local_y * sinf(q1);
     position->y_mm = local_x * sinf(q1) + local_y * cosf(q1);
     position->z_mm = ARM_BASE_HEIGHT_MM +
@@ -186,6 +195,11 @@ Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
         atan2f(target->y_mm, target->x_mm) :
         seed_q_deg[0] * ARM_KIN_DEG_TO_RAD;
 
+    /*
+     * 同一空间点可能对应局部径向正/负两个分支，每个分支又有肘上/肘下
+     * 两个q3解，因此最多得到4组候选。候选必须通过软限位和自动区域，
+     * 最后选择与seed姿态距离最近的连续解。
+     */
     for (uint8_t radial_index = 0u; radial_index < 2u; ++radial_index) {
         float local_x;
         float signed_radius;

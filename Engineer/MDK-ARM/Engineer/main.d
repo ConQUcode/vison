@@ -77,3 +77,4 @@ engineer\main.o: ../MODULE/remote/remote.h
 engineer\main.o: ../APPLICATION/nac.h
 engineer\main.o: ../BSP/USART/bsp_usart.h
 engineer\main.o: ../APPLICATION/Test.h
+engineer\main.o: ../APPLICATION/arm/arm.h

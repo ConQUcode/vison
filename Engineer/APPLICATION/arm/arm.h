@@ -3,6 +3,11 @@
 
 #include "stdint.h"
 
+/*
+ * 机械臂应用层公共接口。
+ * 上位机和比赛逻辑只应提交关节/笛卡尔命令，不应直接操作 DJI 电机。
+ */
+
 typedef enum {
     ARM_JOINT_BASE_YAW = 0,
     ARM_JOINT_SHOULDER,
@@ -15,7 +20,8 @@ typedef enum {
     ARM_MODE_SAFE = 0,
     ARM_MODE_CALIBRATION,
     ARM_MODE_READY,
-    ARM_MODE_SOFT_LIMIT
+    ARM_MODE_SOFT_LIMIT,
+    ARM_MODE_TEACH_POINT
 } Arm_Mode_e;
 
 typedef enum {
@@ -127,6 +133,26 @@ typedef enum {
     ARM_MOTION_RESULT_PREFLIGHT_FAILED
 } Arm_Motion_Result_e;
 
+typedef enum {
+    ARM_CONTROL_POINT_WRIST_CENTER = 0,
+    ARM_CONTROL_POINT_TOOL_TIP
+} Arm_Control_Point_e;
+
+typedef enum {
+    ARM_MOVE_DIRECT = 0,
+    ARM_MOVE_LINEAR
+} Arm_Move_Type_e;
+
+typedef enum {
+    ARM_COMMAND_OK = 0,
+    ARM_COMMAND_BUSY,
+    ARM_COMMAND_NOT_READY,
+    ARM_COMMAND_INVALID,
+    ARM_COMMAND_UNSUPPORTED,
+    ARM_COMMAND_MODE_DENIED,
+    ARM_COMMAND_PREFLIGHT_FAILED
+} Arm_Command_Result_e;
+
 typedef struct {
     float x_mm;
     float y_mm;
@@ -140,6 +166,44 @@ typedef struct {
     Arm_Position_s fk_position;
     float position_error_mm;
 } Arm_IK_Result_s;
+
+typedef struct {
+    /* 由上位机或比赛逻辑递增填写，便于日志对应；固件不依赖其连续性。 */
+    uint32_t command_id;
+    /* 当前仅支持腕部舵机安装轴心，工具末端模型启用前不得填TOOL_TIP。 */
+    Arm_Control_Point_e control_point;
+    /* DIRECT直接下发合法IK角；LINEAR先预检整条空间直线再执行。 */
+    Arm_Move_Type_e move_type;
+    Arm_Position_s target_mm;
+    /* 0使用默认200mm/s；有效范围为(0,200]mm/s。 */
+    float max_speed_mm_s;
+    /* q4尚未接入，本轮必须为0，否则返回ARM_COMMAND_UNSUPPORTED。 */
+    uint8_t tool_pitch_valid;
+    float tool_pitch_deg;
+} Arm_Cartesian_Command_s;
+
+typedef struct {
+    uint32_t command_id;
+    Arm_Move_Type_e move_type;
+    float q_deg[3];
+} Arm_Joint_Command_s;
+
+typedef struct {
+    uint8_t ready;
+    Arm_Control_Point_e point_type;
+    uint8_t kinematics_valid;
+    uint8_t motor_online[3];
+    uint8_t motor_enabled[3];
+    float q_deg[ARM_JOINT_COUNT];
+    float base_raw_deg;
+    float motor_total_angle_deg[3];
+    Arm_Position_s wrist_center_mm;
+    float small_link_pitch_deg;
+    uint16_t wrist_pwm_us;
+    uint8_t wrist_configured;
+    uint8_t tool_model_valid;
+    uint32_t update_count;
+} Arm_Teach_Point_s;
 
 typedef struct {
     float shoulder_hard_min_deg;
@@ -312,12 +376,24 @@ extern Arm_Calibration_s g_arm_calibration;
 extern Arm_Soft_Limit_Debug_s g_arm_soft_limit_debug;
 extern Arm_Kinematics_Debug_s g_arm_kinematics_debug;
 extern Arm_Motion_Debug_s g_arm_motion_debug;
+/* 打点模式只需在Watch中展开此变量，其余结构用于内部维护诊断。 */
+extern Arm_Teach_Point_s g_arm_teach_point;
 extern volatile uint8_t g_arm_homing_abort;
 
 void ArmInit(void);
 void ArmTask(void);
 void ArmStop(void);
 const Arm_State_s *ArmGetState(void);
+const Arm_Motion_Debug_s *ArmGetMotionState(void);
+const Arm_Teach_Point_s *ArmGetTeachPoint(void);
+Arm_Command_Result_e ArmSubmitCartesianCommand(
+    const Arm_Cartesian_Command_s *command);
+Arm_Command_Result_e ArmSubmitJointCommand(
+    const Arm_Joint_Command_s *command);
+/* 普通取消：以当前反馈姿态继续角度闭环保持，不失能、不清标定。 */
+void ArmCancelMotion(void);
+/* 唯一会在正常运行期间主动失能三台电机的应用层接口。 */
+void ArmEmergencyStop(void);
 
 /* Normal boot homing: find only the two measured reference stops. */
 void ArmHomingStart(void);
@@ -325,15 +401,6 @@ void ArmHomingStart(void);
 void ArmCalibrationStart(void);
 void ArmCalibrationAbort(void);
 uint8_t ArmBaseTeachFront(void);
-uint8_t ArmSetJointTargetDeg(float q1_deg, float q2_deg, float q3_deg);
-uint8_t ArmBeginJointMove(const float target_q_deg[3]);
-uint8_t ArmUpdateJointReference(const float reference_q_deg[3]);
-void ArmMotionStopMotors(void);
-void ArmAbortMotion(Arm_Motion_Fault_e reason);
-Arm_Motion_Result_e ArmSetCartesianTarget(const Arm_Position_s *target,
-                                          Arm_IK_Result_s *result);
-Arm_Motion_Result_e ArmMoveLinear(const Arm_Position_s *target,
-                                  float max_speed_mm_s);
 
 void ArmForwardKinematics3DOF(float q1_deg,
                               float q2_deg,
@@ -342,9 +409,5 @@ void ArmForwardKinematics3DOF(float q1_deg,
 Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
                                          const float current_q_deg[3],
                                          Arm_IK_Result_s *result);
-
-void ArmWristPWMInit(void);
-void ArmWristPWMSetUs(uint16_t pulse_us);
-void ArmWristPWMSetAngle(float angle_deg);
 
 #endif

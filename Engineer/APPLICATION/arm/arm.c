@@ -1,83 +1,21 @@
 #include "arm.h"
+#include "arm_config.h"
+#include "arm_internal.h"
 #include "arm_kinematics.h"
 #include "arm_trajectory.h"
+#include "arm_wrist.h"
 
 #include "DJI_motor.h"
 #include "can.h"
 #include "daemon.h"
 #include "math.h"
 #include "string.h"
-#include "tim.h"
 
 #define ARM_PI                         3.14159265358979323846f
 #define ARM_DEG_TO_RAD                 (ARM_PI / 180.0f)
 #define ARM_RAD_TO_DEG                 (180.0f / ARM_PI)
-#define ARM_WRIST_PWM_MIN_US           1000u
-#define ARM_WRIST_PWM_MID_US           1500u
-#define ARM_WRIST_PWM_MAX_US           2000u
 #define ARM_FLOAT_EPSILON              0.0001f
 #define ARM_RANGE_EPSILON_DEG          0.5f
-#define ARM_AUTO_START_ONLINE_MS         20u
-#define ARM_STOP_SETTLE_MS             3000u
-#define ARM_SHOULDER_MIN_DIRECTION      1.0f
-#define ARM_ELBOW_MIN_DIRECTION         1.0f
-#define ARM_BASE_FRONT_RAW_DEG           190.369736f
-#define ARM_BASE_DIRECTION               1.0f
-#define ARM_BASE_ZERO_CONFIGURED         1u
-
-/* Joint commands and IK must stay 5 degrees inside the measured hard stops.
- * Normal boot homing stops at the reference hard stops and does not
- * automatically move either joint to these software limits. */
-#define ARM_SOFT_LIMIT_ENABLE             1u
-#define ARM_SOFT_LIMIT_MARGIN_DEG          5.0f
-#define ARM_SOFT_LIMIT_TARGET_SPEED_DPS         20.0f
-#define ARM_BASE_INIT_CURRENT              10000.0f
-#define ARM_BASE_INIT_TARGET_TOLERANCE_DEG     1.0f
-#define ARM_SOFT_LIMIT_OVERCURRENT_MS      200u
-#define ARM_SOFT_LIMIT_SETTLE_MS           300u
-#define ARM_SOFT_LIMIT_TIMEOUT_MS        45000u
-#define ARM_MOTION_TEST_ENABLE                0u
-#define ARM_MOTION_TEST_POSE_COUNT            3u
-#define ARM_MOTION_TEST_HOLD_MS            5000u
-#define ARM_MOTION_TEST_SETTLE_MS           300u
-#define ARM_MOTION_TEST_POSITION_TOL_DEG     2.0f
-#define ARM_MOTION_TEST_BASE_SPEED_TOL_DPS  10.0f
-#define ARM_MOTION_TEST_JOINT_SPEED_TOL_DPS  5.0f
-
-/*
- * Model angles at the two mechanical stops. The reference stop is reached by
- * the normal one-sided power-on homing sequence. Motor spans are the mean of
- * three unloaded full scans with a 3 s settle at both ends.
- */
-#define ARM_SHOULDER_REFERENCE_DEG      180.0f
-#define ARM_SHOULDER_OPPOSITE_DEG         0.0f
-#define ARM_ELBOW_REFERENCE_DEG        (-180.0f)
-#define ARM_ELBOW_OPPOSITE_DEG          (-85.0f)
-#define ARM_SHOULDER_MEASURED_SPAN_DEG  (-3461.26563f)
-#define ARM_ELBOW_MEASURED_SPAN_DEG     (-3548.73088f)
-
-/*
- * 0: normal boot, find only the two reference stops.
- * 1: maintenance boot, scan both stops and refresh mapping values in RAM.
- * Full scanning remains a maintenance tool. Normal firmware performs only the
- * M2006 then M3508 reference-stop homing sequence.
- */
-#define ARM_BOOT_FULL_SCAN              0u
-
-/*
- * Temporary M3508 gearbox test. Keep the implementation for later maintenance,
- * but leave its runtime switch disabled during normal one-sided homing.
- * When enabled, normal homing is bypassed, GM6020/M2006 remain disabled, and
- * M3508 rotates 19 * 90 = 1710 motor degrees.
- */
-#define ARM_3508_RATIO_TEST_RATIO        19.0f
-#define ARM_3508_RATIO_TEST_OUTPUT_DEG   90.0f
-#define ARM_3508_RATIO_TEST_DIRECTION    1.0f
-#define ARM_3508_RATIO_TEST_SPEED_DPS    342.0f
-#define ARM_3508_RATIO_TEST_SETTLE_MS    2000u
-#define ARM_3508_RATIO_TEST_TIMEOUT_MS   30000u
-#define ARM_3508_RATIO_TEST_STALL_MS     200u
-#define ARM_3508_RATIO_TEST_OVERRUN_DEG  90.0f
 
 typedef enum {
     ARM_CAL_MOTOR_SHOULDER = 0,
@@ -109,18 +47,7 @@ static uint32_t arm_soft_limit_overcurrent_tick;
 static float arm_joint_hold_target_motor_deg[2];
 static float arm_base_last_target_error_deg;
 static uint8_t arm_base_target_error_valid;
-static uint8_t arm_small_angle_test_active;
-static uint8_t arm_motion_test_pose_index;
-static uint8_t arm_motion_test_target_reached;
-static uint32_t arm_motion_test_hold_start_tick;
-/* Disabled: normal firmware uses the one-sided homing sequence. */
-static volatile uint8_t arm_3508_ratio_test_enable = 0u;
-
-static const float arm_motion_test_pose_deg[ARM_MOTION_TEST_POSE_COUNT][3] = {
-    { 30.0f, 160.0f, -110.6f },
-    {-30.0f, 145.0f,  -95.6f },
-    {  0.0f, 170.0f, -120.6f },
-};
+static uint8_t arm_teach_mode_entered;
 
 static void ArmCalibrationFail(Arm_Calibration_State_e error_state);
 static void ArmSoftLimitEnterState(Arm_Soft_Limit_State_e state,
@@ -134,30 +61,42 @@ static float ArmSoftLimitJointToMotor(float joint_deg,
                                       float scale);
 static float ArmNearestBaseTotalTarget(float target_raw_deg);
 static float ArmWrapTo360(float angle_deg);
-static void ArmMotionTestStart(uint32_t now);
+static void ArmUpdateTeachPoint(void);
 
 Arm_State_s g_arm_state;
 Arm_Calibration_s g_arm_calibration;
 Arm_Soft_Limit_Debug_s g_arm_soft_limit_debug;
 Arm_Kinematics_Debug_s g_arm_kinematics_debug;
+Arm_Teach_Point_s g_arm_teach_point;
 
-/* Bench-tuned calibration constants. Change these in source when required. */
-static const float g_arm_shoulder_homing_speed_dps = 450.0f;
-static const float g_arm_shoulder_stall_current = 1200.0f;
-static const float g_arm_elbow_homing_speed_dps = 800.0f;
-static const float g_arm_elbow_stall_current = 1400.0f;
-static const float g_arm_homing_stall_speed_dps = 20.0f;
-static const uint32_t g_arm_homing_spinup_ms = 500u;
-static const uint32_t g_arm_homing_stall_confirm_ms = 8u;
-static const float g_arm_shoulder_motor_to_joint_ratio = 19.22925f;
-static const float g_arm_elbow_motor_to_joint_ratio = 37.35506f;
+/* 下列别名只为缩短标定状态机代码，实际调参统一在 arm_config.h。 */
+static const float g_arm_shoulder_homing_speed_dps =
+    ARM_SHOULDER_HOMING_SPEED_DPS;
+static const float g_arm_shoulder_stall_current =
+    ARM_SHOULDER_STALL_CURRENT;
+static const float g_arm_elbow_homing_speed_dps =
+    ARM_ELBOW_HOMING_SPEED_DPS;
+static const float g_arm_elbow_stall_current = ARM_ELBOW_STALL_CURRENT;
+static const float g_arm_homing_stall_speed_dps =
+    ARM_HOMING_STALL_SPEED_DPS;
+static const uint32_t g_arm_homing_spinup_ms = ARM_HOMING_SPINUP_MS;
+static const uint32_t g_arm_homing_stall_confirm_ms =
+    ARM_HOMING_STALL_CONFIRM_MS;
+static const float g_arm_shoulder_motor_to_joint_ratio =
+    ARM_SHOULDER_EFFECTIVE_RATIO;
+static const float g_arm_elbow_motor_to_joint_ratio =
+    ARM_ELBOW_EFFECTIVE_RATIO;
 static const float g_arm_soft_limit_margin_deg = ARM_SOFT_LIMIT_MARGIN_DEG;
-static const float g_arm_release_joint_deg = 1.0f;
-static const uint32_t g_arm_release_min_ms = 500u;
-static const uint32_t g_arm_shoulder_stage_timeout_ms = 45000u;
-static const uint32_t g_arm_elbow_stage_timeout_ms = 80000u;
-static const float g_arm_shoulder_max_joint_travel_deg = 360.0f;
-static const float g_arm_elbow_max_joint_travel_deg = 360.0f;
+static const float g_arm_release_joint_deg = ARM_RELEASE_JOINT_DEG;
+static const uint32_t g_arm_release_min_ms = ARM_RELEASE_MIN_MS;
+static const uint32_t g_arm_shoulder_stage_timeout_ms =
+    ARM_SHOULDER_STAGE_TIMEOUT_MS;
+static const uint32_t g_arm_elbow_stage_timeout_ms =
+    ARM_ELBOW_STAGE_TIMEOUT_MS;
+static const float g_arm_shoulder_max_joint_travel_deg =
+    ARM_SHOULDER_MAX_TRAVEL_DEG;
+static const float g_arm_elbow_max_joint_travel_deg =
+    ARM_ELBOW_MAX_TRAVEL_DEG;
 
 volatile uint8_t g_arm_homing_abort;
 
@@ -190,10 +129,15 @@ static float ArmSign(float value)
 
 static Motor_Init_Config_s ArmBaseMotorConfig(void)
 {
+    /*
+     * GM6020 底座：角度环输出速度目标，速度环输出电流目标，电流环输出CAN值。
+     * 调参顺序建议从内到外：电流环 -> 速度环 -> 角度环。
+     * MaxOut 是每层最大输出；增大可提高响应，但过大容易超调和振动。
+     */
     Motor_Init_Config_s config = {
         .can_init_config = {
             .can_handle = &hcan1,
-            .tx_id = 5,
+            .tx_id = ARM_BASE_MOTOR_CAN_ID,
         },
         .controller_param_init_config = {
             .angle_PID = {
@@ -238,10 +182,15 @@ static Motor_Init_Config_s ArmBaseMotorConfig(void)
 
 static Motor_Init_Config_s ArmShoulderMotorConfig(void)
 {
+    /*
+     * M3508 大臂：注册时保留同一套角度/速度/电流环参数。
+     * 堵转寻零阶段临时切为速度环；初始化结束后恢复三级角度闭环。
+     * 角度PID的输入是电机侧total_angle，因此DeadBand也为电机侧角度。
+     */
     Motor_Init_Config_s config = {
         .can_init_config = {
             .can_handle = &hcan1,
-            .tx_id = 2,
+            .tx_id = ARM_SHOULDER_MOTOR_CAN_ID,
         },
         .controller_param_init_config = {
             .angle_PID = {
@@ -284,10 +233,15 @@ static Motor_Init_Config_s ArmShoulderMotorConfig(void)
 
 static Motor_Init_Config_s ArmElbowMotorConfig(void)
 {
+    /*
+     * M2006 小臂：与3508使用相同的三级闭环结构，参数独立调节。
+     * 若回正无力，先观察速度环/电流环是否触及MaxOut，再决定提高限幅或Kp；
+     * 若出现抖动和超调，优先降低角度Kp/积分或轨迹关节速度。
+     */
     Motor_Init_Config_s config = {
         .can_init_config = {
             .can_handle = &hcan1,
-            .tx_id = 3,
+            .tx_id = ARM_ELBOW_MOTOR_CAN_ID,
         },
         .controller_param_init_config = {
             .angle_PID = {
@@ -473,6 +427,43 @@ static void ArmUpdateForwardKinematics(void)
     g_arm_state.small_link_pitch_deg = g_arm_state.end_pitch_deg;
 }
 
+/*
+ * 打点模式唯一Watch快照。三台电机失能后仍持续接收CAN反馈，因此用手拖动
+ * 机械臂时，q1/q2/q3和腕部轴心FK坐标会实时变化。q4尚未接入，固定为0。
+ */
+static void ArmUpdateTeachPoint(void)
+{
+    const Arm_Wrist_State_s *wrist_state = ArmWristGetState();
+
+    g_arm_teach_point.ready = arm_teach_mode_entered &&
+        !g_arm_state.motor_enabled[0] &&
+        !g_arm_state.motor_enabled[1] &&
+        !g_arm_state.motor_enabled[2];
+    g_arm_teach_point.point_type = ARM_CONTROL_POINT_WRIST_CENTER;
+    g_arm_teach_point.kinematics_valid = g_arm_state.kinematics_valid;
+    memcpy(g_arm_teach_point.motor_online, g_arm_state.motor_online,
+           sizeof(g_arm_teach_point.motor_online));
+    memcpy(g_arm_teach_point.motor_enabled, g_arm_state.motor_enabled,
+           sizeof(g_arm_teach_point.motor_enabled));
+    memcpy(g_arm_teach_point.q_deg, g_arm_state.q_feedback_deg,
+           sizeof(g_arm_teach_point.q_deg));
+    g_arm_teach_point.q_deg[ARM_JOINT_WRIST] = 0.0f;
+    g_arm_teach_point.base_raw_deg = g_arm_state.base_raw_deg;
+    memcpy(g_arm_teach_point.motor_total_angle_deg,
+           g_arm_state.motor_total_angle_deg,
+           sizeof(g_arm_teach_point.motor_total_angle_deg));
+    g_arm_teach_point.wrist_center_mm = g_arm_state.wrist_center;
+    g_arm_teach_point.small_link_pitch_deg =
+        g_arm_state.small_link_pitch_deg;
+    g_arm_teach_point.wrist_pwm_us = wrist_state->pulse_us;
+    g_arm_teach_point.wrist_configured = wrist_state->configured;
+    g_arm_teach_point.tool_model_valid =
+        ARM_TOOL_MODEL_ENABLE != 0u && wrist_state->configured;
+    if (arm_teach_mode_entered) {
+        g_arm_teach_point.update_count++;
+    }
+}
+
 static void ArmUpdateKinematicsDebug(void)
 {
     g_arm_kinematics_debug.kinematics_valid =
@@ -625,22 +616,25 @@ static void ArmFinishJointHoming(void)
         arm_elbow_motor->measure.total_angle;
     ArmClearMotorController(arm_shoulder_motor);
     ArmClearMotorController(arm_elbow_motor);
-    ArmSetAngleLoop(arm_shoulder_motor);
-    ArmSetAngleLoop(arm_elbow_motor);
-    DJIMotorSetRef(arm_shoulder_motor,
-                   arm_joint_hold_target_motor_deg[0]);
-    DJIMotorSetRef(arm_elbow_motor,
-                   arm_joint_hold_target_motor_deg[1]);
-    DJIMotorEnable(arm_shoulder_motor);
-    DJIMotorEnable(arm_elbow_motor);
+    if (ARM_BOOT_MODE == ARM_BOOT_MODE_TEACH_POINT ||
+        ARM_BOOT_MODE == ARM_BOOT_MODE_FULL_CALIBRATION) {
+        /* 打点和维护扫描完成后立即保持零输出，不出现短暂重新使能。 */
+        ArmStopMotor(arm_shoulder_motor);
+        ArmStopMotor(arm_elbow_motor);
+    } else {
+        ArmSetAngleLoop(arm_shoulder_motor);
+        ArmSetAngleLoop(arm_elbow_motor);
+        DJIMotorSetRef(arm_shoulder_motor,
+                       arm_joint_hold_target_motor_deg[0]);
+        DJIMotorSetRef(arm_elbow_motor,
+                       arm_joint_hold_target_motor_deg[1]);
+        DJIMotorEnable(arm_shoulder_motor);
+        DJIMotorEnable(arm_elbow_motor);
+    }
     g_arm_calibration.joint_calibrated = 1u;
     ArmUpdateCalibrationValid();
     g_arm_state.calibration_state = ARM_CAL_VALID;
     g_arm_state.mode = ARM_MODE_READY;
-    if (g_arm_state.homing_mode == ARM_HOMING_SINGLE_REFERENCE &&
-        ARM_MOTION_TEST_ENABLE != 0u) {
-        ArmMotionTestStart(HAL_GetTick());
-    }
 }
 
 static void ArmEnterCalibrationState(Arm_Calibration_State_e state,
@@ -1297,17 +1291,6 @@ void ArmMotionStopMotors(void)
     g_arm_state.mode = ARM_MODE_SAFE;
 }
 
-static void ArmMotionTestStart(uint32_t now)
-{
-    arm_motion_test_pose_index = 0u;
-    arm_motion_test_target_reached = 0u;
-    arm_motion_test_hold_start_tick = now;
-    arm_small_angle_test_active = ArmSetJointTargetDeg(
-        arm_motion_test_pose_deg[0][0],
-        arm_motion_test_pose_deg[0][1],
-        arm_motion_test_pose_deg[0][2]);
-}
-
 static void ArmAutoCalibrationTask(uint32_t now)
 {
     if (arm_auto_calibration_attempted) {
@@ -1329,7 +1312,7 @@ static void ArmAutoCalibrationTask(uint32_t now)
             ARM_AUTO_START_ONLINE_MS) {
             return;
         }
-        if (ARM_BOOT_FULL_SCAN != 0u) {
+        if (ARM_BOOT_MODE == ARM_BOOT_MODE_FULL_CALIBRATION) {
             ArmCalibrationStart();
         } else {
             ArmHomingStart();
@@ -1654,8 +1637,7 @@ static void ArmUpdateSoftLimitDebug(void)
     g_arm_soft_limit_debug.base_angle_error_deg =
         ArmWrapTo180(g_arm_state.base_init_target_raw_deg -
                      g_arm_state.base_raw_deg);
-    g_arm_soft_limit_debug.small_angle_test_active =
-        arm_small_angle_test_active;
+    g_arm_soft_limit_debug.small_angle_test_active = 0u;
     g_arm_soft_limit_debug.command_target_joint_deg[0] =
         g_arm_state.q_target_deg[ARM_JOINT_BASE_YAW];
     g_arm_soft_limit_debug.command_target_joint_deg[1] =
@@ -1701,13 +1683,9 @@ static void ArmUpdateSoftLimitDebug(void)
     g_arm_soft_limit_debug.current_pid_output[2] =
         arm_elbow_motor != NULL ?
             arm_elbow_motor->motor_controller.current_PID.Output : 0.0f;
-    g_arm_soft_limit_debug.motion_test_pose_index =
-        arm_motion_test_pose_index;
-    g_arm_soft_limit_debug.motion_test_target_reached =
-        arm_motion_test_target_reached;
-    g_arm_soft_limit_debug.motion_test_hold_elapsed_ms =
-        arm_motion_test_target_reached ?
-            (uint32_t)(HAL_GetTick() - arm_motion_test_hold_start_tick) : 0u;
+    g_arm_soft_limit_debug.motion_test_pose_index = 0u;
+    g_arm_soft_limit_debug.motion_test_target_reached = 0u;
+    g_arm_soft_limit_debug.motion_test_hold_elapsed_ms = 0u;
     g_arm_soft_limit_debug.state_elapsed_ms =
         g_arm_state.soft_limit_elapsed_ms;
     if (active_motor != NULL) {
@@ -1868,6 +1846,20 @@ static void ArmSoftLimitTask(uint32_t now)
             break;
 
         case ARM_SOFT_LIMIT_COMPLETE:
+#if ARM_BOOT_MODE == ARM_BOOT_MODE_TEACH_POINT || \
+    ARM_BOOT_MODE == ARM_BOOT_MODE_FULL_CALIBRATION
+            /* 打点/维护扫描完成后保持三电机零输出，禁止保持逻辑重新使能。 */
+            ArmStopMotor(arm_base_motor);
+            ArmStopMotor(arm_shoulder_motor);
+            ArmStopMotor(arm_elbow_motor);
+#if ARM_BOOT_MODE == ARM_BOOT_MODE_TEACH_POINT
+            arm_teach_mode_entered = 1u;
+            g_arm_state.mode = ARM_MODE_TEACH_POINT;
+#else
+            g_arm_state.mode = ARM_MODE_SAFE;
+#endif
+            break;
+#else
             if (!ArmMotorFeedbackReady(arm_base_motor) ||
                 !ArmMotorFeedbackReady(arm_shoulder_motor) ||
                 !ArmMotorFeedbackReady(arm_elbow_motor)) {
@@ -1902,6 +1894,7 @@ static void ArmSoftLimitTask(uint32_t now)
             ArmBaseInitHold();
             g_arm_state.mode = ARM_MODE_READY;
             break;
+#endif
 
         case ARM_SOFT_LIMIT_ERROR_OFFLINE:
         case ARM_SOFT_LIMIT_ERROR_LIMIT:
@@ -1921,31 +1914,6 @@ static void ArmSoftLimitTask(uint32_t now)
     }
 }
 
-void ArmWristPWMInit(void)
-{
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-    ArmWristPWMSetUs(ARM_WRIST_PWM_MID_US);
-}
-
-void ArmWristPWMSetUs(uint16_t pulse_us)
-{
-    pulse_us = (uint16_t)ArmClampFloat((float)pulse_us,
-                                      (float)ARM_WRIST_PWM_MIN_US,
-                                      (float)ARM_WRIST_PWM_MAX_US);
-    g_arm_state.wrist_pwm_us = pulse_us;
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pulse_us);
-}
-
-void ArmWristPWMSetAngle(float angle_deg)
-{
-    float clamped = ArmClampFloat(angle_deg, -90.0f, 90.0f);
-    float pulse = (float)ARM_WRIST_PWM_MIN_US +
-                  (clamped + 90.0f) *
-                  ((float)(ARM_WRIST_PWM_MAX_US - ARM_WRIST_PWM_MIN_US) /
-                   180.0f);
-    ArmWristPWMSetUs((uint16_t)(pulse + 0.5f));
-}
-
 void ArmInit(void)
 {
     Motor_Init_Config_s base_config = ArmBaseMotorConfig();
@@ -1956,6 +1924,7 @@ void ArmInit(void)
     memset(&g_arm_calibration, 0, sizeof(g_arm_calibration));
     memset(&g_arm_soft_limit_debug, 0, sizeof(g_arm_soft_limit_debug));
     memset(&g_arm_kinematics_debug, 0, sizeof(g_arm_kinematics_debug));
+    memset(&g_arm_teach_point, 0, sizeof(g_arm_teach_point));
     arm_base_motor = DJIMotorInit(&base_config);
     arm_shoulder_motor = DJIMotorInit(&shoulder_config);
     arm_elbow_motor = DJIMotorInit(&elbow_config);
@@ -1964,7 +1933,8 @@ void ArmInit(void)
     arm_motors[2] = arm_elbow_motor;
     g_arm_state.mode = ARM_MODE_SAFE;
     g_arm_state.calibration_state = ARM_CAL_IDLE;
-    g_arm_state.wrist_pwm_us = 0u;
+    ArmWristInit();
+    g_arm_state.wrist_pwm_us = ArmWristGetState()->pulse_us;
     g_arm_homing_abort = 0u;
     arm_auto_calibration_attempted = 0u;
     arm_auto_online_waiting = 0u;
@@ -1982,16 +1952,14 @@ void ArmInit(void)
     arm_joint_hold_target_motor_deg[1] = 0.0f;
     arm_base_last_target_error_deg = 0.0f;
     arm_base_target_error_valid = 0u;
-    arm_small_angle_test_active = 0u;
-    arm_motion_test_pose_index = 0u;
-    arm_motion_test_target_reached = 0u;
-    arm_motion_test_hold_start_tick = 0u;
+    arm_teach_mode_entered = 0u;
     g_arm_state.q_target_deg[ARM_JOINT_BASE_YAW] = 0.0f;
     g_arm_state.q_target_deg[ARM_JOINT_SHOULDER] =
         ARM_SHOULDER_REFERENCE_DEG;
     g_arm_state.q_target_deg[ARM_JOINT_ELBOW] =
         ARM_ELBOW_REFERENCE_DEG;
-    g_arm_state.ratio_test_state = arm_3508_ratio_test_enable != 0u ?
+    g_arm_state.ratio_test_state =
+        ARM_BOOT_MODE == ARM_BOOT_MODE_SHOULDER_RATIO_TEST ?
         ARM_RATIO_TEST_WAIT_ONLINE : ARM_RATIO_TEST_DISABLED;
     g_arm_state.soft_limit_axis = ARM_SOFT_LIMIT_AXIS_NONE;
     g_arm_state.soft_limit_state = ARM_SOFT_LIMIT_ENABLE != 0u ?
@@ -2026,7 +1994,7 @@ void ArmTask(void)
     if (g_arm_homing_abort) {
         arm_auto_calibration_attempted = 1u;
         ArmAbortMotion(ARM_MOTION_FAULT_ABORT);
-        if (arm_3508_ratio_test_enable != 0u) {
+        if (ARM_BOOT_MODE == ARM_BOOT_MODE_SHOULDER_RATIO_TEST) {
             ArmRatioTestFail(ARM_RATIO_TEST_ABORTED, now);
         } else {
             if (ArmCalibrationStateIsActive(
@@ -2043,7 +2011,12 @@ void ArmTask(void)
         return;
     }
 
-    if (arm_3508_ratio_test_enable != 0u) {
+    if (ARM_BOOT_MODE == ARM_BOOT_MODE_SHOULDER_RATIO_TEST) {
+        /* 这些函数只属于正常初始化链路；保留符号引用以便维护模式单独编译。 */
+        (void)ArmUpdateTeachPoint;
+        (void)ArmCalibrationTask;
+        (void)ArmAutoCalibrationTask;
+        (void)ArmSoftLimitTask;
         Arm3508RatioTestTask(now);
         ArmUpdateFeedback();
         ArmUpdateForwardKinematics();
@@ -2051,6 +2024,7 @@ void ArmTask(void)
         ArmUpdateSoftLimitDebug();
         return;
     }
+#if ARM_BOOT_MODE != ARM_BOOT_MODE_SHOULDER_RATIO_TEST
 
     ArmAutoCalibrationTask(now);
     ArmCalibrationTask(now);
@@ -2060,6 +2034,9 @@ void ArmTask(void)
     ArmUpdateForwardKinematics();
     ArmUpdateKinematicsDebug();
     ArmTrajectoryTask(now);
+    ArmUpdateFeedback();
+    ArmUpdateForwardKinematics();
+    ArmUpdateTeachPoint();
 
     if (g_arm_state.soft_limit_state >= ARM_SOFT_LIMIT_ERROR_OFFLINE &&
         g_arm_state.soft_limit_state <= ARM_SOFT_LIMIT_ABORTED) {
@@ -2069,6 +2046,9 @@ void ArmTask(void)
                g_arm_state.soft_limit_state ==
                    ARM_SOFT_LIMIT_BASE_SETTLE) {
         g_arm_state.mode = ARM_MODE_SOFT_LIMIT;
+    } else if (ARM_BOOT_MODE == ARM_BOOT_MODE_TEACH_POINT &&
+               arm_teach_mode_entered) {
+        g_arm_state.mode = ARM_MODE_TEACH_POINT;
     } else if (g_arm_calibration.joint_calibrated &&
         g_arm_state.calibration_state == ARM_CAL_VALID) {
         g_arm_state.mode = ARM_MODE_READY;
@@ -2078,9 +2058,153 @@ void ArmTask(void)
         g_arm_state.mode = ARM_MODE_SAFE;
     }
     ArmUpdateSoftLimitDebug();
+#endif
 }
 
 const Arm_State_s *ArmGetState(void)
 {
     return &g_arm_state;
+}
+
+const Arm_Motion_Debug_s *ArmGetMotionState(void)
+{
+    return &g_arm_motion_debug;
+}
+
+const Arm_Teach_Point_s *ArmGetTeachPoint(void)
+{
+    return &g_arm_teach_point;
+}
+
+#if ARM_BOOT_MODE == ARM_BOOT_MODE_NORMAL
+static Arm_Command_Result_e ArmConvertMotionResult(
+    Arm_Motion_Result_e result)
+{
+    switch (result) {
+        case ARM_MOTION_RESULT_OK:
+            return ARM_COMMAND_OK;
+        case ARM_MOTION_RESULT_BUSY:
+            return ARM_COMMAND_BUSY;
+        case ARM_MOTION_RESULT_NOT_READY:
+            return ARM_COMMAND_NOT_READY;
+        case ARM_MOTION_RESULT_INVALID:
+            return ARM_COMMAND_INVALID;
+        case ARM_MOTION_RESULT_PREFLIGHT_FAILED:
+        default:
+            return ARM_COMMAND_PREFLIGHT_FAILED;
+    }
+}
+#endif
+
+static uint8_t ArmApplicationCommandAllowed(void)
+{
+    return ARM_BOOT_MODE == ARM_BOOT_MODE_NORMAL &&
+           g_arm_state.soft_limit_state == ARM_SOFT_LIMIT_COMPLETE &&
+           g_arm_calibration.calibration_valid &&
+           g_arm_state.motor_online[0] && g_arm_state.motor_online[1] &&
+           g_arm_state.motor_online[2] && !g_arm_homing_abort;
+}
+
+Arm_Command_Result_e ArmSubmitCartesianCommand(
+    const Arm_Cartesian_Command_s *command)
+{
+#if ARM_BOOT_MODE != ARM_BOOT_MODE_NORMAL
+    (void)command;
+    return ARM_COMMAND_MODE_DENIED;
+#else
+    Arm_Motion_Result_e result;
+    float speed_mm_s;
+    uint8_t outside_soft_limit;
+
+    if (command == NULL || !isfinite(command->target_mm.x_mm) ||
+        !isfinite(command->target_mm.y_mm) ||
+        !isfinite(command->target_mm.z_mm) ||
+        !isfinite(command->max_speed_mm_s) ||
+        command->max_speed_mm_s < 0.0f ||
+        (command->tool_pitch_valid != 0u &&
+         !isfinite(command->tool_pitch_deg))) {
+        return ARM_COMMAND_INVALID;
+    }
+    if (command->control_point != ARM_CONTROL_POINT_WRIST_CENTER ||
+        command->tool_pitch_valid != 0u) {
+        return ARM_COMMAND_UNSUPPORTED;
+    }
+    if (command->move_type != ARM_MOVE_DIRECT &&
+        command->move_type != ARM_MOVE_LINEAR) {
+        return ARM_COMMAND_INVALID;
+    }
+    if (!ArmApplicationCommandAllowed()) {
+        return ARM_COMMAND_NOT_READY;
+    }
+    if (ArmTrajectoryIsBusy()) {
+        return ARM_COMMAND_BUSY;
+    }
+    speed_mm_s = command->max_speed_mm_s > 0.0f ?
+        command->max_speed_mm_s : ARM_LINEAR_DEFAULT_SPEED_MM_S;
+    if (speed_mm_s > ARM_LINEAR_DEFAULT_SPEED_MM_S) {
+        return ARM_COMMAND_INVALID;
+    }
+
+    outside_soft_limit = !ArmJointPoseWithinSoftLimits(
+        g_arm_state.q_feedback_deg);
+    if (outside_soft_limit) {
+        Arm_Cartesian_Command_s staged_command = *command;
+
+        staged_command.max_speed_mm_s = speed_mm_s;
+        result = ArmTrajectoryStageCartesianCommand(&staged_command);
+    } else if (command->move_type == ARM_MOVE_DIRECT) {
+        result = ArmSetCartesianTarget(&command->target_mm, NULL);
+    } else {
+        result = ArmMoveLinear(&command->target_mm, speed_mm_s);
+    }
+    return ArmConvertMotionResult(result);
+#endif
+}
+
+Arm_Command_Result_e ArmSubmitJointCommand(
+    const Arm_Joint_Command_s *command)
+{
+#if ARM_BOOT_MODE != ARM_BOOT_MODE_NORMAL
+    (void)command;
+    return ARM_COMMAND_MODE_DENIED;
+#else
+    Arm_Motion_Result_e result;
+
+    if (command == NULL || !isfinite(command->q_deg[0]) ||
+        !isfinite(command->q_deg[1]) || !isfinite(command->q_deg[2]) ||
+        (command->move_type != ARM_MOVE_DIRECT &&
+         command->move_type != ARM_MOVE_LINEAR)) {
+        return ARM_COMMAND_INVALID;
+    }
+    if (!ArmApplicationCommandAllowed()) {
+        return ARM_COMMAND_NOT_READY;
+    }
+    if (ArmTrajectoryIsBusy()) {
+        return ARM_COMMAND_BUSY;
+    }
+    if (!ArmJointPoseWithinSoftLimits(command->q_deg) ||
+        !ArmAutoPoseIsSafe(command->q_deg)) {
+        return ARM_COMMAND_PREFLIGHT_FAILED;
+    }
+    result = command->move_type == ARM_MOVE_DIRECT ?
+        ArmTrajectorySetJointDirect(command->q_deg) :
+        ArmTrajectoryMoveJoint(command->q_deg);
+    return ArmConvertMotionResult(result);
+#endif
+}
+
+void ArmCancelMotion(void)
+{
+    if (ARM_BOOT_MODE != ARM_BOOT_MODE_NORMAL ||
+        !ArmApplicationCommandAllowed()) {
+        return;
+    }
+    ArmTrajectoryCancel();
+}
+
+void ArmEmergencyStop(void)
+{
+    g_arm_homing_abort = 1u;
+    ArmAbortMotion(ARM_MOTION_FAULT_ABORT);
+    ArmStop();
 }
