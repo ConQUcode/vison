@@ -166,9 +166,11 @@ typedef enum {
     ARM_DM_AUTO_POINT_IDLE = 0,
     ARM_DM_AUTO_POINT_WAIT_INIT,
     ARM_DM_AUTO_POINT_SOLVE_IK,
-    ARM_DM_AUTO_POINT_MOVE_AXIS,
-    ARM_DM_AUTO_POINT_WAIT_AXIS,
-    ARM_DM_AUTO_POINT_DONE,
+    ARM_DM_AUTO_POINT_START_CONTINUOUS,
+    ARM_DM_AUTO_POINT_WAIT_CONTINUOUS,
+    ARM_DM_AUTO_POINT_START_LINEAR,
+    ARM_DM_AUTO_POINT_WAIT_LINEAR,
+    ARM_DM_AUTO_POINT_WAIT_INTERVAL,
     ARM_DM_AUTO_POINT_FAULT
 } Arm_DM_Auto_Point_State_e;
 
@@ -316,7 +318,7 @@ typedef struct {
     Arm_IK_Status_e ik_status;
     Arm_Position_s target_mm;
     float target_q_deg[3];
-    float speed_deg_s;
+    float speed_mm_s;
     float start_deg;
     float target_deg;
     uint32_t elapsed_ms;

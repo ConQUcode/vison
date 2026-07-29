@@ -5,7 +5,7 @@
 
 /*
  * 当前为三轴联调模式：复用已验证的三电机使能/当前位置保持流程，
- * 然后通过g_arm_dm_debug.auto_init按小臂/大臂/底座顺序回初始化姿态。
+ * 然后使用已验证的三轴同时归位，完成后执行笛卡尔直线测试。
  * 三轴方向确认后，将ARM_BOOT_MODE切到ARM_BOOT_MODE_NORMAL即可进入
  * 自动脱困和小臂/大臂/底座顺序回安全姿态。
  */
@@ -128,7 +128,7 @@
 #define ARM_RETURN_TIMEOUT_MS             15000u
 #define ARM_ARRIVAL_ERROR_DEG                 1.0f
 #define ARM_ARRIVAL_SPEED_DEG_S               2.0f
-#define ARM_ARRIVAL_STABLE_MS               300u
+#define ARM_ARRIVAL_STABLE_MS               120u
 #define ARM_WRONG_DIRECTION_DELTA_DEG          0.5f
 #define ARM_WRONG_DIRECTION_TIME_MS           200u
 #define ARM_TEMPERATURE_HOLD_C                 70.0f
@@ -139,35 +139,46 @@
 #define ARM_DM_AUTO_INIT_ENABLE                  1u
 #define ARM_DM_AUTO_INIT_START_DELAY_MS       1000u
 #define ARM_DM_AUTO_INIT_STEP_TIMEOUT_MS     25000u
-#define ARM_DM_AUTO_INIT_SPEED_DEG_S            10.0f
+#define ARM_DM_AUTO_INIT_SPEED_DEG_S           240.0f
 #define ARM_DM_AUTO_INIT_BASE_Q_DEG              0.0f
 #define ARM_DM_AUTO_INIT_SHOULDER_Q_DEG        180.0f
 #define ARM_DM_AUTO_INIT_ELBOW_Q_DEG          (-90.0f)
 
-/* 初始化完成后的单点IK验证。 */
+/* 初始化完成后，模拟上位机每3s下发一个XYZ目标。 */
 #define ARM_DM_AUTO_POINT_ENABLE                 1u
-#define ARM_DM_AUTO_POINT_X_MM                 250.0f
-#define ARM_DM_AUTO_POINT_Y_MM                   0.0f
-#define ARM_DM_AUTO_POINT_Z_MM                  120.0f
-#define ARM_DM_AUTO_POINT_SPEED_DEG_S           10.0f
+#define ARM_DM_AUTO_POINT_COUNT                   4u
+#define ARM_DM_AUTO_POINT_INTERVAL_MS          3000u
+#define ARM_DM_AUTO_POINT_1_X_MM                250.0f
+#define ARM_DM_AUTO_POINT_1_Y_MM                 50.0f
+#define ARM_DM_AUTO_POINT_1_Z_MM                120.0f
+#define ARM_DM_AUTO_POINT_2_X_MM                250.0f
+#define ARM_DM_AUTO_POINT_2_Y_MM                 50.0f
+#define ARM_DM_AUTO_POINT_2_Z_MM                150.0f
+#define ARM_DM_AUTO_POINT_3_X_MM                250.0f
+#define ARM_DM_AUTO_POINT_3_Y_MM               (-50.0f)
+#define ARM_DM_AUTO_POINT_3_Z_MM                150.0f
+#define ARM_DM_AUTO_POINT_4_X_MM                250.0f
+#define ARM_DM_AUTO_POINT_4_Y_MM               (-50.0f)
+#define ARM_DM_AUTO_POINT_4_Z_MM                120.0f
+#define ARM_DM_AUTO_POINT_SPEED_MM_S           450.0f
 #define ARM_DM_AUTO_POINT_STEP_TIMEOUT_MS    25000u
 
-/* 达妙直驱第一版保守轨迹参数。 */
-#define ARM_JOINT_COMMAND_SPEED_DEG_S            10.0f
-#define ARM_LINEAR_DEFAULT_SPEED_MM_S            20.0f
-#define ARM_LINEAR_MAX_SPEED_MM_S                60.0f
-#define ARM_LINEAR_MAX_ACCEL_MM_S2              100.0f
-#define ARM_LINEAR_Q1_MAX_SPEED_DEG_S             15.0f
-#define ARM_LINEAR_Q2_MAX_SPEED_DEG_S             12.0f
-#define ARM_LINEAR_Q3_MAX_SPEED_DEG_S             15.0f
-#define ARM_LINEAR_Q1_MAX_ACCEL_DEG_S2            30.0f
-#define ARM_LINEAR_Q2_MAX_ACCEL_DEG_S2            24.0f
-#define ARM_LINEAR_Q3_MAX_ACCEL_DEG_S2            30.0f
-#define ARM_LINEAR_SAMPLE_SPACING_MM               2.0f
+/* 达妙三轴快速联调轨迹参数。 */
+#define ARM_JOINT_COMMAND_SPEED_DEG_S           420.0f
+#define ARM_LINEAR_DEFAULT_SPEED_MM_S           450.0f
+#define ARM_LINEAR_MAX_SPEED_MM_S               700.0f
+#define ARM_LINEAR_MAX_ACCEL_MM_S2             3600.0f
+#define ARM_LINEAR_Q1_MAX_SPEED_DEG_S            420.0f
+#define ARM_LINEAR_Q2_MAX_SPEED_DEG_S            380.0f
+#define ARM_LINEAR_Q3_MAX_SPEED_DEG_S            420.0f
+#define ARM_LINEAR_Q1_MAX_ACCEL_DEG_S2          1800.0f
+#define ARM_LINEAR_Q2_MAX_ACCEL_DEG_S2          1500.0f
+#define ARM_LINEAR_Q3_MAX_ACCEL_DEG_S2          1800.0f
+#define ARM_LINEAR_SAMPLE_SPACING_MM               1.0f
 #define ARM_LINEAR_MAX_SAMPLES                    384u
 #define ARM_LINEAR_FK_ERROR_MAX_MM                  0.5f
 #define ARM_LINEAR_HOLD_MS                        1500u
-#define ARM_LINEAR_IK_UPDATE_MS                      5u
+#define ARM_LINEAR_IK_UPDATE_MS                      2u
 #define ARM_REALTIME_COMMAND_TIMEOUT_MS            100u
 #define ARM_REALTIME_DEFAULT_ACCEL_MM_S2           80.0f
 #define ARM_TRACKING_ERROR_WARN_DEG                  5.0f

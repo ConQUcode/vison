@@ -9,8 +9,8 @@
 
 /*
  * 轨迹层只接收关节角或腕部轴心坐标，不直接决定电机是否初始化成功。
- * 空间直线在启动前按2mm间隔完整预检并缓存IK解；执行时每5ms根据当前
- * 笛卡尔插值点重新求一次IK，1ms任务只在相邻两组在线IK解之间插值。
+ * 空间直线在启动前按配置间隔完整预检并缓存IK解；执行时按配置周期
+ * 根据当前笛卡尔插值点重新求IK，1ms任务在相邻两组合法解之间插值。
  * 预检采样密度不决定轨迹时间，时间参数由空间/关节速度及加速度共同决定。
  * 五次曲线10t^3-15t^4+6t^5保证起止速度和加速度均为0。
  */
@@ -24,6 +24,10 @@
 #define ARM_LINEAR_Q1_STEP_MAX_DEG         5.0f
 #define ARM_LINEAR_Q2_STEP_MAX_DEG         2.0f
 #define ARM_LINEAR_Q3_STEP_MAX_DEG         2.0f
+#define ARM_COMPOSITE_JOINT_STEP_DEG        1.0f
+#define ARM_SAMPLE_PROGRESS_EPSILON          0.000001f
+#define ARM_COMPOSITE_BLEND_JOINT_INTERVALS 12u
+#define ARM_COMPOSITE_BLEND_LINEAR_INTERVALS 12u
 
 typedef enum {
     ARM_TRAJECTORY_PATH_NONE = 0,
@@ -64,6 +68,7 @@ typedef struct {
     uint8_t target_error_valid[3];
     uint8_t target_crossed[3];
     float sample_q_deg[ARM_LINEAR_MAX_SAMPLES][3];
+    float sample_progress[ARM_LINEAR_MAX_SAMPLES];
 } Arm_Cartesian_Runtime_s;
 
 Arm_Motion_Debug_s g_arm_motion_debug;
@@ -126,10 +131,16 @@ static float ArmCartesianQuinticAcceleration(float normalized_time)
 
 static uint8_t ArmCartesianMotorsReady(void)
 {
+    uint8_t control_mode_ready = g_arm_state.mode == ARM_MODE_READY;
+
+#if ARM_BOOT_MODE == ARM_BOOT_MODE_DM_SINGLE_AXIS_TEST
+    control_mode_ready = control_mode_ready ||
+        g_arm_state.mode == ARM_MODE_DM_SINGLE_AXIS_TEST;
+#endif
     return g_arm_state.config_valid && g_arm_state.kinematics_valid &&
            g_arm_state.all_targets_synced &&
            g_arm_state.start_state == ARM_START_READY &&
-           g_arm_state.mode == ARM_MODE_READY &&
+           control_mode_ready &&
            g_arm_state.fault_latched == ARM_FAULT_NONE &&
            g_arm_state.motor_online[0] && g_arm_state.motor_online[1] &&
            g_arm_state.motor_online[2];
@@ -323,6 +334,152 @@ static uint8_t ArmCartesianJointStepContinuous(const float previous_q_deg[3],
                ARM_LINEAR_Q3_STEP_MAX_DEG;
 }
 
+static float ArmCartesianBuildJointSampleProgress(uint16_t sample_count)
+{
+    const float joint_speed_deg_s[3] = {
+        ARM_LINEAR_Q1_MAX_SPEED_DEG_S,
+        ARM_LINEAR_Q2_MAX_SPEED_DEG_S,
+        ARM_LINEAR_Q3_MAX_SPEED_DEG_S,
+    };
+    float total_minimum_time_s = 0.0f;
+
+    if (sample_count == 0u || sample_count > ARM_LINEAR_MAX_SAMPLES) {
+        return 0.0f;
+    }
+    arm_cartesian_runtime.sample_progress[0] = 0.0f;
+    for (uint16_t i = 1u; i < sample_count; ++i) {
+        float segment_minimum_time_s = 0.0f;
+        float segment_delta_deg[3];
+
+        segment_delta_deg[0] = fabsf(ArmCartesianWrapTo180(
+            arm_cartesian_runtime.sample_q_deg[i][0] -
+            arm_cartesian_runtime.sample_q_deg[i - 1u][0]));
+        segment_delta_deg[1] = fabsf(
+            arm_cartesian_runtime.sample_q_deg[i][1] -
+            arm_cartesian_runtime.sample_q_deg[i - 1u][1]);
+        segment_delta_deg[2] = fabsf(
+            arm_cartesian_runtime.sample_q_deg[i][2] -
+            arm_cartesian_runtime.sample_q_deg[i - 1u][2]);
+        for (uint8_t joint = 0u; joint < 3u; ++joint) {
+            segment_minimum_time_s = fmaxf(segment_minimum_time_s,
+                segment_delta_deg[joint] / joint_speed_deg_s[joint]);
+        }
+
+        /* 保证进度严格递增，允许缓存中出现重合的安全样本。 */
+        if (segment_minimum_time_s < ARM_SAMPLE_PROGRESS_EPSILON) {
+            segment_minimum_time_s = ARM_SAMPLE_PROGRESS_EPSILON;
+        }
+        total_minimum_time_s += segment_minimum_time_s;
+        arm_cartesian_runtime.sample_progress[i] = total_minimum_time_s;
+    }
+
+    if (sample_count == 1u ||
+        total_minimum_time_s < ARM_SAMPLE_PROGRESS_EPSILON) {
+        arm_cartesian_runtime.sample_progress[0] = 0.0f;
+        return 0.0f;
+    }
+    for (uint16_t i = 1u; i < sample_count; ++i) {
+        arm_cartesian_runtime.sample_progress[i] /= total_minimum_time_s;
+    }
+    arm_cartesian_runtime.sample_progress[sample_count - 1u] = 1.0f;
+    return total_minimum_time_s;
+}
+
+static uint8_t ArmCartesianBlendCompositeWaypoint(
+    uint16_t waypoint_index,
+    uint16_t sample_count)
+{
+    uint16_t before_count = ARM_COMPOSITE_BLEND_JOINT_INTERVALS;
+    uint16_t after_count = ARM_COMPOSITE_BLEND_LINEAR_INTERVALS;
+    uint16_t first_index;
+    uint16_t last_index;
+    uint16_t blend_interval_count;
+    float control_q_deg[4][3];
+
+    if (waypoint_index == 0u || waypoint_index + 1u >= sample_count) {
+        return 1u;
+    }
+    if (before_count > waypoint_index) {
+        before_count = waypoint_index;
+    }
+    if (after_count > sample_count - 1u - waypoint_index) {
+        after_count = (uint16_t)(sample_count - 1u - waypoint_index);
+    }
+    if (before_count >= waypoint_index) {
+        before_count = (uint16_t)(waypoint_index - 1u);
+    }
+    if (after_count >= sample_count - 1u - waypoint_index) {
+        after_count = (uint16_t)(sample_count - 2u - waypoint_index);
+    }
+    if (before_count == 0u || after_count == 0u) {
+        return 1u;
+    }
+
+    first_index = (uint16_t)(waypoint_index - before_count);
+    last_index = (uint16_t)(waypoint_index + after_count);
+    blend_interval_count = (uint16_t)(last_index - first_index);
+    memcpy(control_q_deg[0], arm_cartesian_runtime.sample_q_deg[first_index],
+           sizeof(control_q_deg[0]));
+    memcpy(control_q_deg[3], arm_cartesian_runtime.sample_q_deg[last_index],
+           sizeof(control_q_deg[3]));
+    for (uint8_t joint = 0u; joint < 3u; ++joint) {
+        float incoming_step_deg = joint == ARM_JOINT_BASE_YAW ?
+            ArmCartesianWrapTo180(
+                arm_cartesian_runtime.sample_q_deg[first_index][joint] -
+                arm_cartesian_runtime.sample_q_deg[first_index - 1u][joint]) :
+            arm_cartesian_runtime.sample_q_deg[first_index][joint] -
+                arm_cartesian_runtime.sample_q_deg[first_index - 1u][joint];
+        float outgoing_step_deg = joint == ARM_JOINT_BASE_YAW ?
+            ArmCartesianWrapTo180(
+                arm_cartesian_runtime.sample_q_deg[last_index + 1u][joint] -
+                arm_cartesian_runtime.sample_q_deg[last_index][joint]) :
+            arm_cartesian_runtime.sample_q_deg[last_index + 1u][joint] -
+                arm_cartesian_runtime.sample_q_deg[last_index][joint];
+
+        control_q_deg[1][joint] = control_q_deg[0][joint] +
+            incoming_step_deg * (float)blend_interval_count / 3.0f;
+        control_q_deg[2][joint] = control_q_deg[3][joint] -
+            outgoing_step_deg * (float)blend_interval_count / 3.0f;
+    }
+
+    for (uint16_t i = first_index; i <= last_index; ++i) {
+        float ratio = (float)(i - first_index) /
+            (float)blend_interval_count;
+        float one_minus_ratio = 1.0f - ratio;
+        float one_minus_ratio_2 = one_minus_ratio * one_minus_ratio;
+        float ratio_2 = ratio * ratio;
+        float blended_q_deg[3];
+
+        for (uint8_t joint = 0u; joint < 3u; ++joint) {
+            blended_q_deg[joint] =
+                one_minus_ratio_2 * one_minus_ratio *
+                    control_q_deg[0][joint] +
+                3.0f * one_minus_ratio_2 * ratio *
+                    control_q_deg[1][joint] +
+                3.0f * one_minus_ratio * ratio_2 *
+                    control_q_deg[2][joint] +
+                ratio_2 * ratio * control_q_deg[3][joint];
+        }
+        blended_q_deg[ARM_JOINT_BASE_YAW] = ArmCartesianWrapTo180(
+            blended_q_deg[ARM_JOINT_BASE_YAW]);
+        if (!ArmJointPoseWithinSoftLimits(blended_q_deg) ||
+            !ArmAutoPoseIsSafe(blended_q_deg)) {
+            return 0u;
+        }
+        memcpy(arm_cartesian_runtime.sample_q_deg[i], blended_q_deg,
+               sizeof(blended_q_deg));
+    }
+
+    for (uint16_t i = first_index + 1u; i <= last_index + 1u; ++i) {
+        if (!ArmCartesianJointStepContinuous(
+                arm_cartesian_runtime.sample_q_deg[i - 1u],
+                arm_cartesian_runtime.sample_q_deg[i])) {
+            return 0u;
+        }
+    }
+    return 1u;
+}
+
 static uint32_t ArmCartesianDurationMs(float path_length_mm,
                                        float max_speed_mm_s,
                                        float max_accel_mm_s2,
@@ -334,6 +491,8 @@ static uint32_t ArmCartesianDurationMs(float path_length_mm,
      */
     float duration_s = 0.0f;
     float joint_travel_deg[3] = {0.0f, 0.0f, 0.0f};
+    float joint_path_minimum_time_s =
+        ArmCartesianBuildJointSampleProgress(sample_count);
     const float joint_speed_deg_s[3] = {
         ARM_LINEAR_Q1_MAX_SPEED_DEG_S,
         ARM_LINEAR_Q2_MAX_SPEED_DEG_S,
@@ -353,6 +512,8 @@ static uint32_t ArmCartesianDurationMs(float path_length_mm,
 
         duration_s = fmaxf(speed_duration_s, accel_duration_s);
     }
+    duration_s = fmaxf(duration_s,
+        ARM_LINEAR_QUINTIC_PEAK_FACTOR * joint_path_minimum_time_s);
 
     for (uint16_t i = 1u; i < sample_count; ++i) {
         joint_travel_deg[0] += fabsf(ArmCartesianWrapTo180(
@@ -376,6 +537,13 @@ static uint32_t ArmCartesianDurationMs(float path_length_mm,
     }
     for (uint16_t i = 1u; i < sample_count; ++i) {
         float segment_delta_deg[3];
+        float segment_progress =
+            arm_cartesian_runtime.sample_progress[i] -
+            arm_cartesian_runtime.sample_progress[i - 1u];
+
+        if (segment_progress < ARM_SAMPLE_PROGRESS_EPSILON) {
+            continue;
+        }
 
         segment_delta_deg[0] = fabsf(ArmCartesianWrapTo180(
             arm_cartesian_runtime.sample_q_deg[i][0] -
@@ -388,13 +556,13 @@ static uint32_t ArmCartesianDurationMs(float path_length_mm,
             arm_cartesian_runtime.sample_q_deg[i - 1u][2]);
         for (uint8_t joint = 0u; joint < 3u; ++joint) {
             float segment_speed_duration_s = ARM_LINEAR_QUINTIC_PEAK_FACTOR *
-                segment_delta_deg[joint] * (float)(sample_count - 1u) /
-                joint_speed_deg_s[joint];
+                segment_delta_deg[joint] /
+                (segment_progress * joint_speed_deg_s[joint]);
             float segment_accel_duration_s = sqrtf(
                 ARM_LINEAR_QUINTIC_ACCEL_FACTOR *
                 segment_delta_deg[joint] *
-                (float)(sample_count - 1u) /
-                joint_accel_deg_s2[joint]);
+                1.0f /
+                (segment_progress * joint_accel_deg_s2[joint]));
 
             duration_s = fmaxf(duration_s,
                 fmaxf(segment_speed_duration_s,
@@ -410,7 +578,8 @@ static uint32_t ArmCartesianDurationMs(float path_length_mm,
 static void ArmCartesianInterpolateJointSamples(float progress,
                                                 float reference_q_deg[3])
 {
-    float sample_position;
+    float clamped_progress;
+    float progress_span;
     float sample_fraction;
     uint16_t lower_index;
     uint16_t upper_index;
@@ -420,16 +589,35 @@ static void ArmCartesianInterpolateJointSamples(float progress,
                sizeof(float) * 3u);
         return;
     }
-    sample_position = ArmCartesianClamp(progress, 0.0f, 1.0f) *
-                      (float)(arm_cartesian_runtime.sample_count - 1u);
-    lower_index = (uint16_t)sample_position;
-    if (lower_index >= arm_cartesian_runtime.sample_count - 1u) {
+    clamped_progress = ArmCartesianClamp(progress, 0.0f, 1.0f);
+    if (clamped_progress >= 1.0f) {
         lower_index = arm_cartesian_runtime.sample_count - 1u;
         upper_index = lower_index;
         sample_fraction = 0.0f;
     } else {
-        upper_index = lower_index + 1u;
-        sample_fraction = sample_position - (float)lower_index;
+        uint16_t search_low = 0u;
+        uint16_t search_high = arm_cartesian_runtime.sample_count - 1u;
+
+        while ((uint16_t)(search_low + 1u) < search_high) {
+            uint16_t middle = (uint16_t)(search_low +
+                (search_high - search_low) / 2u);
+
+            if (arm_cartesian_runtime.sample_progress[middle] <=
+                clamped_progress) {
+                search_low = middle;
+            } else {
+                search_high = middle;
+            }
+        }
+        lower_index = search_low;
+        upper_index = search_high;
+        progress_span =
+            arm_cartesian_runtime.sample_progress[upper_index] -
+            arm_cartesian_runtime.sample_progress[lower_index];
+        sample_fraction = progress_span > ARM_SAMPLE_PROGRESS_EPSILON ?
+            (clamped_progress -
+             arm_cartesian_runtime.sample_progress[lower_index]) /
+                progress_span : 0.0f;
     }
     reference_q_deg[0] = ArmCartesianWrapTo180(
         arm_cartesian_runtime.sample_q_deg[lower_index][0] +
@@ -1052,6 +1240,167 @@ Arm_Motion_Result_e ArmMoveLinear(const Arm_Position_s *target,
     ArmCartesianStartPreparedTrajectory(
         target, duration_ms, max_speed_mm_s, ARM_LINEAR_MAX_ACCEL_MM_S2,
         ARM_TRAJECTORY_PATH_CARTESIAN_LINEAR,
+        ARM_MOTION_RUNNING, now_ms);
+    return ARM_MOTION_RESULT_OK;
+}
+
+Arm_Motion_Result_e ArmTrajectoryMoveJointThenLinear(
+    const float waypoint_q_deg[3],
+    const Arm_Position_s *target,
+    float max_speed_mm_s)
+{
+    Arm_IK_Result_s ik_result;
+    Arm_Position_s waypoint_position;
+    Arm_Position_s sample_position;
+    float start_q_deg[3];
+    float previous_q_deg[3];
+    float max_joint_delta_deg = 0.0f;
+    float cartesian_length_mm;
+    float effective_length_mm;
+    uint16_t joint_interval_count;
+    uint16_t cartesian_interval_count;
+    uint16_t total_sample_count;
+    uint32_t duration_ms;
+    uint32_t now_ms = HAL_GetTick();
+
+    memset(&ik_result, 0, sizeof(ik_result));
+    ik_result.status = ARM_IK_INVALID_ARGUMENT;
+    if (waypoint_q_deg == NULL || target == NULL ||
+        !isfinite(target->x_mm) || !isfinite(target->y_mm) ||
+        !isfinite(target->z_mm) || !isfinite(max_speed_mm_s) ||
+        max_speed_mm_s < ARM_LINEAR_MIN_SPEED_MM_S ||
+        max_speed_mm_s > ARM_LINEAR_MAX_SPEED_MM_S) {
+        ArmCartesianRecordRejected(ik_result.status);
+        return ARM_MOTION_RESULT_INVALID;
+    }
+    if (ArmTrajectoryIsBusy()) {
+        return ARM_MOTION_RESULT_BUSY;
+    }
+    if (!ArmCartesianMotorsReady()) {
+        ArmCartesianRecordRejected(ik_result.status);
+        return ARM_MOTION_RESULT_NOT_READY;
+    }
+    start_q_deg[0] = g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW];
+    start_q_deg[1] = g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER];
+    start_q_deg[2] = g_arm_state.q_feedback_deg[ARM_JOINT_ELBOW];
+    if (!ArmJointPoseWithinSoftLimits(start_q_deg) ||
+        !ArmAutoPoseIsSafe(start_q_deg) ||
+        !ArmJointPoseWithinSoftLimits(waypoint_q_deg) ||
+        !ArmAutoPoseIsSafe(waypoint_q_deg)) {
+        ArmCartesianRecordRejected(ARM_IK_COLLISION_RISK);
+        return ARM_MOTION_RESULT_PREFLIGHT_FAILED;
+    }
+
+    for (uint8_t joint = 0u; joint < 3u; ++joint) {
+        float delta_deg = joint == ARM_JOINT_BASE_YAW ?
+            fabsf(ArmCartesianWrapTo180(
+                waypoint_q_deg[joint] - start_q_deg[joint])) :
+            fabsf(waypoint_q_deg[joint] - start_q_deg[joint]);
+
+        max_joint_delta_deg = fmaxf(max_joint_delta_deg, delta_deg);
+    }
+    joint_interval_count = (uint16_t)ceilf(
+        max_joint_delta_deg / ARM_COMPOSITE_JOINT_STEP_DEG);
+    if (joint_interval_count < 1u) {
+        joint_interval_count = 1u;
+    }
+
+    ArmForwardKinematics3DOF(waypoint_q_deg[0], waypoint_q_deg[1],
+                             waypoint_q_deg[2], &waypoint_position);
+    cartesian_length_mm = ArmCartesianPositionDistance(&waypoint_position,
+                                                       target);
+    if (!isfinite(cartesian_length_mm) ||
+        cartesian_length_mm <= ARM_LINEAR_MIN_DISTANCE_MM) {
+        ArmCartesianRecordRejected(ARM_IK_INVALID_ARGUMENT);
+        return ARM_MOTION_RESULT_INVALID;
+    }
+    cartesian_interval_count = (uint16_t)ceilf(
+        cartesian_length_mm / ARM_LINEAR_SAMPLE_SPACING_MM);
+    if (cartesian_interval_count < 1u) {
+        cartesian_interval_count = 1u;
+    }
+    total_sample_count = (uint16_t)(1u + joint_interval_count +
+                                    cartesian_interval_count);
+    if (total_sample_count > ARM_LINEAR_MAX_SAMPLES) {
+        ArmCartesianRecordRejected(ARM_IK_INVALID_ARGUMENT);
+        return ARM_MOTION_RESULT_PREFLIGHT_FAILED;
+    }
+
+    arm_cartesian_runtime.sample_count = total_sample_count;
+    memcpy(arm_cartesian_runtime.sample_q_deg[0], start_q_deg,
+           sizeof(start_q_deg));
+    for (uint16_t i = 1u; i <= joint_interval_count; ++i) {
+        float ratio = (float)i / (float)joint_interval_count;
+        float *sample_q_deg = arm_cartesian_runtime.sample_q_deg[i];
+
+        sample_q_deg[0] = ArmCartesianWrapTo180(start_q_deg[0] +
+            ratio * ArmCartesianWrapTo180(waypoint_q_deg[0] -
+                                           start_q_deg[0]));
+        sample_q_deg[1] = start_q_deg[1] +
+            ratio * (waypoint_q_deg[1] - start_q_deg[1]);
+        sample_q_deg[2] = start_q_deg[2] +
+            ratio * (waypoint_q_deg[2] - start_q_deg[2]);
+        if (!ArmJointPoseWithinSoftLimits(sample_q_deg) ||
+            !ArmAutoPoseIsSafe(sample_q_deg)) {
+            ArmCartesianRecordRejected(ARM_IK_COLLISION_RISK);
+            return ARM_MOTION_RESULT_PREFLIGHT_FAILED;
+        }
+    }
+
+    memcpy(previous_q_deg, waypoint_q_deg, sizeof(previous_q_deg));
+    for (uint16_t i = 1u; i <= cartesian_interval_count; ++i) {
+        float ratio = (float)i / (float)cartesian_interval_count;
+        uint16_t sample_index = (uint16_t)(joint_interval_count + i);
+
+        sample_position.x_mm = waypoint_position.x_mm +
+            ratio * (target->x_mm - waypoint_position.x_mm);
+        sample_position.y_mm = waypoint_position.y_mm +
+            ratio * (target->y_mm - waypoint_position.y_mm);
+        sample_position.z_mm = waypoint_position.z_mm +
+            ratio * (target->z_mm - waypoint_position.z_mm);
+        if (ArmInverseKinematics3DOF(&sample_position, previous_q_deg,
+                                    &ik_result) != ARM_IK_OK ||
+            ik_result.position_error_mm > ARM_LINEAR_FK_ERROR_MAX_MM ||
+            !ArmJointPoseWithinSoftLimits(ik_result.q_deg) ||
+            !ArmAutoPoseIsSafe(ik_result.q_deg) ||
+            !ArmCartesianJointStepContinuous(previous_q_deg,
+                                             ik_result.q_deg)) {
+            ArmCartesianRecordRejected(ik_result.status);
+            return ARM_MOTION_RESULT_PREFLIGHT_FAILED;
+        }
+        memcpy(arm_cartesian_runtime.sample_q_deg[sample_index],
+               ik_result.q_deg, sizeof(ik_result.q_deg));
+        memcpy(previous_q_deg, ik_result.q_deg, sizeof(previous_q_deg));
+    }
+
+    /*
+     * 精确经过安全姿态会把“主要转大臂”和“主要展小臂”
+     * 两个不同切向拼成尖角。用局部三次Bezier圆角替换尖角，
+     * 保留安全区域的必经约束，但不强制电机在该点换向或降速。
+     */
+    if (!ArmCartesianBlendCompositeWaypoint(joint_interval_count,
+                                             total_sample_count)) {
+        ArmCartesianRecordRejected(ARM_IK_COLLISION_RISK);
+        return ARM_MOTION_RESULT_PREFLIGHT_FAILED;
+    }
+
+    /*
+     * 两段样本共用一个五次时间轴。用等效路径长度补偿关节过渡
+     * 占用的样本比例，保证后半段笛卡尔速度不超过设定值。
+     */
+    effective_length_mm = cartesian_length_mm *
+        (float)(total_sample_count - 1u) /
+        (float)cartesian_interval_count;
+    duration_ms = ArmCartesianDurationMs(effective_length_mm,
+        max_speed_mm_s, ARM_LINEAR_MAX_ACCEL_MM_S2, total_sample_count);
+    if (!ArmBeginJointMove(previous_q_deg)) {
+        ArmCartesianRecordRejected(ARM_IK_INVALID_ARGUMENT);
+        return ARM_MOTION_RESULT_NOT_READY;
+    }
+    arm_cartesian_runtime.start_position = g_arm_state.wrist_center;
+    ArmCartesianStartPreparedTrajectory(
+        target, duration_ms, max_speed_mm_s, ARM_LINEAR_MAX_ACCEL_MM_S2,
+        ARM_TRAJECTORY_PATH_JOINT_STAGING,
         ARM_MOTION_RUNNING, now_ms);
     return ARM_MOTION_RESULT_OK;
 }

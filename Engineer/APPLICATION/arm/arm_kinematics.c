@@ -16,7 +16,7 @@
  * 两杆物理夹角90deg时q3=-90deg，两杆完全伸直180deg时q3=-180deg。
  * 标准二连杆内部有向转角q3_math = -180deg - q3。
  * 当前输出点是腕部舵机安装轴心，不包含q4和末端工具长度。
- * 底座、大臂、小臂转轴无Y向偏移；肩轴高度为250mm。
+ * 底座、大臂、小臂转轴无Y向偏移；肩轴高度由ARM_BASE_HEIGHT_MM配置。
  */
 
 static float ArmKinematicsClamp(float value, float min_value, float max_value)

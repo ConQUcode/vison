@@ -1,5 +1,22 @@
 # Findings
 
+## 2026-07-30 Commissioning trajectory integration
+
+- The live geometry and elbow model differ from the original plan snapshot: keep the current source values and do not restore the obsolete `250/260/260 mm` geometry.
+- Current `DM_SINGLE_AXIS_TEST` auto initialization and auto XYZ point bypass `ArmTrajectoryTask()` and call `ArmCommandPose()` with the final pose directly.
+- The existing trajectory layer already supports synchronized quintic joint interpolation and preflight-checked Cartesian linear motion; integration should reuse it instead of adding another planner.
+- One compound `cmd.exe` source-search command failed due quoting/parsing; subsequent compound inspections use w64devkit Bash.
+- `DM_SINGLE_AXIS_TEST` now executes `ArmTrajectoryTask()` after the proven three-axis enable/hold reaches READY. Internal trajectory readiness accepts this commissioning mode, while public host command checks remain unchanged.
+- Automatic initialization now calls `ArmTrajectoryMoveJointAtSpeed()`: all three joints share one quintic progress variable and the Watch `auto_init.speed_deg_s` actually limits trajectory duration.
+- Automatic XYZ motion now calls `ArmMoveLinear()`: the complete straight path is sampled every 2 mm for IK/limit/continuity preflight, then executed with 5 ms online IK and 1 ms reference interpolation.
+- Automatic point speed is now explicitly `speed_mm_s`; the default is `150 mm/s`. Existing `g_arm_motion_debug` exposes progress, duration, sample count, acceptance and preflight result.
+- Hardware showed no initialization movement after routing initialization through the normal joint trajectory. That entry requires every interpolated reference, including the initial feedback pose, to be inside normal soft limits; a startup pose outside soft limits is rejected and the trajectory time is frozen. Initialization is therefore restored to the previously validated simultaneous direct command, while Cartesian planning remains active only after initialization and belt coupling activation.
+- After initialization was restored, the Cartesian motion still correctly rejected its path. FK places `[0,180,-90]` at approximately `(-260,0,292) mm`; a straight line to `(250,0,120) mm` crosses the base-center/branch-change region. Firmware-equivalent 2 mm sampling found no limited IK solution at the second sample.
+- A staged route was numerically validated: joint quintic `[0,180,-90] -> [0,90,-90]`, followed by a Cartesian line from `(230,0,322)` to `(250,0,120)`. The line passes all 103 samples and ends near `[0,65.93,-62.82] deg`.
+- The first staged trajectory felt slow because the 90 deg safety transition was acceleration-limited at `200 deg/s2`, while the 203 mm Cartesian segment was limited to `150 mm/s` and `600 mm/s2`. Fast commissioning values are now `220-240 deg/s`, `700-800 deg/s2`, `300 mm/s`, and `1800 mm/s2`; motor reference frames use a matching `240 deg/s` velocity cap.
+- The path was not five points: `5 ms` was the online-IK update period. The 203 mm straight segment previously had about 103 preflight samples at 2 mm spacing plus 1 ms reference interpolation. It now uses 1 mm preflight spacing (about 204 samples), 2 ms online IK, and higher limits for every phase: initialization 240 deg/s, staged joints 380-420 deg/s with 1500-1800 deg/s2, Cartesian 450 mm/s with 3600 mm/s2, and 120 ms arrival stability.
+- The visible pause at `[0,90,-90]` was caused by two independent quintic trajectories: the first explicitly reached zero velocity and waited for arrival stability, then the Cartesian segment restarted from zero. The auto route is now one cached composite trajectory with roughly 91 joint-transition samples plus 204 Cartesian IK samples under one global quintic time base. The safe pose remains a mandatory waypoint but is no longer a HOLDING state or stop point.
+
 ## 2026-07-30 Enable success and fast commissioning decision
 
 - The user has now physically confirmed that all three Damiao motors can be enabled. This closes the raw-ID Enter Motor Mode and no-feedback startup-deadlock bring-up stage.
@@ -14,6 +31,13 @@
 - Final commissioning Keil image built incrementally with 0 errors and 0 warnings. Size is Code 46744, RO 672, RW 916, ZI 101872 bytes. The map retains `ArmProcessSingleAxisTest` and `DMMotorEnterModeAndHoldOpenLoop`; `ArmProcessStartup` is removed, so NORMAL automatic escape/return cannot run in this image.
 
 ## 2026-07-30 Full-Damiao Implementation Results
+
+- The automatic host simulation now cycles through `(250,50,120)`, `(250,50,150)`, `(250,-50,150)`, and `(250,-50,120) mm`. The first command retains the safe-region rounded composite entry; subsequent commands use the normal Cartesian-linear preflight path.
+- The 3000 ms interval is measured from command acceptance. If a trajectory takes longer than 3000 ms, firmware waits for it to finish and dispatches the next point immediately instead of overwriting an active trajectory.
+
+- The first continuous joint-then-linear implementation removed the explicit stop at `[0,90,-90]`, but it still parameterized cached samples by array index. Joint staging samples are about 1 deg apart while Cartesian IK samples are about 1 mm apart, so the shoulder reference speed could still change sharply at the waypoint even though the motion state remained RUNNING.
+- Cached joint paths now assign progress from each segment's minimum q1/q2/q3 travel time under the configured joint speed limits. Dense Cartesian IK samples therefore consume proportionally less global progress than the 1 deg staging samples, removing the artificial sample-density speed collapse without changing geometry, belt compensation, motor direction or the target point.
+- The exact safe-pose join is also a geometric corner: the incoming path is shoulder-dominant while the outgoing linear IK path is elbow-dominant. A 12 joint-interval / 12 Cartesian-interval cubic Bezier blend now rounds only this local join, stays inside the same joint safety limits, and preserves tangent continuity into and out of the blend.
 
 - Physical bring-up reported that only the elbow appeared enabled. The current module sets `mode_entered/control_enabled` from CAN transmit success, although that only proves the STM32 queued a frame and does not prove the motor entered Motor Mode.
 - NORMAL currently sends Enter Mode during `ARM_START_SYNC_TARGETS`, then immediately begins escape/return without waiting for a fresh state-confirming feedback frame. Startup must instead gate all later behavior on explicit three-axis enable confirmation.

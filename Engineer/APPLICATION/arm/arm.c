@@ -47,6 +47,7 @@ typedef struct {
     uint8_t resetting;
     uint8_t auto_init_initialized;
     uint8_t auto_point_initialized;
+    uint8_t auto_point_first_move;
     uint8_t elbow_coupling_active;
 } Arm_Runtime_s;
 
@@ -493,7 +494,7 @@ static void ArmProcessEnableOnly(uint32_t now_ms)
 
         case ARM_START_READY:
             /*
-             * 三轴持续保持各自首次有效反馈位置；禁止任何自动机械臂运动。
+             * 纯使能模式只保持位置；联调模式在此基础上由arm轨迹层接管目标。
              */
             if ((uint32_t)(now_ms - arm_runtime.state_tick) >=
                 ARM_DM_ENABLE_REFRESH_MS) {
@@ -1032,7 +1033,6 @@ static void ArmProcessAutoInit(uint32_t now_ms)
     };
     Arm_DM_Auto_Init_Debug_s *init = &g_arm_dm_debug.auto_init;
     uint8_t axis;
-    float speed_deg_s;
     float tracking_error;
     float axis_speed_deg_s;
 
@@ -1070,8 +1070,7 @@ static void ArmProcessAutoInit(uint32_t now_ms)
         return;
     }
 
-    speed_deg_s = init->speed_deg_s;
-    if (!isfinite(speed_deg_s) || speed_deg_s <= 0.0f) {
+    if (!isfinite(init->speed_deg_s) || init->speed_deg_s <= 0.0f) {
         init->state = ARM_DM_AUTO_INIT_FAULT;
         init->result = ARM_COMMAND_INVALID;
         return;
@@ -1112,7 +1111,7 @@ static void ArmProcessAutoInit(uint32_t now_ms)
                 init->result = ARM_COMMAND_PREFLIGHT_FAILED;
                 break;
             }
-            if (!ArmCommandPose(init_target_q_deg, speed_deg_s, 0u)) {
+            if (!ArmCommandPose(init_target_q_deg, init->speed_deg_s, 0u)) {
                 init->state = ARM_DM_AUTO_INIT_FAULT;
                 init->result = ARM_COMMAND_PREFLIGHT_FAILED;
                 break;
@@ -1165,18 +1164,34 @@ static void ArmProcessAutoInit(uint32_t now_ms)
 
 static void ArmProcessAutoPoint(uint32_t now_ms)
 {
+    static const float safe_q_deg[3] = {
+        ARM_SAFE_Q1_DEG,
+        ARM_SAFE_Q2_DEG,
+        ARM_SAFE_Q3_DEG
+    };
+    static const Arm_Position_s auto_points[ARM_DM_AUTO_POINT_COUNT] = {
+        {ARM_DM_AUTO_POINT_1_X_MM, ARM_DM_AUTO_POINT_1_Y_MM,
+         ARM_DM_AUTO_POINT_1_Z_MM},
+        {ARM_DM_AUTO_POINT_2_X_MM, ARM_DM_AUTO_POINT_2_Y_MM,
+         ARM_DM_AUTO_POINT_2_Z_MM},
+        {ARM_DM_AUTO_POINT_3_X_MM, ARM_DM_AUTO_POINT_3_Y_MM,
+         ARM_DM_AUTO_POINT_3_Z_MM},
+        {ARM_DM_AUTO_POINT_4_X_MM, ARM_DM_AUTO_POINT_4_Y_MM,
+         ARM_DM_AUTO_POINT_4_Z_MM},
+    };
     Arm_DM_Auto_Point_Debug_s *point = &g_arm_dm_debug.auto_point;
     Arm_IK_Result_s ik_result;
-    float speed_deg_s;
+    Arm_Motion_Result_e motion_result;
 
     if (point->enable == 0u) {
         if (point->state != ARM_DM_AUTO_POINT_IDLE) {
-            ArmSyncAllCurrentTargets();
+            ArmTrajectoryCancel();
         }
         point->state = ARM_DM_AUTO_POINT_IDLE;
         point->axis = ARM_DM_TEST_NONE;
         point->result = ARM_COMMAND_NOT_READY;
         arm_runtime.auto_point_initialized = 0u;
+        arm_runtime.auto_point_first_move = 1u;
         return;
     }
 
@@ -1197,13 +1212,12 @@ static void ArmProcessAutoPoint(uint32_t now_ms)
         point->done = 0u;
         point->result = ARM_COMMAND_NOT_READY;
         point->ik_status = ARM_IK_INVALID_ARGUMENT;
-        point->target_mm.x_mm = ARM_DM_AUTO_POINT_X_MM;
-        point->target_mm.y_mm = ARM_DM_AUTO_POINT_Y_MM;
-        point->target_mm.z_mm = ARM_DM_AUTO_POINT_Z_MM;
+        point->target_mm = auto_points[0];
         point->start_deg = NAN;
         point->target_deg = NAN;
         point->elapsed_ms = 0u;
-        point->cycle_count++;
+        point->cycle_count = 0u;
+        arm_runtime.auto_point_first_move = 1u;
         return;
     }
 
@@ -1214,8 +1228,8 @@ static void ArmProcessAutoPoint(uint32_t now_ms)
         point->result = ARM_COMMAND_NOT_READY;
         return;
     }
-    speed_deg_s = point->speed_deg_s;
-    if (!isfinite(speed_deg_s) || speed_deg_s <= 0.0f) {
+    if (!isfinite(point->speed_mm_s) || point->speed_mm_s <= 0.0f ||
+        point->speed_mm_s > ARM_LINEAR_MAX_SPEED_MM_S) {
         point->state = ARM_DM_AUTO_POINT_FAULT;
         point->result = ARM_COMMAND_INVALID;
         return;
@@ -1238,59 +1252,116 @@ static void ArmProcessAutoPoint(uint32_t now_ms)
                    sizeof(point->target_q_deg));
             memcpy(arm_runtime.auto_point_target_q_deg, ik_result.q_deg,
                    sizeof(arm_runtime.auto_point_target_q_deg));
-            point->step = 0u;
             point->result = ARM_COMMAND_OK;
-            point->state = ARM_DM_AUTO_POINT_MOVE_AXIS;
+            point->state = arm_runtime.auto_point_first_move != 0u ?
+                ARM_DM_AUTO_POINT_START_CONTINUOUS :
+                ARM_DM_AUTO_POINT_START_LINEAR;
             break;
 
-        case ARM_DM_AUTO_POINT_MOVE_AXIS:
-            if (!ArmCommandPose(arm_runtime.auto_point_target_q_deg,
-                    speed_deg_s, 0u)) {
+        case ARM_DM_AUTO_POINT_START_CONTINUOUS:
+            motion_result = ArmTrajectoryMoveJointThenLinear(
+                safe_q_deg, &point->target_mm, point->speed_mm_s);
+            if (motion_result != ARM_MOTION_RESULT_OK) {
+                point->ik_status = g_arm_motion_debug.ik_status;
                 point->state = ARM_DM_AUTO_POINT_FAULT;
-                point->result = ARM_COMMAND_PREFLIGHT_FAILED;
+                point->result = motion_result == ARM_MOTION_RESULT_BUSY ?
+                    ARM_COMMAND_BUSY : ARM_COMMAND_PREFLIGHT_FAILED;
                 break;
             }
+            memcpy(point->target_q_deg, g_arm_motion_debug.target_q_deg,
+                   sizeof(point->target_q_deg));
+            memcpy(arm_runtime.auto_point_target_q_deg,
+                   g_arm_motion_debug.target_q_deg,
+                   sizeof(arm_runtime.auto_point_target_q_deg));
             arm_runtime.auto_point_tick = now_ms;
             arm_runtime.stable_tick = 0u;
-            point->axis = ARM_DM_TEST_NONE;
-            point->step = 1u;
-            point->start_deg = NAN;
-            point->target_deg = NAN;
             point->elapsed_ms = 0u;
             point->result = ARM_COMMAND_OK;
-            point->state = ARM_DM_AUTO_POINT_WAIT_AXIS;
+            point->state = ARM_DM_AUTO_POINT_WAIT_CONTINUOUS;
             break;
 
-        case ARM_DM_AUTO_POINT_WAIT_AXIS:
-            if (!ArmCommandPose(arm_runtime.auto_point_target_q_deg,
-                    speed_deg_s, 0u)) {
-                point->state = ARM_DM_AUTO_POINT_FAULT;
-                point->result = ARM_COMMAND_PREFLIGHT_FAILED;
-                break;
-            }
-            if (ArmPoseArrived(arm_runtime.auto_point_target_q_deg, now_ms)) {
+        case ARM_DM_AUTO_POINT_WAIT_CONTINUOUS:
+            if (!ArmTrajectoryIsBusy() &&
+                g_arm_motion_debug.motion_state == ARM_MOTION_HOLDING &&
+                ArmPoseArrived(arm_runtime.auto_point_target_q_deg, now_ms)) {
                 point->axis = ARM_DM_TEST_NONE;
                 point->done = 1u;
                 point->result = ARM_COMMAND_OK;
-                point->state = ARM_DM_AUTO_POINT_DONE;
+                arm_runtime.auto_point_first_move = 0u;
+                point->state = ARM_DM_AUTO_POINT_WAIT_INTERVAL;
                 break;
             }
             if ((uint32_t)(now_ms - arm_runtime.auto_point_tick) >=
                 ARM_DM_AUTO_POINT_STEP_TIMEOUT_MS) {
+                ArmTrajectoryCancel();
                 point->state = ARM_DM_AUTO_POINT_FAULT;
                 point->result = ARM_COMMAND_NOT_READY;
             }
             break;
 
-        case ARM_DM_AUTO_POINT_DONE:
-            ArmSyncAllCurrentTargets();
+        case ARM_DM_AUTO_POINT_START_LINEAR:
+            motion_result = ArmMoveLinear(&point->target_mm,
+                                          point->speed_mm_s);
+            if (motion_result != ARM_MOTION_RESULT_OK) {
+                point->ik_status = g_arm_motion_debug.ik_status;
+                point->state = ARM_DM_AUTO_POINT_FAULT;
+                point->result = motion_result == ARM_MOTION_RESULT_BUSY ?
+                    ARM_COMMAND_BUSY : ARM_COMMAND_PREFLIGHT_FAILED;
+                break;
+            }
+            memcpy(point->target_q_deg, g_arm_motion_debug.target_q_deg,
+                   sizeof(point->target_q_deg));
+            memcpy(arm_runtime.auto_point_target_q_deg,
+                   g_arm_motion_debug.target_q_deg,
+                   sizeof(arm_runtime.auto_point_target_q_deg));
+            arm_runtime.auto_point_tick = now_ms;
+            arm_runtime.stable_tick = 0u;
+            point->done = 0u;
+            point->elapsed_ms = 0u;
+            point->result = ARM_COMMAND_OK;
+            point->state = ARM_DM_AUTO_POINT_WAIT_LINEAR;
+            break;
+
+        case ARM_DM_AUTO_POINT_WAIT_LINEAR:
+            if (!ArmTrajectoryIsBusy() &&
+                g_arm_motion_debug.motion_state == ARM_MOTION_HOLDING &&
+                ArmPoseArrived(arm_runtime.auto_point_target_q_deg, now_ms)) {
+                point->axis = ARM_DM_TEST_NONE;
+                point->done = 1u;
+                point->result = ARM_COMMAND_OK;
+                point->state = ARM_DM_AUTO_POINT_WAIT_INTERVAL;
+                break;
+            }
+            if ((uint32_t)(now_ms - arm_runtime.auto_point_tick) >=
+                ARM_DM_AUTO_POINT_STEP_TIMEOUT_MS) {
+                ArmTrajectoryCancel();
+                point->state = ARM_DM_AUTO_POINT_FAULT;
+                point->result = ARM_COMMAND_NOT_READY;
+            }
+            break;
+
+        case ARM_DM_AUTO_POINT_WAIT_INTERVAL:
             point->axis = ARM_DM_TEST_NONE;
             point->done = 1u;
             point->result = ARM_COMMAND_OK;
+            if ((uint32_t)(now_ms - arm_runtime.auto_point_tick) >=
+                ARM_DM_AUTO_POINT_INTERVAL_MS) {
+                point->step++;
+                if (point->step >= ARM_DM_AUTO_POINT_COUNT) {
+                    point->step = 0u;
+                    point->cycle_count++;
+                }
+                point->target_mm = auto_points[point->step];
+                point->done = 0u;
+                point->ik_status = ARM_IK_INVALID_ARGUMENT;
+                point->state = ARM_DM_AUTO_POINT_SOLVE_IK;
+            }
             break;
 
         case ARM_DM_AUTO_POINT_FAULT:
-            ArmSyncAllCurrentTargets();
+            if (ArmTrajectoryIsBusy()) {
+                ArmTrajectoryCancel();
+            }
             break;
 
         case ARM_DM_AUTO_POINT_IDLE:
@@ -1540,6 +1611,7 @@ void ArmInit(void)
            sizeof(arm_runtime.auto_point_target_q_deg));
     arm_runtime.auto_init_initialized = 0u;
     arm_runtime.auto_point_initialized = 0u;
+    arm_runtime.auto_point_first_move = 1u;
     arm_runtime.elbow_coupling_active = 0u;
     g_arm_dm_debug.auto_init.enable = ARM_DM_AUTO_INIT_ENABLE;
     g_arm_dm_debug.auto_init.state = ARM_DM_AUTO_INIT_IDLE;
@@ -1563,12 +1635,12 @@ void ArmInit(void)
     g_arm_dm_debug.auto_point.done = 0u;
     g_arm_dm_debug.auto_point.result = ARM_COMMAND_NOT_READY;
     g_arm_dm_debug.auto_point.ik_status = ARM_IK_INVALID_ARGUMENT;
-    g_arm_dm_debug.auto_point.target_mm.x_mm = ARM_DM_AUTO_POINT_X_MM;
-    g_arm_dm_debug.auto_point.target_mm.y_mm = ARM_DM_AUTO_POINT_Y_MM;
-    g_arm_dm_debug.auto_point.target_mm.z_mm = ARM_DM_AUTO_POINT_Z_MM;
+    g_arm_dm_debug.auto_point.target_mm.x_mm = ARM_DM_AUTO_POINT_1_X_MM;
+    g_arm_dm_debug.auto_point.target_mm.y_mm = ARM_DM_AUTO_POINT_1_Y_MM;
+    g_arm_dm_debug.auto_point.target_mm.z_mm = ARM_DM_AUTO_POINT_1_Z_MM;
     memset(g_arm_dm_debug.auto_point.target_q_deg, 0,
            sizeof(g_arm_dm_debug.auto_point.target_q_deg));
-    g_arm_dm_debug.auto_point.speed_deg_s = ARM_DM_AUTO_POINT_SPEED_DEG_S;
+    g_arm_dm_debug.auto_point.speed_mm_s = ARM_DM_AUTO_POINT_SPEED_MM_S;
     g_arm_dm_debug.auto_point.start_deg = NAN;
     g_arm_dm_debug.auto_point.target_deg = NAN;
     g_arm_dm_debug.auto_point.elapsed_ms = 0u;
@@ -1627,12 +1699,13 @@ void ArmTask(void)
         }
         /* 反馈state含义尚未实机逐状态验收，联调阶段只观察，不据此失能。 */
         if (ArmTemperatureAtOrAbove(ARM_TEMPERATURE_HOLD_C)) {
-            ArmSyncAllCurrentTargets();
+            ArmTrajectoryCancel();
             g_arm_dm_debug.auto_init.result = ARM_COMMAND_NOT_READY;
             ArmUpdateFeedback(now_ms);
             ArmUpdateTeachAndKinematicsDebug();
             return;
         }
+        ArmTrajectoryTask(now_ms);
         if (g_arm_dm_debug.auto_init.state != ARM_DM_AUTO_INIT_DONE) {
             ArmProcessAutoInit(now_ms);
         }
@@ -1687,7 +1760,13 @@ const Arm_Teach_Point_s *ArmGetTeachPoint(void)
 
 uint8_t ArmBeginJointMove(const float target_q_deg[3])
 {
-    if (g_arm_state.mode != ARM_MODE_READY ||
+    uint8_t control_mode_ready = g_arm_state.mode == ARM_MODE_READY;
+
+#if ARM_BOOT_MODE == ARM_BOOT_MODE_DM_SINGLE_AXIS_TEST
+    control_mode_ready = control_mode_ready ||
+        g_arm_state.mode == ARM_MODE_DM_SINGLE_AXIS_TEST;
+#endif
+    if (!control_mode_ready ||
         g_arm_state.start_state != ARM_START_READY ||
         g_arm_state.fault_latched != ARM_FAULT_NONE ||
         !ArmJointPoseWithinSoftLimits(target_q_deg)) {
@@ -1702,7 +1781,13 @@ uint8_t ArmBeginJointMove(const float target_q_deg[3])
 
 uint8_t ArmUpdateJointReference(const float reference_q_deg[3])
 {
-    if (reference_q_deg == NULL || g_arm_state.mode != ARM_MODE_READY ||
+    uint8_t control_mode_ready = g_arm_state.mode == ARM_MODE_READY;
+
+#if ARM_BOOT_MODE == ARM_BOOT_MODE_DM_SINGLE_AXIS_TEST
+    control_mode_ready = control_mode_ready ||
+        g_arm_state.mode == ARM_MODE_DM_SINGLE_AXIS_TEST;
+#endif
+    if (reference_q_deg == NULL || !control_mode_ready ||
         g_arm_state.start_state != ARM_START_READY ||
         g_arm_state.fault_latched != ARM_FAULT_NONE ||
         !ArmJointPoseWithinSoftLimits(reference_q_deg)) {

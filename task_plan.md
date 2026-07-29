@@ -131,6 +131,28 @@ motors in position-speed mode.
 - [completed] Build a commissioning HEX and document the exact Watch request/ack sequence.
 - [pending] After physical direction confirmation, switch the final image to NORMAL for escape and sequential safe-pose return.
 
+### Phase 13 - Connect commissioning auto motion to trajectory planning
+
+- [completed] Reuse the existing trajectory layer in the current `DM_SINGLE_AXIS_TEST` commissioning boot path.
+- [completed] Preserve the physically verified simultaneous direct initialization; enable trajectory planning only after initialization and belt compensation are complete.
+- [completed] Run the automatic XYZ test point as a preflight-checked Cartesian linear trajectory instead of sending one final IK pose.
+- [completed] Preserve the live geometry, q3 convention, belt compensation, target point and enable sequence.
+- [completed] Reuse concise `g_arm_dm_debug` and `g_arm_motion_debug` planning state/result without adding another large debug structure.
+- [completed] Perform source/diff validation only; do not run Keil compilation per user request.
+
+### Phase 14 - Remove the forward-safe-pose hesitation
+
+- [completed] Merge initialization-to-safe and safe-to-XYZ into one global quintic trajectory so the safe pose is not a stop point.
+- [completed] Parameterize cached joint samples by joint travel time instead of raw sample index so the 1 deg staging samples and 1 mm Cartesian IK samples do not create a reference-speed step at the waypoint.
+- [completed] Complete scoped source and whitespace validation without running Keil compilation.
+
+### Phase 15 - Four-point host-command simulation
+
+- [completed] Replace the one-shot XYZ test with the requested four-point loop.
+- [completed] Send point 1 immediately after initialization, then select the next point every 3000 ms.
+- [completed] Preserve the rounded composite entry path for the first point and use preflight-checked Cartesian lines between subsequent points.
+- [completed] Validate state transitions, point order and source formatting without running Keil compilation.
+
 ## Environment Notes
 
 - PowerShell startup fails with `8009001d`; native `cmd.exe` is used.
@@ -138,3 +160,5 @@ motors in position-speed mode.
 - Keil is installed at `C:\Keil_v5` and builds with project-local `MDK-ARM/tmp`.
 - Existing user/IDE changes in `.vscode/BROWSE.VC.DB`, `Engineer.uvguix.11737`
   and `Engineer.uvoptx` remain untouched.
+- 2026-07-30: a compound `cmd.exe` `rg` inspection failed because cmd parsed the quoted search expression as commands; use `C:\w64devkit\bin\bash.exe` for compound source inspection.
+- 2026-07-30: a multiline Python `-c` path simulation failed under `cmd.exe` with an unterminated string; use Bash stdin/heredoc for the numerical reproduction.
