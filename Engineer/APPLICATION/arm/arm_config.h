@@ -28,8 +28,8 @@
  * 将ARM_API_POINT_TEST_ENABLE改回0，正式命令层即可接管同一个公开接口。
  */
 #define ARM_API_POINT_TEST_ENABLE             1u
-#define ARM_API_POINT_TEST_X_MM              74.7991486f
-#define ARM_API_POINT_TEST_Y_MM              (-8.17393684f)
+#define ARM_API_POINT_TEST_X_MM             103.8259070f
+#define ARM_API_POINT_TEST_Y_MM              (-4.79646767f)
 #define ARM_API_POINT_TEST_Z_MM              (-26.6742554f)
 #define ARM_API_POINT_TEST_SPEED_MM_S        100.0f
 
@@ -42,8 +42,8 @@
 #define ARM_BASE_HEIGHT_MM               34.0f
 #define ARM_LINK_1_MM                   150.0f
 #define ARM_LINK_2_MM                   179.0f
-#define ARM_SHOULDER_OFFSET_FORWARD_MM  (-29.0f)
-#define ARM_SHOULDER_OFFSET_LEFT_MM      (-7.6f)
+#define ARM_SHOULDER_OFFSET_FORWARD_MM     0.0f
+#define ARM_SHOULDER_OFFSET_LEFT_MM       (-4.0f)
 
 /* GM6020为绝对编码器：朝车头时原始角190.369736deg，无需碰限位清零。 */
 #define ARM_BASE_FRONT_RAW_DEG          190.369736f
@@ -71,17 +71,17 @@
 /*
  * 单边堵转初始化参数。
  * 判据为“电流超过阈值且速度低于阈值”；启动屏蔽避免加速电流误判，
- * 连续确认抑制毛刺。确认后立即失能，等待3s释放弹性，再清total_angle。
+ * 连续确认抑制毛刺。确认后立即失能，等待1s释放弹性，再清total_angle。
  */
-#define ARM_AUTO_START_ONLINE_MS          20u
-#define ARM_SHOULDER_HOMING_SPEED_DPS    450.0f
-#define ARM_SHOULDER_STALL_CURRENT      1200.0f
+#define ARM_AUTO_START_ONLINE_MS          10u
+#define ARM_SHOULDER_HOMING_SPEED_DPS    250.0f
+#define ARM_SHOULDER_STALL_CURRENT      600.0f
 #define ARM_ELBOW_HOMING_SPEED_DPS       800.0f
 #define ARM_ELBOW_STALL_CURRENT         1400.0f
 #define ARM_HOMING_STALL_SPEED_DPS        20.0f
 #define ARM_HOMING_SPINUP_MS             500u
 #define ARM_HOMING_STALL_CONFIRM_MS        8u
-#define ARM_STOP_SETTLE_MS              3000u
+#define ARM_STOP_SETTLE_MS              1000u
 #define ARM_SHOULDER_MIN_DIRECTION         1.0f
 #define ARM_ELBOW_MIN_DIRECTION            1.0f
 
@@ -118,14 +118,14 @@
 
 /* 自动测试参数只在ARM_BOOT_MODE_AUTO_TEST下生效。 */
 #define ARM_AUTO_TEST_LOOP                   1u
-#define ARM_AUTO_TEST_POINT_1_X_MM          27.1272f
-#define ARM_AUTO_TEST_POINT_1_Y_MM          (-7.6000f)
+#define ARM_AUTO_TEST_POINT_1_X_MM          56.1272f
+#define ARM_AUTO_TEST_POINT_1_Y_MM          (-4.0000f)
 #define ARM_AUTO_TEST_POINT_1_Z_MM         120.0365f
-#define ARM_AUTO_TEST_POINT_2_X_MM         122.0166f
-#define ARM_AUTO_TEST_POINT_2_Y_MM          76.1590f
+#define ARM_AUTO_TEST_POINT_2_X_MM         143.7071f
+#define ARM_AUTO_TEST_POINT_2_Y_MM          95.7417f
 #define ARM_AUTO_TEST_POINT_2_Z_MM        (-117.2108f)
-#define ARM_AUTO_TEST_POINT_3_X_MM           8.8361f
-#define ARM_AUTO_TEST_POINT_3_Y_MM         (-19.5842f)
+#define ARM_AUTO_TEST_POINT_3_X_MM          31.8877f
+#define ARM_AUTO_TEST_POINT_3_Y_MM         (-37.5448f)
 #define ARM_AUTO_TEST_POINT_3_Z_MM         159.0000f
 
 /* 3508减速比维护测试。 */

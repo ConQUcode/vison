@@ -48,6 +48,32 @@ static float arm_joint_hold_target_motor_deg[2];
 static float arm_base_last_target_error_deg;
 static uint8_t arm_base_target_error_valid;
 static uint8_t arm_teach_mode_entered;
+static uint8_t arm_homing_speed_pid_loaded;
+static PID_Init_Config_s arm_shoulder_normal_speed_pid;
+static PID_Init_Config_s arm_elbow_normal_speed_pid;
+
+/*
+ * 堵转初始化专用速度PID。
+ * 当前数值复制自拆分前的3508/2006注册速度环，后续调节正常三环时不会影响
+ * 初始化碰限位力度；若只想改变堵转手感，应只修改这里。
+ */
+static PID_Init_Config_s arm_shoulder_homing_speed_pid = {
+    .Kp = 3.0f,
+    .Ki = 0.2f,
+    .Kd = 0.0f,
+    .Improve = PID_Integral_Limit,
+    .IntegralLimit = 3000.0f,
+    .MaxOut = 5500.0f,
+};
+
+static PID_Init_Config_s arm_elbow_homing_speed_pid = {
+    .Kp = 2.3f,
+    .Ki = 0.1f,
+    .Kd = 0.0f,
+    .Improve = PID_Integral_Limit,
+    .IntegralLimit = 5000.0f,
+    .MaxOut = 8200.0f,
+};
 
 static void ArmCalibrationFail(Arm_Calibration_State_e error_state);
 static void ArmSoftLimitEnterState(Arm_Soft_Limit_State_e state,
@@ -62,6 +88,7 @@ static float ArmSoftLimitJointToMotor(float joint_deg,
 static float ArmNearestBaseTotalTarget(float target_raw_deg);
 static float ArmWrapTo360(float angle_deg);
 static void ArmUpdateTeachPoint(void);
+static void ArmRestoreNormalSpeedPids(void);
 
 Arm_State_s g_arm_state;
 Arm_Calibration_s g_arm_calibration;
@@ -141,15 +168,15 @@ static Motor_Init_Config_s ArmBaseMotorConfig(void)
         },
         .controller_param_init_config = {
             .angle_PID = {
-                .Kp = 13.5f,
-                .Ki = 1.8f,
+                .Kp = 10.5f,
+                .Ki = 2.8f,
                 .DeadBand = 1.0f,
                 .Improve = PID_Integral_Limit,
-                .IntegralLimit = 3000.0f,
-                .MaxOut = 2500.0f,
+                .IntegralLimit = 3500.0f,
+                .MaxOut = 3000.0f,
             },
             .speed_PID = {
-                .Kp = 7.0f,
+                .Kp = 8.0f,
                 .Ki = 1.0f,
                 .Improve = PID_Integral_Limit,
                 .IntegralLimit = 3000.0f,
@@ -194,21 +221,21 @@ static Motor_Init_Config_s ArmShoulderMotorConfig(void)
         },
         .controller_param_init_config = {
             .angle_PID = {
-                .Kp = 10.5f,
+                .Kp = 11.5f,
                 .Ki = 0.01f,
                 .Kd = 0.0f,
                 .DeadBand = 19.22925f,
-                .MaxOut = 2800.0f,
+                .MaxOut = 5800.0f,
             },
             .speed_PID = {
-                .Kp = 6.0f,
+                .Kp = 9.0f,
                 .Ki = 0.2f,
                 .Improve = PID_Integral_Limit,
                 .IntegralLimit = 3000.0f,
-                .MaxOut = 5500.0f,
+                .MaxOut = 7500.0f,
             },
             .current_PID = {
-                .Kp = 1.2f,
+                .Kp = 1.3f,
                 .Ki = 0.01f,
                 .Kd = 0.0f,
                 .Improve = (PID_Improvement_e)(
@@ -311,6 +338,60 @@ static void ArmClearMotorController(DJIMotor_Instance *motor)
     ArmClearPidRuntime(&motor->motor_controller.angle_PID);
     ArmClearPidRuntime(&motor->motor_controller.speed_PID);
     ArmClearPidRuntime(&motor->motor_controller.current_PID);
+}
+
+static void ArmCopyPidConfig(const PID_Instance *pid,
+                             PID_Init_Config_s *config)
+{
+    if (pid == NULL || config == NULL) {
+        return;
+    }
+    config->Kp = pid->Kp;
+    config->Ki = pid->Ki;
+    config->Kd = pid->Kd;
+    config->MaxOut = pid->MaxOut;
+    config->DeadBand = pid->DeadBand;
+    config->Improve = pid->Improve;
+    config->IntegralLimit = pid->IntegralLimit;
+    config->CoefA = pid->CoefA;
+    config->CoefB = pid->CoefB;
+    config->Output_LPF_RC = pid->Output_LPF_RC;
+    config->Derivative_LPF_RC = pid->Derivative_LPF_RC;
+}
+
+/*
+ * 进入堵转初始化时保存正常三环中的速度PID，然后只替换速度环参数。
+ * 角度环和电流环不参与寻零，且其参数完全不受此切换影响。
+ */
+static void ArmLoadHomingSpeedPids(void)
+{
+    if (arm_homing_speed_pid_loaded || arm_shoulder_motor == NULL ||
+        arm_elbow_motor == NULL) {
+        return;
+    }
+    ArmCopyPidConfig(&arm_shoulder_motor->motor_controller.speed_PID,
+                     &arm_shoulder_normal_speed_pid);
+    ArmCopyPidConfig(&arm_elbow_motor->motor_controller.speed_PID,
+                     &arm_elbow_normal_speed_pid);
+    PIDInit(&arm_shoulder_motor->motor_controller.speed_PID,
+            &arm_shoulder_homing_speed_pid);
+    PIDInit(&arm_elbow_motor->motor_controller.speed_PID,
+            &arm_elbow_homing_speed_pid);
+    arm_homing_speed_pid_loaded = 1u;
+}
+
+/* 成功、失败和人工中止都必须恢复注册结构体中的正常速度PID。 */
+static void ArmRestoreNormalSpeedPids(void)
+{
+    if (!arm_homing_speed_pid_loaded || arm_shoulder_motor == NULL ||
+        arm_elbow_motor == NULL) {
+        return;
+    }
+    PIDInit(&arm_shoulder_motor->motor_controller.speed_PID,
+            &arm_shoulder_normal_speed_pid);
+    PIDInit(&arm_elbow_motor->motor_controller.speed_PID,
+            &arm_elbow_normal_speed_pid);
+    arm_homing_speed_pid_loaded = 0u;
 }
 
 static void ArmStopMotor(DJIMotor_Instance *motor)
@@ -610,6 +691,7 @@ static void ArmFinishJointHoming(void)
         ArmCalibrationFail(ARM_CAL_ERROR_TRAVEL);
         return;
     }
+    ArmRestoreNormalSpeedPids();
     arm_joint_hold_target_motor_deg[0] =
         arm_shoulder_motor->measure.total_angle;
     arm_joint_hold_target_motor_deg[1] =
@@ -659,6 +741,7 @@ static void ArmCalibrationFail(Arm_Calibration_State_e error_state)
     ArmStopMotor(arm_base_motor);
     ArmStopMotor(arm_shoulder_motor);
     ArmStopMotor(arm_elbow_motor);
+    ArmRestoreNormalSpeedPids();
     ArmClearMotorController(arm_base_motor);
     ArmClearMotorController(arm_shoulder_motor);
     ArmClearMotorController(arm_elbow_motor);
@@ -1023,6 +1106,7 @@ static void ArmStartHomingMode(Arm_Homing_Mode_e mode)
     }
 
     g_arm_state.mode = ARM_MODE_CALIBRATION;
+    ArmLoadHomingSpeedPids();
     ArmClearMotorController(arm_shoulder_motor);
     ArmClearMotorController(arm_elbow_motor);
     ArmEnterCalibrationState(ARM_CAL_ELBOW_FIND_REFERENCE,
@@ -1953,6 +2037,7 @@ void ArmInit(void)
     arm_base_last_target_error_deg = 0.0f;
     arm_base_target_error_valid = 0u;
     arm_teach_mode_entered = 0u;
+    arm_homing_speed_pid_loaded = 0u;
     g_arm_state.q_target_deg[ARM_JOINT_BASE_YAW] = 0.0f;
     g_arm_state.q_target_deg[ARM_JOINT_SHOULDER] =
         ARM_SHOULDER_REFERENCE_DEG;

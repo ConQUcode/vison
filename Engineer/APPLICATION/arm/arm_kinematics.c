@@ -128,14 +128,26 @@ void ArmForwardKinematics3DOF(float q1_deg,
 uint8_t ArmKinematicsSelfTest(float *error_mm)
 {
     Arm_Position_s position;
+    Arm_Position_s expected;
     float error;
 
     ArmForwardKinematics3DOF(0.0f, 180.0f, -180.0f, &position);
-    error = sqrtf(position.x_mm * position.x_mm +
-                  (position.y_mm - ARM_SHOULDER_OFFSET_LEFT_MM) *
-                      (position.y_mm - ARM_SHOULDER_OFFSET_LEFT_MM) +
-                  (position.z_mm - ARM_BASE_HEIGHT_MM) *
-                      (position.z_mm - ARM_BASE_HEIGHT_MM));
+    /*
+     * 参考姿态q=[0,180,-180]时，大臂沿-X、末端小臂沿+X。
+     * 期望坐标必须由当前几何参数推导，不能再把旧机构的x=0硬编码进自检，
+     * 否则修改肩部固定偏移后会被误判为运动学故障。
+     */
+    expected.x_mm = ARM_SHOULDER_OFFSET_FORWARD_MM - ARM_LINK_1_MM +
+                    ARM_LINK_2_MM;
+    expected.y_mm = ARM_SHOULDER_OFFSET_LEFT_MM;
+    expected.z_mm = ARM_BASE_HEIGHT_MM;
+    error = sqrtf(
+        (position.x_mm - expected.x_mm) *
+            (position.x_mm - expected.x_mm) +
+        (position.y_mm - expected.y_mm) *
+            (position.y_mm - expected.y_mm) +
+        (position.z_mm - expected.z_mm) *
+            (position.z_mm - expected.z_mm));
     if (error_mm != NULL) {
         *error_mm = error;
     }
