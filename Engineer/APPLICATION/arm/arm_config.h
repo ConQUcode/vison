@@ -74,7 +74,7 @@
  * 连续确认抑制毛刺。确认后立即失能，等待1s释放弹性，再清total_angle。
  */
 #define ARM_AUTO_START_ONLINE_MS          10u
-#define ARM_SHOULDER_HOMING_SPEED_DPS    250.0f
+#define ARM_SHOULDER_HOMING_SPEED_DPS    450.0f
 #define ARM_SHOULDER_STALL_CURRENT      600.0f
 #define ARM_ELBOW_HOMING_SPEED_DPS       800.0f
 #define ARM_ELBOW_STALL_CURRENT         1400.0f
@@ -104,12 +104,12 @@
 #define ARM_SOFT_LIMIT_TIMEOUT_MS          45000u
 
 /*
- * 腕部轴心空间速度上限200mm/s。局部IK若超过关节限速会自动延长时间。
+ * 腕部轴心空间速度上限300mm/s。局部IK若超过关节限速会自动延长时间。
  * 提高限速会缩短动作，但也会增大跟随误差、超调和结构振动。
  */
-#define ARM_LINEAR_DEFAULT_SPEED_MM_S     200.0f
-#define ARM_LINEAR_Q1_MAX_SPEED_DEG_S     140.0f
-#define ARM_LINEAR_Q2_MAX_SPEED_DEG_S      90.0f
+#define ARM_LINEAR_DEFAULT_SPEED_MM_S     400.0f
+#define ARM_LINEAR_Q1_MAX_SPEED_DEG_S     240.0f
+#define ARM_LINEAR_Q2_MAX_SPEED_DEG_S      60.0f
 #define ARM_LINEAR_Q3_MAX_SPEED_DEG_S     110.0f
 #define ARM_LINEAR_SAMPLE_SPACING_MM        2.0f /* 只影响预检密度，不决定速度。 */
 #define ARM_LINEAR_MAX_SAMPLES             384u

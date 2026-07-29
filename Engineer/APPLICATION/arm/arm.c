@@ -53,6 +53,33 @@ static PID_Init_Config_s arm_shoulder_normal_speed_pid;
 static PID_Init_Config_s arm_elbow_normal_speed_pid;
 
 /*
+ * M3508肩关节前馈：Iff = K1*cos(q2) + K2*cos(q2+q3) + bias。
+ * K1补偿大臂及安装在大臂上的质量，K2预留给小臂/腕部重量传到肩关节的
+ * 力矩；当前K2为0，因此没有启用小臂负载补偿，也没有给M2006增加前馈。
+ * q2<=30度关闭，30度后平滑介入，接近90度平滑退出，q2>=90度关闭。
+ * 这样只在用户确认的30~90度区间辅助，并避免开关边界出现电流阶跃。
+ */
+Arm_Shoulder_Feedforward_s g_arm_shoulder_feedforward = {
+    .enabled = 1u,
+    .active = 0u,
+    .shoulder_gain_current = -2000.0f,
+    .link_load_gain_current = 0.0f,
+    .bias_current = 0.0f,
+    .max_current = 3000.0f,
+    .start_above_deg = 30.0f,
+    .off_above_deg = 90.0f,
+    .q2_deg = 0.0f,
+    .q2_plus_q3_deg = 0.0f,
+    .angle_window_scale = 0.0f,
+    .cos_q2 = 0.0f,
+    .cos_q2_plus_q3 = 0.0f,
+    .shoulder_term_current = 0.0f,
+    .link_load_term_current = 0.0f,
+    .raw_current = 0.0f,
+    .output_current = 0.0f,
+};
+
+/*
  * 堵转初始化专用速度PID。
  * 当前数值复制自拆分前的3508/2006注册速度环，后续调节正常三环时不会影响
  * 初始化碰限位力度；若只想改变堵转手感，应只修改这里。
@@ -89,6 +116,7 @@ static float ArmNearestBaseTotalTarget(float target_raw_deg);
 static float ArmWrapTo360(float angle_deg);
 static void ArmUpdateTeachPoint(void);
 static void ArmRestoreNormalSpeedPids(void);
+static void ArmUpdateShoulderGravityFeedforward(void);
 
 Arm_State_s g_arm_state;
 Arm_Calibration_s g_arm_calibration;
@@ -168,7 +196,7 @@ static Motor_Init_Config_s ArmBaseMotorConfig(void)
         },
         .controller_param_init_config = {
             .angle_PID = {
-                .Kp = 10.5f,
+                .Kp = 10.8f,
                 .Ki = 2.8f,
                 .DeadBand = 1.0f,
                 .Improve = PID_Integral_Limit,
@@ -176,7 +204,7 @@ static Motor_Init_Config_s ArmBaseMotorConfig(void)
                 .MaxOut = 3000.0f,
             },
             .speed_PID = {
-                .Kp = 8.0f,
+                .Kp = 10.0f,
                 .Ki = 1.0f,
                 .Improve = PID_Integral_Limit,
                 .IntegralLimit = 3000.0f,
@@ -220,22 +248,24 @@ static Motor_Init_Config_s ArmShoulderMotorConfig(void)
             .tx_id = ARM_SHOULDER_MOTOR_CAN_ID,
         },
         .controller_param_init_config = {
+            .current_feedforward_ptr =
+                &g_arm_shoulder_feedforward.output_current,
             .angle_PID = {
-                .Kp = 11.5f,
+                .Kp = 10.0f,
                 .Ki = 0.01f,
                 .Kd = 0.0f,
                 .DeadBand = 19.22925f,
                 .MaxOut = 5800.0f,
             },
             .speed_PID = {
-                .Kp = 9.0f,
+                .Kp = 7.5f,
                 .Ki = 0.2f,
                 .Improve = PID_Integral_Limit,
                 .IntegralLimit = 3000.0f,
                 .MaxOut = 7500.0f,
             },
             .current_PID = {
-                .Kp = 1.3f,
+                .Kp = 1.2f,
                 .Ki = 0.01f,
                 .Kd = 0.0f,
                 .Improve = (PID_Improvement_e)(
@@ -251,7 +281,7 @@ static Motor_Init_Config_s ArmShoulderMotorConfig(void)
             .close_loop_type = SPEED_LOOP,
             .motor_reverse_flag = MOTOR_DIRECTION_NORMAL,
             .feedback_reverse_flag = FEEDBACK_DIRECTION_NORMAL,
-            .feedforward_flag = FEEDFORWARD_NONE,
+            .feedforward_flag = CURRENT_FEEDFORWARD,
         },
         .motor_type = M3508,
     };
@@ -494,6 +524,91 @@ static void ArmUpdateFeedback(void)
         g_arm_state.q_feedback_deg[ARM_JOINT_ELBOW] = 0.0f;
     }
     g_arm_state.q_feedback_deg[ARM_JOINT_WRIST] = 0.0f;
+}
+
+/*
+ * 每个控制周期根据当前q2更新M3508电流前馈。
+ * 仅在正常初始化完成、反馈在线且电机已使能时生效；堵转寻零、打点、
+ * 维护扫描、失能及急停状态统一输出0，避免前馈干扰初始化或手动拖动。
+ */
+static void ArmUpdateShoulderGravityFeedforward(void)
+{
+    float q2_deg = g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER];
+    float q3_deg = g_arm_state.q_feedback_deg[ARM_JOINT_ELBOW];
+    float limit = fabsf(g_arm_shoulder_feedforward.max_current);
+    float start_deg = g_arm_shoulder_feedforward.start_above_deg;
+    float off_deg = g_arm_shoulder_feedforward.off_above_deg;
+    float window_scale = 0.0f;
+    uint8_t can_apply =
+        g_arm_shoulder_feedforward.enabled != 0u &&
+        arm_shoulder_motor != NULL &&
+        g_arm_state.motor_online[ARM_JOINT_SHOULDER] != 0u &&
+        g_arm_state.motor_enabled[ARM_JOINT_SHOULDER] != 0u &&
+        g_arm_calibration.joint_calibrated != 0u &&
+        g_arm_state.calibration_state == ARM_CAL_VALID &&
+        g_arm_state.soft_limit_state == ARM_SOFT_LIMIT_COMPLETE &&
+        q2_deg >= g_arm_calibration.shoulder_soft_min_deg &&
+        q2_deg <= g_arm_calibration.shoulder_soft_max_deg &&
+        arm_homing_speed_pid_loaded == 0u &&
+        g_arm_homing_abort == 0u &&
+        ARM_BOOT_MODE != ARM_BOOT_MODE_TEACH_POINT &&
+        ARM_BOOT_MODE != ARM_BOOT_MODE_FULL_CALIBRATION &&
+        ARM_BOOT_MODE != ARM_BOOT_MODE_SHOULDER_RATIO_TEST;
+
+    g_arm_shoulder_feedforward.q2_deg = q2_deg;
+    g_arm_shoulder_feedforward.q2_plus_q3_deg = q2_deg + q3_deg;
+    if (!isfinite(q2_deg) || !isfinite(q3_deg)) {
+        g_arm_shoulder_feedforward.angle_window_scale = 0.0f;
+        g_arm_shoulder_feedforward.cos_q2 = 0.0f;
+        g_arm_shoulder_feedforward.cos_q2_plus_q3 = 0.0f;
+        g_arm_shoulder_feedforward.shoulder_term_current = 0.0f;
+        g_arm_shoulder_feedforward.link_load_term_current = 0.0f;
+        g_arm_shoulder_feedforward.raw_current = 0.0f;
+        g_arm_shoulder_feedforward.output_current = 0.0f;
+        g_arm_shoulder_feedforward.active = 0u;
+        return;
+    }
+
+    if (isfinite(start_deg) && isfinite(off_deg) &&
+        off_deg > start_deg + 15.0f && q2_deg > start_deg &&
+        q2_deg < off_deg) {
+        float ramp_in = ArmClampFloat((q2_deg - start_deg) / 5.0f,
+                                      0.0f, 1.0f);
+        float ramp_out = ArmClampFloat((off_deg - q2_deg) / 10.0f,
+                                       0.0f, 1.0f);
+
+        /* 30~35度渐入，35~80度完整，80~90度渐出；两端斜率均为0。 */
+        ramp_in = ramp_in * ramp_in * (3.0f - 2.0f * ramp_in);
+        ramp_out = ramp_out * ramp_out * (3.0f - 2.0f * ramp_out);
+        window_scale = fminf(ramp_in, ramp_out);
+    }
+    g_arm_shoulder_feedforward.angle_window_scale = window_scale;
+
+    g_arm_shoulder_feedforward.cos_q2 = cosf(q2_deg * ARM_DEG_TO_RAD);
+    g_arm_shoulder_feedforward.cos_q2_plus_q3 = cosf(
+        g_arm_shoulder_feedforward.q2_plus_q3_deg * ARM_DEG_TO_RAD);
+    g_arm_shoulder_feedforward.shoulder_term_current =
+        g_arm_shoulder_feedforward.shoulder_gain_current *
+        g_arm_shoulder_feedforward.cos_q2;
+    g_arm_shoulder_feedforward.link_load_term_current =
+        g_arm_shoulder_feedforward.link_load_gain_current *
+        g_arm_shoulder_feedforward.cos_q2_plus_q3;
+    g_arm_shoulder_feedforward.raw_current =
+        (g_arm_shoulder_feedforward.shoulder_term_current +
+         g_arm_shoulder_feedforward.link_load_term_current +
+         g_arm_shoulder_feedforward.bias_current) * window_scale;
+
+    if (!can_apply || window_scale <= ARM_FLOAT_EPSILON ||
+        !isfinite(g_arm_shoulder_feedforward.raw_current) ||
+        limit <= ARM_FLOAT_EPSILON) {
+        g_arm_shoulder_feedforward.output_current = 0.0f;
+        g_arm_shoulder_feedforward.active = 0u;
+        return;
+    }
+
+    g_arm_shoulder_feedforward.output_current = ArmClampFloat(
+        g_arm_shoulder_feedforward.raw_current, -limit, limit);
+    g_arm_shoulder_feedforward.active = 1u;
 }
 
 static void ArmUpdateForwardKinematics(void)
@@ -2009,6 +2124,16 @@ void ArmInit(void)
     memset(&g_arm_soft_limit_debug, 0, sizeof(g_arm_soft_limit_debug));
     memset(&g_arm_kinematics_debug, 0, sizeof(g_arm_kinematics_debug));
     memset(&g_arm_teach_point, 0, sizeof(g_arm_teach_point));
+    g_arm_shoulder_feedforward.active = 0u;
+    g_arm_shoulder_feedforward.q2_deg = 0.0f;
+    g_arm_shoulder_feedforward.q2_plus_q3_deg = 0.0f;
+    g_arm_shoulder_feedforward.angle_window_scale = 0.0f;
+    g_arm_shoulder_feedforward.cos_q2 = 0.0f;
+    g_arm_shoulder_feedforward.cos_q2_plus_q3 = 0.0f;
+    g_arm_shoulder_feedforward.shoulder_term_current = 0.0f;
+    g_arm_shoulder_feedforward.link_load_term_current = 0.0f;
+    g_arm_shoulder_feedforward.raw_current = 0.0f;
+    g_arm_shoulder_feedforward.output_current = 0.0f;
     arm_base_motor = DJIMotorInit(&base_config);
     arm_shoulder_motor = DJIMotorInit(&shoulder_config);
     arm_elbow_motor = DJIMotorInit(&elbow_config);
@@ -2075,6 +2200,7 @@ void ArmTask(void)
         return;
     }
     ArmUpdateFeedback();
+    ArmUpdateShoulderGravityFeedforward();
 
     if (g_arm_homing_abort) {
         arm_auto_calibration_attempted = 1u;
@@ -2090,6 +2216,7 @@ void ArmTask(void)
             }
         }
         ArmUpdateFeedback();
+        ArmUpdateShoulderGravityFeedforward();
         ArmUpdateForwardKinematics();
         ArmUpdateKinematicsDebug();
         ArmUpdateSoftLimitDebug();
@@ -2104,6 +2231,7 @@ void ArmTask(void)
         (void)ArmSoftLimitTask;
         Arm3508RatioTestTask(now);
         ArmUpdateFeedback();
+        ArmUpdateShoulderGravityFeedforward();
         ArmUpdateForwardKinematics();
         ArmUpdateKinematicsDebug();
         ArmUpdateSoftLimitDebug();
@@ -2142,6 +2270,7 @@ void ArmTask(void)
     } else {
         g_arm_state.mode = ARM_MODE_SAFE;
     }
+    ArmUpdateShoulderGravityFeedforward();
     ArmUpdateSoftLimitDebug();
 #endif
 }

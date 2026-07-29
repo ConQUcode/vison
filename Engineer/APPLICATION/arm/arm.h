@@ -371,11 +371,38 @@ typedef struct {
     float position_error_mm;
 } Arm_Motion_Debug_s;
 
+/*
+ * M3508大臂重力电流前馈调试量。
+ * 两个gain可直接在Watch中小步调整；其符号同时决定对应补偿方向。
+ * output_current是实际送入DJI电机电流环之前的前馈量，不是最终CAN输出。
+ */
+typedef struct {
+    uint8_t enabled;
+    uint8_t active;
+    float shoulder_gain_current;
+    float link_load_gain_current;
+    float bias_current;
+    float max_current;
+    float start_above_deg;
+    float off_above_deg;
+    float q2_deg;
+    float q2_plus_q3_deg;
+    float angle_window_scale;
+    float cos_q2;
+    float cos_q2_plus_q3;
+    float shoulder_term_current;
+    float link_load_term_current;
+    float raw_current;
+    float output_current;
+} Arm_Shoulder_Feedforward_s;
+
 extern Arm_State_s g_arm_state;
 extern Arm_Calibration_s g_arm_calibration;
 extern Arm_Soft_Limit_Debug_s g_arm_soft_limit_debug;
 extern Arm_Kinematics_Debug_s g_arm_kinematics_debug;
 extern Arm_Motion_Debug_s g_arm_motion_debug;
+/* Watch调参时只需展开该结构体；M2006本轮仍不启用重力补偿。 */
+extern Arm_Shoulder_Feedforward_s g_arm_shoulder_feedforward;
 /* 打点模式只需在Watch中展开此变量，其余结构用于内部维护诊断。 */
 extern Arm_Teach_Point_s g_arm_teach_point;
 extern volatile uint8_t g_arm_homing_abort;
