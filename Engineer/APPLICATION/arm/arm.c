@@ -8,6 +8,7 @@
 #include "arm_wrist.h"
 #include "dmmotor.h"
 #include "can.h"
+#include "tim.h"
 #include "stm32f4xx_hal.h"
 
 #include <math.h>
@@ -74,6 +75,28 @@ Arm_Boot_Debug_s g_arm_boot_debug;
 static Arm_Joint_Motor_s arm_joint[ARM_AXIS_COUNT];
 static Arm_Runtime_s arm_runtime;
 static Arm_Command_Mailbox_s arm_command_mailbox;
+
+static void ArmBootBuzzerStop(void)
+{
+#if ARM_BOOT_BUZZER_ENABLE != 0u
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 0u);
+    (void)HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_3);
+#endif
+}
+
+static uint8_t ArmBootBuzzerStart(void)
+{
+#if ARM_BOOT_BUZZER_ENABLE != 0u
+    /* TIM4由CubeMX配置为4kHz；约50%占空比用于短鸣提示。 */
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3,
+                          ARM_BOOT_BUZZER_COMPARE);
+    if (HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3) != HAL_OK) {
+        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 0u);
+        return 0u;
+    }
+#endif
+    return 1u;
+}
 
 static uint8_t ArmCommandPose(const float pose_q_deg[3],
                               float speed_deg_s,
@@ -416,12 +439,13 @@ static void ArmLatchFault(Arm_Fault_e fault)
     g_arm_state.start_state = fault == ARM_FAULT_EMERGENCY_STOP ?
         ARM_START_ESTOP : ARM_START_FAULT;
     ArmAbortMotion(ARM_MOTION_FAULT_ABORT);
+    ArmBootBuzzerStop();
     arm_runtime.elbow_coupling_active = 0u;
     ArmToolStopServo1Tracking();
     ArmDisableAll();
     arm_runtime.disable_sent = 1u;
     if (fault == ARM_FAULT_EMERGENCY_STOP ||
-        g_arm_boot_debug.state == ARM_BOOT_HOLD_MAGNET) {
+        g_arm_tool_debug.magnet_on != 0u) {
         ArmToolSetMagnet(0u);
     }
 }
@@ -1386,7 +1410,7 @@ static void ArmProcessBootSequence(uint32_t now_ms)
                 g_arm_boot_debug.tool_test_completed = 1u;
                 g_arm_boot_debug.motion_result = ARM_MOTION_RESULT_OK;
                 ArmToolSetMagnet(1u);
-                ArmSetBootState(ARM_BOOT_HOLD_MAGNET, now_ms);
+                ArmSetBootState(ARM_BOOT_SERVO2_COMMAND_135, now_ms);
             } else if (g_arm_boot_debug.elapsed_ms >=
                        ARM_BOOT_TOOL_TEST_TIMEOUT_MS) {
                 ArmTrajectoryCancel();
@@ -1396,7 +1420,32 @@ static void ArmProcessBootSequence(uint32_t now_ms)
             }
             break;
 
-        case ARM_BOOT_HOLD_MAGNET:
+        case ARM_BOOT_SERVO2_COMMAND_135:
+            ArmTrajectoryTask(now_ms);
+            if (!ArmAllFeedbackValid(now_ms) ||
+                !ArmAllTargetsSynced() || !ArmAllMotorsEnabled()) {
+                ArmToolSetMagnet(0u);
+                g_arm_boot_debug.motion_result =
+                    ARM_MOTION_RESULT_NOT_READY;
+                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
+                break;
+            }
+            g_arm_boot_debug.servo2_target_deg =
+                ARM_BOOT_SERVO2_TEST_FORWARD_DEG;
+            g_arm_boot_debug.servo2_result = ArmToolSetServo2Angle(
+                ARM_BOOT_SERVO2_TEST_FORWARD_DEG);
+            if (g_arm_boot_debug.servo2_result == ARM_COMMAND_OK) {
+                g_arm_boot_debug.servo2_test_step = 1u;
+                ArmSetBootState(ARM_BOOT_SERVO2_WAIT_135, now_ms);
+            } else if (g_arm_boot_debug.servo2_result != ARM_COMMAND_BUSY) {
+                ArmToolSetMagnet(0u);
+                g_arm_boot_debug.motion_result =
+                    ARM_MOTION_RESULT_NOT_READY;
+                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
+            }
+            break;
+
+        case ARM_BOOT_SERVO2_WAIT_135:
             ArmTrajectoryTask(now_ms);
             if (!ArmAllFeedbackValid(now_ms) ||
                 !ArmAllTargetsSynced() || !ArmAllMotorsEnabled()) {
@@ -1407,9 +1456,74 @@ static void ArmProcessBootSequence(uint32_t now_ms)
                 break;
             }
             if (g_arm_boot_debug.elapsed_ms >=
-                ARM_BOOT_MAGNET_TEST_HOLD_MS) {
+                ARM_BOOT_SERVO2_TEST_MOVE_TIME_MS +
+                    ARM_BOOT_SERVO2_TEST_SETTLE_MS) {
+                ArmSetBootState(ARM_BOOT_SERVO2_COMMAND_45, now_ms);
+            }
+            break;
+
+        case ARM_BOOT_SERVO2_COMMAND_45:
+            ArmTrajectoryTask(now_ms);
+            if (!ArmAllFeedbackValid(now_ms) ||
+                !ArmAllTargetsSynced() || !ArmAllMotorsEnabled()) {
                 ArmToolSetMagnet(0u);
+                g_arm_boot_debug.motion_result =
+                    ARM_MOTION_RESULT_NOT_READY;
+                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
+                break;
+            }
+            g_arm_boot_debug.servo2_target_deg =
+                ARM_BOOT_SERVO2_TEST_REVERSE_DEG;
+            g_arm_boot_debug.servo2_result = ArmToolSetServo2Angle(
+                ARM_BOOT_SERVO2_TEST_REVERSE_DEG);
+            if (g_arm_boot_debug.servo2_result == ARM_COMMAND_OK) {
+                g_arm_boot_debug.servo2_test_step = 2u;
+                ArmSetBootState(ARM_BOOT_SERVO2_WAIT_45, now_ms);
+            } else if (g_arm_boot_debug.servo2_result != ARM_COMMAND_BUSY) {
+                ArmToolSetMagnet(0u);
+                g_arm_boot_debug.motion_result =
+                    ARM_MOTION_RESULT_NOT_READY;
+                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
+            }
+            break;
+
+        case ARM_BOOT_SERVO2_WAIT_45:
+            ArmTrajectoryTask(now_ms);
+            if (!ArmAllFeedbackValid(now_ms) ||
+                !ArmAllTargetsSynced() || !ArmAllMotorsEnabled()) {
+                ArmToolSetMagnet(0u);
+                g_arm_boot_debug.motion_result =
+                    ARM_MOTION_RESULT_NOT_READY;
+                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
+                break;
+            }
+            if (g_arm_boot_debug.elapsed_ms >=
+                ARM_BOOT_SERVO2_TEST_MOVE_TIME_MS +
+                    ARM_BOOT_SERVO2_TEST_SETTLE_MS) {
+                ArmToolSetMagnet(0u);
+                g_arm_boot_debug.servo2_test_completed = 1u;
                 g_arm_boot_debug.magnet_test_completed = 1u;
+                g_arm_boot_debug.buzzer_started = 0u;
+                g_arm_boot_debug.buzzer_completed = 0u;
+                ArmSetBootState(ARM_BOOT_BUZZER_NOTIFY, now_ms);
+            }
+            break;
+
+        case ARM_BOOT_BUZZER_NOTIFY:
+            ArmTrajectoryTask(now_ms);
+            if (g_arm_boot_debug.buzzer_started == 0u) {
+                g_arm_boot_debug.buzzer_started = 1u;
+                if (!ArmBootBuzzerStart()) {
+                    /* 提示音失败不影响机械臂测试结果，直接进入READY。 */
+                    g_arm_boot_debug.buzzer_completed = 1u;
+                    ArmSetBootState(ARM_BOOT_READY, now_ms);
+                    break;
+                }
+            }
+            if (g_arm_boot_debug.elapsed_ms >=
+                ARM_BOOT_BUZZER_DURATION_MS) {
+                ArmBootBuzzerStop();
+                g_arm_boot_debug.buzzer_completed = 1u;
                 ArmSetBootState(ARM_BOOT_READY, now_ms);
             }
             break;
@@ -1422,6 +1536,7 @@ static void ArmProcessBootSequence(uint32_t now_ms)
 
         case ARM_BOOT_FAULT:
         default:
+            ArmBootBuzzerStop();
             ArmToolStopServo1Tracking();
             ArmToolSetMagnet(0u);
             ArmTrajectoryCancel();

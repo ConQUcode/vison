@@ -350,13 +350,11 @@ Arm_Command_Result_e ArmToolSetServo1Angle(float angle_deg)
 
 Arm_Command_Result_e ArmToolSetServo2Angle(float angle_deg)
 {
-    if (!isfinite(angle_deg) ||
-        fabsf(angle_deg - ARM_TOOL_SERVO2_FIXED_DEG) >
-            ARM_TOOL_SERVO_COMMAND_DEADBAND_DEG) {
-        return ARM_COMMAND_UNSUPPORTED;
+    if (!ArmToolServoAngleFiniteAndInRange(angle_deg)) {
+        return ARM_COMMAND_INVALID;
     }
-    return ArmToolSendServo(ARM_TOOL_SERVO2_ID, ARM_TOOL_SERVO2_FIXED_DEG,
-                            ARM_TOOL_SERVO_INIT_TIME_MS, 0u);
+    return ArmToolSendServo(ARM_TOOL_SERVO2_ID, angle_deg,
+                            ARM_BOOT_SERVO2_TEST_MOVE_TIME_MS, 1u);
 }
 
 Arm_Command_Result_e ArmToolSetVerticalDownFromPitch(
