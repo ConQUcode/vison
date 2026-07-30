@@ -61,6 +61,7 @@
 "engineer\arm_kinematics.o"
 "engineer\arm_trajectory.o"
 "engineer\arm_wrist.o"
+"engineer\arm_tool.o"
 "engineer\catch.o"
 "engineer\croutine.o"
 "engineer\event_groups.o"

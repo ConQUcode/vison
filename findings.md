@@ -1,5 +1,41 @@
 # Findings
 
+## 2026-07-30 ID1 vertical-down compensation direction
+
+- Restored `ARM_TOOL_SERVO1_DIRECTION` from `-1.0f` to the previously correct `+1.0f` physical convention.
+- The vertical-down target remains `servo1_deg = 90 deg + small_link_pitch_deg / direction`; with `direction=+1`, a positive small-link pitch commands an ID1 angle above 90 deg to counter-rotate the end tool.
+- This change affects only the ID1 tool-servo compensation direction; Damiao joint directions, elbow belt coupling compensation, FK/IK geometry and motor initialization are unchanged.
+
+## 2026-07-30 Single-owner boot refactor completion
+
+- `ArmTask()` now exclusively owns the commissioning sequence: motor enable/feedback synchronization, simultaneous mechanical initialization, safe-pose trajectory, tool initialization wait, stabilization, internal TOOL_TIP test and final READY publication.
+- The internal test no longer uses `ArmSubmitCartesianCommand()`, the single-slot Host mailbox or `g_arm_host_status.ready`; those paths are reserved for actual external commands after boot.
+- `Test.c` no longer contains `ArmApiPointTestTask()` or `g_arm_api_test_debug`; it only schedules `ArmTask()`, optional disabled simulators and motor control services.
+- Tool initialization failure or an 8 s initialization timeout now enters a terminal boot fault instead of waiting forever.
+- Boot test failure cancels the trajectory, holds the current pose through the existing cancel path, sets `ARM_MODE_FAULT/ARM_START_FAULT`, never republishes READY and never automatically retries the test.
+- The concise bring-up Watch surface is `g_arm_boot_debug`; old automatic-point and API-point debug structures have been removed from source.
+- Scoped `git diff --check` passed with line-ending conversion notices only. No Keil build, flash or hardware validation was performed.
+
+## 2026-07-30 Arm boot/test ownership refactor
+
+- Hardware Watch shows `g_arm_api_test_debug.wait_ready=1`, `submitted=0`, `rejected=0`; the test command never reaches the mailbox, so this is not an IK rejection.
+- The current one-shot boot test lives in `Test.c` and waits on public `g_arm_host_status.ready`, while that status is produced at the end of `ArmTask()`. This creates an unnecessary cross-task readiness loop for an internal commissioning action.
+- The trajectory layer already accepts internal motion while the commissioning boot mode is `ARM_MODE_DM_SINGLE_AXIS_TEST`, so the TOOL_TIP test can be started directly by the arm boot sequence before publishing public READY.
+- USART6 tool initialization and CAN motor initialization can remain concurrent; only the transition into the TOOL_TIP test must wait for both auto-init completion and tool init completion.
+
+## 2026-07-30 USART6 Huaner LX integration
+
+- USART6 is now CubeMX-generated as 115200 8N1 full-duplex on PG14/PG9, with RX DMA2 Stream1 Channel5, TX DMA2 Stream6 Channel5 and USART6 IRQ priority 5.
+- The external controller board owns the two-wire UART to single-wire servo-bus conversion, so firmware must not add a direction GPIO or switch the MCU UART to single-wire mode.
+- The existing `hsl_servo` is Feetech/SCS protocol (`FF FF`, register-address writes) on huart1 and cannot be converted by changing the UART handle alone; Huaner LX uses `55 55`, command-specific parameters and position range 0..1000.
+- `catch.c` still calls legacy `WritePosEx2()` with values up to 1500. It must remain unmodified in this phase, so all legacy SCS APIs will be retained as non-transmitting rejected stubs to prevent unsafe reinterpretation.
+- The existing USART BSP owns `HAL_UARTEx_RxEventCallback` and `HAL_UART_ErrorCallback` but has no DMA TX/RX-complete dispatch. The new driver therefore needs a compatible callback-registration extension rather than defining competing HAL global callbacks.
+- The STM32F4 HAL normal-mode TX DMA callback is raised only after the UART TC interrupt confirms the final stop bit has left the peripheral, not merely when DMA empties its memory buffer.
+- Waiting for a later 1 ms task call to start RX can miss a short LX response. Position reads now arm normal RX DMA before TX, then `HSLServoTask()` inspects the DMA remaining count and searches the 16-byte buffer for a valid 8-byte reply. This also tolerates controller-board TX echo before the reply without treating the echo's idle gap as the complete transaction.
+- Independently verified frames: `Move(1,500,1000)` is `55 55 01 07 01 F4 01 E8 03 10`; `Stop(1)` is `55 55 01 03 0C EF`; `PositionRead(1)` is `55 55 01 03 1C DF`.
+- Per-ID TX/RX/timeout/checksum/frame counters are independent; global totals remain in `g_hsl_servo_debug`.
+- Legacy `WritePosEx2()` and related Feetech symbols contain no UART transmit call and only report unsupported/increment `legacy_reject_count`.
+
 ## 2026-07-30 Commissioning trajectory integration
 
 - The live geometry and elbow model differ from the original plan snapshot: keep the current source values and do not restore the obsolete `250/260/260 mm` geometry.
@@ -31,6 +67,9 @@
 - Final commissioning Keil image built incrementally with 0 errors and 0 warnings. Size is Code 46744, RO 672, RW 916, ZI 101872 bytes. The map retains `ArmProcessSingleAxisTest` and `DMMotorEnterModeAndHoldOpenLoop`; `ArmProcessStartup` is removed, so NORMAL automatic escape/return cannot run in this image.
 
 ## 2026-07-30 Full-Damiao Implementation Results
+
+- Host-control packaging decision: communication modules will include `arm_host.h`, submit one `Arm_Command_s`, and read one `Arm_Host_Status_s`. Damiao instances, CAN counters, trajectory caches and bench debug structures remain outside this stable interface.
+- User selected startup option 1: the arm must not report host READY at the rear initialization pose `[0,180,-90]`; it must continue to the forward safe pose `[0,90,-90]` and satisfy the arrival stability check first.
 
 - The automatic host simulation now cycles through `(250,50,120)`, `(250,50,150)`, `(250,-50,150)`, and `(250,-50,120) mm`. The first command retains the safe-region rounded composite entry; subsequent commands use the normal Cartesian-linear preflight path.
 - The 3000 ms interval is measured from command acceptance. If a trajectory takes longer than 3000 ms, firmware waits for it to finish and dispatches the next point immediately instead of overwriting an active trajectory.

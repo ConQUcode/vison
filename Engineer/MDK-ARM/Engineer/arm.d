@@ -1,9 +1,11 @@
 engineer\arm.o: ..\APPLICATION\arm\arm.c
 engineer\arm.o: ..\APPLICATION\arm\arm.h
 engineer\arm.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+engineer\arm.o: ..\APPLICATION\arm\arm_host.h
 engineer\arm.o: ..\APPLICATION\arm\arm_config.h
 engineer\arm.o: ..\APPLICATION\arm\arm_internal.h
 engineer\arm.o: ..\APPLICATION\arm\arm_kinematics.h
+engineer\arm.o: ..\APPLICATION\arm\arm_tool.h
 engineer\arm.o: ..\APPLICATION\arm\arm_trajectory.h
 engineer\arm.o: ..\APPLICATION\arm\arm_wrist.h
 engineer\arm.o: ../MODULE/motor/DMmotor/dmmotor.h

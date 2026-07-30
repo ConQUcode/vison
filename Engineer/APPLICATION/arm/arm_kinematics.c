@@ -139,8 +139,16 @@ uint8_t ArmKinematicsSelfTest(float *error_mm)
     Arm_Position_s expected;
     float error;
 
-    ArmForwardKinematics3DOF(ARM_SAFE_Q1_DEG, ARM_SAFE_Q2_DEG,
-                             ARM_SAFE_Q3_DEG, &position);
+    /*
+     * 运动学自检必须使用固定的已知解析姿态，不能复用可调的上电待机
+     * 姿态ARM_SAFE_Q*。否则只要修改启动姿态，就会在电机使能前误报
+     * ARM_FAULT_CONFIG并触发三轴失能。
+     *
+     * 固定参考姿态[0, 90, -90]：
+     * 大臂竖直向上，小臂水平向前，腕部轴心为
+     * (LINK_2, 0, BASE_HEIGHT + LINK_1)。
+     */
+    ArmForwardKinematics3DOF(0.0f, 90.0f, -90.0f, &position);
     expected.x_mm = ARM_LINK_2_MM;
     expected.y_mm = 0.0f;
     expected.z_mm = ARM_BASE_HEIGHT_MM + ARM_LINK_1_MM;

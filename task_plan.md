@@ -153,6 +153,31 @@ motors in position-speed mode.
 - [completed] Preserve the rounded composite entry path for the first point and use preflight-checked Cartesian lines between subsequent points.
 - [completed] Validate state transitions, point order and source formatting without running Keil compilation.
 
+### Phase 16 - Host-ready arm application interface
+
+- [completed] Add a communication-independent `arm_host.h` with a unified command, command lifecycle and concise status snapshot.
+- [completed] Add a single-slot non-blocking command mailbox processed only by `ArmTask()`, with emergency/cancel/reset priority.
+- [completed] Keep existing joint/Cartesian/realtime APIs as compatibility wrappers around the unified interface.
+- [completed] Make the commissioning startup reach `[0,90,-90]` before reporting host READY and disable the four-point loop by default.
+- [completed] Perform source, API-use and whitespace validation without running Keil compilation.
+
+### Phase 17 - USART6 Huaner LX servo driver
+
+- [completed] Replace the internal Feetech/SCS protocol in `hsl_servo` with the Huaner LX `55 55` protocol on USART6.
+- [completed] Add one DMA transaction state machine for move, stop and position-read commands with strict frame validation and timeouts.
+- [completed] Extend the USART BSP with compatible TX/RX/error callback registration while preserving existing Receive-to-Idle users.
+- [completed] Add concise status/debug snapshots and keep legacy Feetech APIs as non-transmitting rejected stubs.
+- [completed] Initialize and service the driver from the existing application init/1 ms command path without modifying `catch.c`.
+- [completed] Perform source/frame/whitespace validation only; do not run Keil compilation.
+
+### Phase 18 - Single-owner arm boot sequence
+
+- [completed] Move the one-shot TOOL_TIP commissioning motion out of `Test.c` and into an explicit `ArmTask()` boot sequence.
+- [completed] Make `ArmTask()` the only owner of enable, auto-init, tool-init wait, stabilization, test motion and final READY publication.
+- [completed] Remove the internal boot test's dependency on the public host mailbox and `g_arm_host_status.ready`.
+- [completed] Keep `Test.c` as scheduling/observation only and disable its duplicate command submission path.
+- [completed] Add one concise Watch-visible boot state/result structure and run source/diff validation without a Keil build.
+
 ## Environment Notes
 
 - PowerShell startup fails with `8009001d`; native `cmd.exe` is used.
@@ -162,3 +187,4 @@ motors in position-speed mode.
   and `Engineer.uvoptx` remain untouched.
 - 2026-07-30: a compound `cmd.exe` `rg` inspection failed because cmd parsed the quoted search expression as commands; use `C:\w64devkit\bin\bash.exe` for compound source inspection.
 - 2026-07-30: a multiline Python `-c` path simulation failed under `cmd.exe` with an unterminated string; use Bash stdin/heredoc for the numerical reproduction.
+- 2026-07-30: the first Phase 18 combined patch did not apply because a mojibake comment in `arm_config.h` made the context unstable. No source changes were made; subsequent patches use stable macro/function boundaries.

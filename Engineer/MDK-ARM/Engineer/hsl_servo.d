@@ -1,6 +1,9 @@
 engineer\hsl_servo.o: ..\MODULE\feite_motor\hsl_servo.c
 engineer\hsl_servo.o: ..\MODULE\feite_motor\hsl_servo.h
 engineer\hsl_servo.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+engineer\hsl_servo.o: ../BSP/USART/bsp_usart.h
+engineer\hsl_servo.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdlib.h
+engineer\hsl_servo.o: ../Core/Inc/usart.h
 engineer\hsl_servo.o: ../Core/Inc/main.h
 engineer\hsl_servo.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h
 engineer\hsl_servo.o: ../Core/Inc/stm32f4xx_hal_conf.h
@@ -37,4 +40,4 @@ engineer\hsl_servo.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 engineer\hsl_servo.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd.h
 engineer\hsl_servo.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_usb.h
 engineer\hsl_servo.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd_ex.h
-engineer\hsl_servo.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdlib.h
+engineer\hsl_servo.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h

@@ -16,6 +16,42 @@
 /* usart服务实例,所有注册了usart的模块信息会被保存在这里 */
 static uint8_t idx;
 static USART_Instance *usart_instances[USART_DEVICE_MAX_NUM] = {NULL};
+static uint8_t async_callback_count;
+static USART_Async_Callback_Config_s
+    async_callbacks[USART_ASYNC_CALLBACK_MAX_NUM];
+
+static USART_Async_Callback_Config_s *USARTFindAsyncCallbacks(
+    UART_HandleTypeDef *huart)
+{
+    uint8_t i;
+
+    for (i = 0u; i < async_callback_count; ++i) {
+        if (async_callbacks[i].usart_handle == huart) {
+            return &async_callbacks[i];
+        }
+    }
+    return NULL;
+}
+
+uint8_t USARTRegisterAsyncCallbacks(
+    const USART_Async_Callback_Config_s *config)
+{
+    USART_Async_Callback_Config_s *registered;
+
+    if (config == NULL || config->usart_handle == NULL) {
+        return 0u;
+    }
+    registered = USARTFindAsyncCallbacks(config->usart_handle);
+    if (registered != NULL) {
+        *registered = *config;
+        return 1u;
+    }
+    if (async_callback_count >= USART_ASYNC_CALLBACK_MAX_NUM) {
+        return 0u;
+    }
+    async_callbacks[async_callback_count++] = *config;
+    return 1u;
+}
 
 /**
  * @brief 启动串口服务,会在每个实例注册之后自动启用接收,当前实现为DMA接收,后续可能添加IT和BLOCKING接收
@@ -103,6 +139,15 @@ uint8_t USARTIsReady(USART_Instance *_instance)
  */
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
+    USART_Async_Callback_Config_s *async =
+        USARTFindAsyncCallbacks(huart);
+
+    if (async != NULL) {
+        if (async->rx_event_callback != NULL) {
+            async->rx_event_callback(Size);
+        }
+        return;
+    }
     for (uint8_t i = 0; i < idx; ++i) {                  // find the instance which is being handled
         if (huart == usart_instances[i]->usart_handle) { // call the callback function if it is not NULL
             if (usart_instances[i]->module_callback != NULL) {
@@ -116,6 +161,26 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     }
 }
 
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+    USART_Async_Callback_Config_s *async =
+        USARTFindAsyncCallbacks(huart);
+
+    if (async != NULL && async->tx_complete_callback != NULL) {
+        async->tx_complete_callback();
+    }
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    USART_Async_Callback_Config_s *async =
+        USARTFindAsyncCallbacks(huart);
+
+    if (async != NULL && async->rx_event_callback != NULL) {
+        async->rx_event_callback(huart->RxXferSize);
+    }
+}
+
 /**
  * @brief 当串口发送/接收出现错误时,会调用此函数,此时这个函数要做的就是重新启动接收
  *
@@ -125,6 +190,15 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
  */
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
+    USART_Async_Callback_Config_s *async =
+        USARTFindAsyncCallbacks(huart);
+
+    if (async != NULL) {
+        if (async->error_callback != NULL) {
+            async->error_callback();
+        }
+        return;
+    }
     for (uint8_t i = 0; i < idx; ++i) {
         if (huart == usart_instances[i]->usart_handle) {
             HAL_UARTEx_ReceiveToIdle_DMA(usart_instances[i]->usart_handle, usart_instances[i]->recv_buff, usart_instances[i]->recv_buff_size);

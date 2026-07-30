@@ -2,9 +2,11 @@ engineer\arm_trajectory.o: ..\APPLICATION\arm\arm_trajectory.c
 engineer\arm_trajectory.o: ..\APPLICATION\arm\arm_trajectory.h
 engineer\arm_trajectory.o: ..\APPLICATION\arm\arm.h
 engineer\arm_trajectory.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+engineer\arm_trajectory.o: ..\APPLICATION\arm\arm_host.h
 engineer\arm_trajectory.o: ..\APPLICATION\arm\arm_config.h
 engineer\arm_trajectory.o: ..\APPLICATION\arm\arm_internal.h
 engineer\arm_trajectory.o: ..\APPLICATION\arm\arm_kinematics.h
+engineer\arm_trajectory.o: ..\APPLICATION\arm\arm_tool.h
 engineer\arm_trajectory.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h
 engineer\arm_trajectory.o: ../Core/Inc/stm32f4xx_hal_conf.h
 engineer\arm_trajectory.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rcc.h

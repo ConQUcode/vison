@@ -2,17 +2,7 @@
 #define __TEST_H
 
 #include "arm.h"
-
-/* 本次坐标接口回放的唯一Watch变量，正式比赛逻辑不依赖此结构。 */
-typedef struct {
-    uint8_t enabled;
-    uint8_t submitted;
-    uint32_t submit_count;
-    Arm_Command_Result_e result;
-    Arm_Position_s target_mm;
-} Arm_Api_Test_Debug_s;
-
-extern Arm_Api_Test_Debug_s g_arm_api_test_debug;
+#include "hsl_servo.h"
 
 typedef enum {
     ARM_HOST_SIM_WAIT_READY = 0,
@@ -37,6 +27,32 @@ typedef struct {
 } Arm_Host_Sim_Debug_s;
 
 extern Arm_Host_Sim_Debug_s g_arm_host_sim_debug;
+
+typedef enum {
+    FEETECH_TEST_STATE_DISABLED = 0,
+    FEETECH_TEST_STATE_WAIT_START,
+    FEETECH_TEST_STATE_SEND,
+    FEETECH_TEST_STATE_WAIT_STEP,
+    FEETECH_TEST_STATE_DONE,
+    FEETECH_TEST_STATE_ERROR
+} Feetech_Servo_Test_State_e;
+
+typedef struct {
+    uint8_t enabled;
+    Feetech_Servo_Test_State_e state;
+    uint8_t id;
+    uint8_t step;
+    uint16_t target_deg;
+    uint16_t target_position;
+    HSLServo_Result_e last_result;
+    uint32_t start_tick;
+    uint32_t last_send_tick;
+    uint32_t send_count;
+    uint32_t busy_count;
+    uint32_t error_count;
+} Feetech_Servo_Test_Debug_s;
+
+extern Feetech_Servo_Test_Debug_s g_feetech_servo_test_debug;
 
 void all_init_Task(void);
 void all_cmd_Task(void);

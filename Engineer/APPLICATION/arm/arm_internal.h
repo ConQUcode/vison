@@ -17,5 +17,11 @@ Arm_Motion_Result_e ArmSetCartesianTarget(const Arm_Position_s *target,
                                           Arm_IK_Result_s *result);
 Arm_Motion_Result_e ArmMoveLinear(const Arm_Position_s *target,
                                   float max_speed_mm_s);
+Arm_Motion_Result_e ArmSetToolTipTargetVerticalDown(
+    const Arm_Position_s *target_tip,
+    Arm_IK_Result_s *result);
+Arm_Motion_Result_e ArmMoveLinearToolTipVerticalDown(
+    const Arm_Position_s *target_tip,
+    float max_speed_mm_s);
 
 #endif

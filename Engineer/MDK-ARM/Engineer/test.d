@@ -53,4 +53,6 @@ engineer\test.o: ../MODULE/daemon/daemon.h
 engineer\test.o: ../MODULE/motor/DMmotor/dmmotor.h
 engineer\test.o: ..\APPLICATION\Test.h
 engineer\test.o: ../APPLICATION/arm/arm.h
+engineer\test.o: ../APPLICATION/arm/arm_host.h
+engineer\test.o: ../MODULE/feite_motor/hsl_servo.h
 engineer\test.o: ../APPLICATION/arm/arm_config.h

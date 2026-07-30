@@ -87,4 +87,6 @@ engineer\freertos.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_io
 engineer\freertos.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ctlreq.h
 engineer\freertos.o: ../APPLICATION/Test.h
 engineer\freertos.o: ../APPLICATION/arm/arm.h
+engineer\freertos.o: ../APPLICATION/arm/arm_host.h
+engineer\freertos.o: ../MODULE/feite_motor/hsl_servo.h
 engineer\freertos.o: ../APPLICATION/catch/catch.h

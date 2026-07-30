@@ -17,9 +17,20 @@
 
 #define USART_DEVICE_MAX_NUM 3    // 支持的最大USART设备数量
 #define USART_RXBUFF_LIMIT   255u // 如果协议需要更大的buff,请修改这里
+#define USART_ASYNC_CALLBACK_MAX_NUM 3u
 
 // 模块回调函数,用于解析协议
 typedef void (*usart_module_callback)();
+typedef void (*usart_async_rx_callback)(uint16_t size);
+typedef void (*usart_async_event_callback)(void);
+
+typedef struct
+{
+    UART_HandleTypeDef *usart_handle;
+    usart_async_rx_callback rx_event_callback;
+    usart_async_event_callback tx_complete_callback;
+    usart_async_event_callback error_callback;
+} USART_Async_Callback_Config_s;
 
 /* 发送模式枚举 */
 typedef enum {
@@ -83,5 +94,12 @@ void USARTSend(USART_Instance *_instance, uint8_t *send_buf, uint16_t send_size,
  * @return uint8_t ready 1, busy 0
  */
 uint8_t USARTIsReady(USART_Instance *_instance);
+
+/*
+ * 为自行管理DMA缓冲区和事务状态机的模块注册HAL回调分发。
+ * 此接口不自动启动接收，也不占用USART_Instance的Receive-to-Idle缓冲区。
+ */
+uint8_t USARTRegisterAsyncCallbacks(
+    const USART_Async_Callback_Config_s *config);
 
 #endif // BSP_USART_H

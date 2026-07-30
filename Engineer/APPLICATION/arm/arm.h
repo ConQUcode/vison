@@ -2,6 +2,9 @@
 #define __ARM_H__
 
 #include "stdint.h"
+#include "arm_host.h"
+
+/* 本头文件包含机械臂内部状态与调试接口；通信层只包含arm_host.h。 */
 
 typedef enum {
     ARM_JOINT_BASE_YAW = 0,
@@ -134,51 +137,27 @@ typedef enum {
 } Arm_Motion_Result_e;
 
 typedef enum {
-    ARM_CONTROL_POINT_WRIST_CENTER = 0,
-    ARM_CONTROL_POINT_TOOL_TIP
-} Arm_Control_Point_e;
-
-typedef enum {
-    ARM_MOVE_DIRECT = 0,
-    ARM_MOVE_LINEAR
-} Arm_Move_Type_e;
-
-typedef enum {
-    ARM_COMMAND_OK = 0,
-    ARM_COMMAND_BUSY,
-    ARM_COMMAND_NOT_READY,
-    ARM_COMMAND_INVALID,
-    ARM_COMMAND_UNSUPPORTED,
-    ARM_COMMAND_MODE_DENIED,
-    ARM_COMMAND_PREFLIGHT_FAILED
-} Arm_Command_Result_e;
-
-typedef enum {
     ARM_DM_AUTO_INIT_IDLE = 0,
     ARM_DM_AUTO_INIT_WAIT_READY,
     ARM_DM_AUTO_INIT_MOVE_AXIS,
     ARM_DM_AUTO_INIT_WAIT_AXIS,
+    ARM_DM_AUTO_INIT_MOVE_SAFE,
+    ARM_DM_AUTO_INIT_WAIT_SAFE,
     ARM_DM_AUTO_INIT_DONE,
     ARM_DM_AUTO_INIT_FAULT
 } Arm_DM_Auto_Init_State_e;
 
 typedef enum {
-    ARM_DM_AUTO_POINT_IDLE = 0,
-    ARM_DM_AUTO_POINT_WAIT_INIT,
-    ARM_DM_AUTO_POINT_SOLVE_IK,
-    ARM_DM_AUTO_POINT_START_CONTINUOUS,
-    ARM_DM_AUTO_POINT_WAIT_CONTINUOUS,
-    ARM_DM_AUTO_POINT_START_LINEAR,
-    ARM_DM_AUTO_POINT_WAIT_LINEAR,
-    ARM_DM_AUTO_POINT_WAIT_INTERVAL,
-    ARM_DM_AUTO_POINT_FAULT
-} Arm_DM_Auto_Point_State_e;
-
-typedef struct {
-    float x_mm;
-    float y_mm;
-    float z_mm;
-} Arm_Position_s;
+    ARM_BOOT_WAIT_MOTORS = 0,
+    ARM_BOOT_AUTO_INIT,
+    ARM_BOOT_WAIT_TOOL,
+    ARM_BOOT_STABILIZE,
+    ARM_BOOT_START_TOOL_TEST,
+    ARM_BOOT_RUN_TOOL_TEST,
+    ARM_BOOT_HOLD_MAGNET,
+    ARM_BOOT_READY,
+    ARM_BOOT_FAULT
+} Arm_Boot_State_e;
 
 typedef struct {
     Arm_IK_Status_e status;
@@ -206,9 +185,12 @@ typedef struct {
 
 typedef struct {
     uint32_t command_id;
+    Arm_Control_Point_e control_point;
     Arm_Position_s target_mm;
     float max_speed_mm_s;
     float max_acceleration_mm_s2;
+    uint8_t tool_pitch_valid;
+    float tool_pitch_deg;
 } Arm_Realtime_Cartesian_Target_s;
 
 typedef struct {
@@ -220,10 +202,16 @@ typedef struct {
     float q_deg[ARM_JOINT_COUNT];
     float motor_position_rad[3];
     Arm_Position_s wrist_center_mm;
+    Arm_Position_s tool_tip_mm;
     float small_link_pitch_deg;
     uint16_t wrist_pwm_us;
     uint8_t wrist_configured;
-    uint8_t tool_model_valid;
+    uint8_t tool_ready;
+    uint8_t magnet_on;
+    float tool_servo_target_deg[2];
+    uint16_t tool_servo_target_pos[2];
+    uint8_t tool_vertical_down_enabled;
+    uint32_t tool_error_code;
     uint32_t update_count;
 } Arm_Teach_Point_s;
 
@@ -253,8 +241,15 @@ typedef struct {
     float mos_temperature_c[3];
     float rotor_temperature_c[3];
     Arm_Position_s wrist_center;
+    Arm_Position_s tool_tip;
     float small_link_pitch_deg;
     float end_pitch_deg;
+    uint8_t tool_ready;
+    uint8_t magnet_on;
+    float tool_servo_target_deg[2];
+    uint16_t tool_servo_target_pos[2];
+    uint8_t tool_vertical_down_enabled;
+    uint32_t tool_error_code;
     uint16_t wrist_pwm_us;
     uint32_t state_elapsed_ms;
     uint32_t fault_reset_request;
@@ -309,21 +304,20 @@ typedef struct {
 } Arm_DM_Auto_Init_Debug_s;
 
 typedef struct {
-    uint8_t enable;
-    Arm_DM_Auto_Point_State_e state;
-    uint8_t axis;
-    uint8_t step;
-    uint8_t done;
-    Arm_Command_Result_e result;
+    Arm_Boot_State_e state;
+    uint8_t tool_test_enabled;
+    uint8_t tool_test_started;
+    uint8_t tool_test_completed;
+    uint8_t magnet_test_completed;
+    Arm_Motion_Result_e motion_result;
     Arm_IK_Status_e ik_status;
-    Arm_Position_s target_mm;
+    Arm_Position_s target_tool_tip_mm;
+    Arm_Position_s target_wrist_mm;
     float target_q_deg[3];
-    float speed_mm_s;
-    float start_deg;
-    float target_deg;
+    float servo1_target_deg;
+    uint32_t state_tick;
     uint32_t elapsed_ms;
-    uint32_t cycle_count;
-} Arm_DM_Auto_Point_Debug_s;
+} Arm_Boot_Debug_s;
 
 typedef struct {
     Arm_Mode_e mode;
@@ -333,7 +327,6 @@ typedef struct {
     uint8_t passive_feedback_observed[3];
     uint8_t enter_mode_sent[3];
     Arm_DM_Auto_Init_Debug_s auto_init;
-    Arm_DM_Auto_Point_Debug_s auto_point;
     uint32_t fault_reset_request;
     uint32_t fault_reset_applied;
     Arm_Fault_Reset_Result_e fault_reset_result;
@@ -414,6 +407,7 @@ extern Arm_Kinematics_Debug_s g_arm_kinematics_debug;
 extern Arm_Motion_Debug_s g_arm_motion_debug;
 extern Arm_Control_Debug_s g_arm_control_debug;
 extern Arm_Teach_Point_s g_arm_teach_point;
+extern Arm_Boot_Debug_s g_arm_boot_debug;
 
 void ArmInit(void);
 void ArmTask(void);

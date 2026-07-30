@@ -2,51 +2,24 @@
 #include "dmmotor.h"
 #include "Test.h"
 #include "arm_config.h"
+#include "hsl_servo.h"
 #include "math.h"
 #include "string.h"
 
-Arm_Api_Test_Debug_s g_arm_api_test_debug;
 Arm_Host_Sim_Debug_s g_arm_host_sim_debug;
+Feetech_Servo_Test_Debug_s g_feetech_servo_test_debug;
 
 #define ARM_HOST_SIM_PI 3.14159265358979323846f
 
-/*
- * 用公开坐标接口回放一次打点结果。
- * 只有机械臂完成初始化、三台电机在线且运动学有效后才提交；提交成功或被
- * 明确拒绝后不再重试，避免1ms任务重复发送同一条命令。
- */
-static void ArmApiPointTestTask(void)
-{
-#if ARM_API_POINT_TEST_ENABLE != 0u
-    const Arm_State_s *state = ArmGetState();
-    Arm_Cartesian_Command_s command;
+#define FEETECH_SERVO_SWEEP_TEST_ENABLE       0u
+#define FEETECH_SERVO_SWEEP_TEST_ID           1u
+#define FEETECH_SERVO_SWEEP_START_DELAY_MS    500u
+#define FEETECH_SERVO_SWEEP_STEP_INTERVAL_MS  900u
+#define FEETECH_SERVO_SWEEP_MOVE_TIME_MS      600u
 
-    if (g_arm_api_test_debug.submitted) {
-        return;
-    }
-    if (state->mode != ARM_MODE_READY || !state->kinematics_valid ||
-        !state->motor_online[0] || !state->motor_online[1] ||
-        !state->motor_online[2]) {
-        g_arm_api_test_debug.result = ARM_COMMAND_NOT_READY;
-        return;
-    }
-
-    memset(&command, 0, sizeof(command));
-    command.command_id = 1u;
-    command.control_point = ARM_CONTROL_POINT_WRIST_CENTER;
-    command.move_type = ARM_MOVE_LINEAR;
-    command.target_mm = g_arm_api_test_debug.target_mm;
-    command.max_speed_mm_s = ARM_API_POINT_TEST_SPEED_MM_S;
-    command.tool_pitch_valid = 0u;
-
-    g_arm_api_test_debug.result = ArmSubmitCartesianCommand(&command);
-    g_arm_api_test_debug.submit_count++;
-    if (g_arm_api_test_debug.result != ARM_COMMAND_NOT_READY &&
-        g_arm_api_test_debug.result != ARM_COMMAND_BUSY) {
-        g_arm_api_test_debug.submitted = 1u;
-    }
-#endif
-}
+static const uint16_t feetech_servo_sweep_pos[] = {
+    333u, 417u, 375u
+};
 
 /*
  * 模拟上位机100Hz发送最新目标：
@@ -164,23 +137,99 @@ static void ArmRealtimeHostSimulatorTask(void)
 #endif
 }
 
+static void FeetechServoSweepTestTask(void)
+{
+#if FEETECH_SERVO_SWEEP_TEST_ENABLE != 0u
+    uint32_t now = HAL_GetTick();
+
+    if (g_feetech_servo_test_debug.enabled == 0u) {
+        return;
+    }
+
+    switch (g_feetech_servo_test_debug.state) {
+        case FEETECH_TEST_STATE_WAIT_START:
+            if ((uint32_t)(now - g_feetech_servo_test_debug.start_tick) >=
+                FEETECH_SERVO_SWEEP_START_DELAY_MS) {
+                g_feetech_servo_test_debug.state =
+                    FEETECH_TEST_STATE_SEND;
+            }
+            break;
+
+        case FEETECH_TEST_STATE_SEND:
+            if (g_feetech_servo_test_debug.step >=
+                (sizeof(feetech_servo_sweep_pos) /
+                 sizeof(feetech_servo_sweep_pos[0]))) {
+                g_feetech_servo_test_debug.state =
+                    FEETECH_TEST_STATE_DONE;
+                break;
+            }
+            g_feetech_servo_test_debug.target_position =
+                feetech_servo_sweep_pos[g_feetech_servo_test_debug.step];
+            g_feetech_servo_test_debug.target_deg =
+                (uint16_t)(((uint32_t)
+                    g_feetech_servo_test_debug.target_position * 240u +
+                    500u) / 1000u);
+            g_feetech_servo_test_debug.last_result =
+                HSLServoMove(
+                    g_feetech_servo_test_debug.id,
+                    g_feetech_servo_test_debug.target_position,
+                    FEETECH_SERVO_SWEEP_MOVE_TIME_MS);
+            if (g_feetech_servo_test_debug.last_result ==
+                HSL_SERVO_RESULT_OK) {
+                g_feetech_servo_test_debug.send_count++;
+                g_feetech_servo_test_debug.last_send_tick = now;
+                g_feetech_servo_test_debug.step++;
+                g_feetech_servo_test_debug.state =
+                    FEETECH_TEST_STATE_WAIT_STEP;
+            } else if (g_feetech_servo_test_debug.last_result ==
+                       HSL_SERVO_RESULT_BUSY) {
+                g_feetech_servo_test_debug.busy_count++;
+            } else {
+                g_feetech_servo_test_debug.error_count++;
+                g_feetech_servo_test_debug.state =
+                    FEETECH_TEST_STATE_ERROR;
+            }
+            break;
+
+        case FEETECH_TEST_STATE_WAIT_STEP:
+            if ((uint32_t)(now - g_feetech_servo_test_debug.last_send_tick) >=
+                FEETECH_SERVO_SWEEP_STEP_INTERVAL_MS) {
+                g_feetech_servo_test_debug.state =
+                    FEETECH_TEST_STATE_SEND;
+            }
+            break;
+
+        case FEETECH_TEST_STATE_DISABLED:
+        case FEETECH_TEST_STATE_DONE:
+        case FEETECH_TEST_STATE_ERROR:
+        default:
+            break;
+    }
+#endif
+}
+
 void all_init_Task(void)
 {
-	memset(&g_arm_api_test_debug, 0, sizeof(g_arm_api_test_debug));
 	memset(&g_arm_host_sim_debug, 0, sizeof(g_arm_host_sim_debug));
-	g_arm_api_test_debug.enabled = ARM_API_POINT_TEST_ENABLE != 0u;
+	memset(&g_feetech_servo_test_debug, 0,
+           sizeof(g_feetech_servo_test_debug));
 	g_arm_host_sim_debug.enabled = ARM_REALTIME_HOST_SIM_ENABLE != 0u;
-	g_arm_api_test_debug.target_mm.x_mm = ARM_API_POINT_TEST_X_MM;
-	g_arm_api_test_debug.target_mm.y_mm = ARM_API_POINT_TEST_Y_MM;
-	g_arm_api_test_debug.target_mm.z_mm = ARM_API_POINT_TEST_Z_MM;
 	ArmInit();
+	g_feetech_servo_test_debug.enabled =
+        FEETECH_SERVO_SWEEP_TEST_ENABLE != 0u;
+	g_feetech_servo_test_debug.id = FEETECH_SERVO_SWEEP_TEST_ID;
+	g_feetech_servo_test_debug.start_tick = HAL_GetTick();
+	g_feetech_servo_test_debug.state =
+        g_feetech_servo_test_debug.enabled != 0u ?
+        FEETECH_TEST_STATE_WAIT_START :
+        FEETECH_TEST_STATE_DISABLED;
 }
 
 void all_cmd_Task(void)
 {
 	ArmTask();
-	ArmApiPointTestTask();
 	ArmRealtimeHostSimulatorTask();
+	FeetechServoSweepTestTask();
 	DMMotorControl(HAL_GetTick());
 	DJIMotorControl();
 }
