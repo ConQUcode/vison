@@ -27,51 +27,7 @@ Project File Date:  07/31/2026
 <h2>Output:</h2>
 *** Using Compiler 'V5.06 update 7 (build 960)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
 Build target 'Engineer'
-compiling arm_kinematics.c...
-compiling arm_wrist.c...
-compiling arm_usb_bridge.c...
-..\APPLICATION\arm\arm_usb_bridge.c(36): warning:  #550-D: variable "target_yaw_complete_tick"  was set but never used
-  static uint32_t target_yaw_complete_tick;
-..\APPLICATION\arm\arm_usb_bridge.c: 1 warning, 0 errors
-compiling arm_tool.c...
-..\APPLICATION\arm\arm_tool.c(448): warning:  #186-D: pointless comparison of unsigned integer with zero
-      if (position < ARM_TOOL_SERVO2_POS_MIN ||
-..\APPLICATION\arm\arm_tool.c: 1 warning, 0 errors
-compiling Test.c...
-..\APPLICATION\Test.c(29): warning:  #177-D: variable "feetech_servo_sweep_pos"  was declared but never referenced
-  static const uint16_t feetech_servo_sweep_pos[] = {
-..\APPLICATION\Test.c: 1 warning, 0 errors
-compiling arm_trajectory.c...
-compiling main.c...
-../APPLICATION/nac.h(107): warning:  #1295-D: Deprecated declaration NacSend - give arg types
-  void NacSend();
-../APPLICATION/nac.h(117): warning:  #1-D: last line of file ends without a newline
-  #endif
-../APPLICATION/chassis/chassis.h(11): warning:  #1295-D: Deprecated declaration ChassisTest_OldVersion - give arg types
-  void ChassisTest_OldVersion();
-../Core/Src/main.c: 3 warnings, 0 errors
-compiling arm.c...
-..\APPLICATION\arm\arm.c(639): warning:  #177-D: function "ArmSetJointCommandRaw"  was declared but never referenced
-  static uint8_t ArmSetJointCommandRaw(uint8_t axis,
-..\APPLICATION\arm\arm.c: 1 warning, 0 errors
-compiling freertos.c...
-../APPLICATION/nac.h(107): warning:  #1295-D: Deprecated declaration NacSend - give arg types
-  void NacSend();
-../APPLICATION/nac.h(117): warning:  #1-D: last line of file ends without a newline
-  #endif
-../APPLICATION/chassis/chassis.h(11): warning:  #1295-D: Deprecated declaration ChassisTest_OldVersion - give arg types
-  void ChassisTest_OldVersion();
-../APPLICATION/catch/catch.h(4): warning:  #1295-D: Deprecated declaration catch_init - give arg types
-  void catch_init();
-../APPLICATION/catch/catch.h(5): warning:  #1295-D: Deprecated declaration catch_all - give arg types
-  void catch_all();
-../APPLICATION/catch/catch.h(7): warning:  #1-D: last line of file ends without a newline
-  #endif
-../Core/Src/freertos.c: 6 warnings, 0 errors
-linking...
-Program Size: Code=85420 RO-data=724 RW-data=1024 ZI-data=105708  
-FromELF: creating hex file...
-"Engineer\Engineer.axf" - 0 Error(s), 13 Warning(s).
+"Engineer\Engineer.axf" - 0 Error(s), 0 Warning(s).
 
 <h2>Software Packages used:</h2>
 
@@ -94,7 +50,7 @@ Package Vendor: Keil
 
    * Component: ARM::CMSIS:CORE:5.5.0
       Include file:  CMSIS\Core\Include\tz_context.h
-Build Time Elapsed:  00:00:04
+Build Time Elapsed:  00:00:00
 </pre>
 </body>
 </html>

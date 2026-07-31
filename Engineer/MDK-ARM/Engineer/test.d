@@ -59,4 +59,14 @@ engineer\test.o: ../APPLICATION/arm/arm_config.h
 engineer\test.o: ../APPLICATION/arm/arm_usb_bridge.h
 engineer\test.o: ../MODULE/protocol/protocol.h
 engineer\test.o: ../MODULE/buzzer/buzzer.h
+engineer\test.o: ../MODULE/usb/usb.h
+engineer\test.o: ../USB_DEVICE/App/usbd_cdc_if.h
+engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc/usbd_cdc.h
+engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h
+engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_def.h
+engineer\test.o: ../USB_DEVICE/Target/usbd_conf.h
+engineer\test.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
+engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_core.h
+engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h
+engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ctlreq.h
 engineer\test.o: ../Core/Inc/gpio.h

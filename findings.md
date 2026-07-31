@@ -1,5 +1,24 @@
 # Findings
 
+## 2026-08-01 USB recovery failure analysis
+
+- A rejected Cartesian target is accepted into the arm mailbox first and later finishes as `ARM_COMMAND_STATE_REJECTED`; the USB bridge currently groups that state with `CANCELLED/FAULTED`, submits an unnecessary cancel command, and remains in `ARM_USB_ACTION_FAILED` until `host.busy` becomes zero.
+- A later `TargetControl` is rejected at the bridge entry whenever either `action_state` or `active_business` is not idle.
+- Protocol ACK generation occurs before `ArmUsbBridgeOnTargetControl()`, so a trace with no `ACK id=4` cannot be explained solely by the arm business lock.
+- The USB copy TX queue can remain permanently at `tx_busy=1` if the CDC completion callback is lost or the host reconnects during a transfer. There is no timeout, CDC init/deinit reset hook, or queue-state debug API; restarting only the host therefore does not necessarily recover it.
+- ACK, heartbeat, callback and motion-status frames share the same eight-slot FIFO. Low-priority reliable status traffic can fill every slot and prevent a newly received command ACK from being queued.
+
+## 2026-08-01 USB recovery implementation
+
+- `ARM_COMMAND_STATE_REJECTED` now uses an immediate reject path: it sends the appropriate failed status/callback, clears active command/yaw/phase tracking, and restores `active_business/action_state` to idle in the same bridge cycle. It does not submit `CANCEL_MOTION`.
+- Synchronous submission failures for target, HOME, magnet descend/raise and ID2 reset use the same immediate reject path because no new physical command started.
+- `STATUS_FAULT_RETRY` now clears recoverable bridge state when the arm has no latched fault; if the arm is genuinely busy it submits one cancel request and waits for `host.busy` to clear.
+- USB protocol ACK frames now use an independent four-slot high-priority copy queue. Reliable motion/callback traffic remains on the normal eight-slot queue and cannot consume ACK capacity.
+- USB TX records start time and recovers after 100 ms without completion by dropping the stale in-flight copy, clearing CDC `TxState`, flushing the CDC IN endpoint and waiting a 20 ms guard period. Pointer matching prevents a late completion callback from completing a newer frame.
+- CDC init/deinit clears both application TX queues and requests a protocol-session reset in USB task context, so reconnecting the host clears duplicate-sequence state and stale reliable queues.
+- Task IDs 1..4 are recorded without retaining `TASK_START_RECORD` as an active movement-business lock, and each new non-duplicate TargetControl resets status deduplication so it receives its own failure response.
+- ARM GCC `-fsyntax-only` passed for `arm_usb_bridge.c`, `usb.c`, `usbd_cdc_if.c` and `Test.c`; scoped `git diff --check` passed with line-ending notices only. No Keil link, flash or hardware test was run.
+
 ## 2026-07-31 USB host protocol integration audit
 
 - The active protocol under `Engineer/MODULE/protocol` is still the old `Handshake/Heartbeat/CmdVel` version. The desktop source `C:/Users/11737/Desktop/protocol.h/.c` contains the requested puzzle-arm messages and keeps `Packet_CartesianMotionCommand` at 16 bytes.

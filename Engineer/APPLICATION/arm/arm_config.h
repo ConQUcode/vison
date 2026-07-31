@@ -110,9 +110,10 @@
 #define ARM_Q2_SOFT_MIN_DEG                 35.0f
 #define ARM_Q2_SOFT_MAX_DEG                180.0f
 /* q3采用机械定义：q3 = -两杆物理内夹角。
- * 正常物理夹角40deg~190deg，对应q3=-190deg~-40deg。 */
+ * 正常物理夹角35deg~190deg，对应q3=-190deg~-35deg；
+ * 上限小幅放宽，为当前HOME及近端低位运动保留解算余量。 */
 #define ARM_Q3_SOFT_MIN_DEG              (-190.0f)
-#define ARM_Q3_SOFT_MAX_DEG               (-40.0f)
+#define ARM_Q3_SOFT_MAX_DEG               (-35.0f)
 #define ARM_Q1_ESCAPE_MIN_DEG            (-110.0f)
 #define ARM_Q1_ESCAPE_MAX_DEG              110.0f
 #define ARM_Q2_ESCAPE_MIN_DEG               20.0f
@@ -270,15 +271,15 @@
 #define ARM_TOOL_SERVO_UPDATE_PERIOD_MS             30u
 #define ARM_TOOL_SERVO_COMMAND_DEADBAND_DEG          0.5f
 
-#define ARM_USB_MOVE_Z_MM                           26.0f
+#define ARM_USB_MOVE_Z_MM                           30.0f
 #define ARM_USB_MOVE_SPEED_MM_S                    450.0f
 #define ARM_USB_MAGNET_ACTION_Z_MM                  16.0f
 #define ARM_USB_MAGNET_ACTION_DELAY_MS            1000u
 #define ARM_USB_MAGNET_DWELL_MS                   1000u
 #define ARM_USB_MAGNET_Z_SPEED_MM_S                100.0f
-#define ARM_USB_HOME_X_MM                          230.0f
+#define ARM_USB_HOME_X_MM                          205.0f
 #define ARM_USB_HOME_Y_MM                            0.0f
-#define ARM_USB_HOME_Z_MM                           80.0f
+#define ARM_USB_HOME_Z_MM                           90.0f
 #define ARM_USB_HOME_SPEED_MM_S                    200.0f
 #define ARM_USB_YAW_MIN_DEG                        (-90.0f)
 #define ARM_USB_YAW_MAX_DEG                          90.0f

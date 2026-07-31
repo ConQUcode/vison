@@ -1,5 +1,16 @@
 # Progress
 
+## 2026-08-01 - Phase 20 started
+
+- Compared the host-side `debug.md` report with the live protocol, USB queue and arm bridge code.
+- Confirmed two independent recovery gaps: rejected arm commands can retain the bridge business lock, while a stuck/full USB TX queue can prevent even `ACK id=4` from leaving the MCU.
+- Scoped the implementation to bridge-state recovery and USB transport recovery only; arm geometry, HOME coordinates, motor limits, speed and hardware parameters remain untouched.
+- A combined late-completion and task-record cleanup patch failed context verification without changing source; continuing with smaller patches.
+- The first GCC syntax-check wrapper failed at shell parsing (`unexpected (`) before invoking GCC; switching to explicit per-file commands.
+- Completed the rejection-state split, recoverable `FAULT_RETRY`, dedicated ACK queue, USB TX timeout/reconnect recovery, late-callback guard and Watch diagnostics.
+- Explicit ARM GCC syntax-only check passed for all four changed C translation units.
+- Scoped `git diff --check` passed; only existing LF/CRLF conversion notices were emitted. Keil compilation and hardware testing remain manual.
+
 - 2026-07-30: Started Phase 18 after hardware showed the automatic point task remained in `wait_ready` and never submitted. Chose a single-owner `ArmTask()` boot sequence instead of adding more host-ready conditions to `Test.c`.
 - 2026-07-30: First combined Phase 18 patch was rejected cleanly due to an unstable mojibake comment anchor. Switched to smaller patches keyed by symbols and function boundaries.
 

@@ -43,6 +43,24 @@ extern uint32_t usb_last_recv_time;
 extern volatile uint32_t g_usb_rx_overflow_count;
 extern volatile uint32_t g_usb_tx_fail_count;
 
+typedef struct {
+    uint8_t busy;
+    uint8_t active_high_priority;
+    uint8_t high_queue_count;
+    uint8_t normal_queue_count;
+    uint8_t device_state;
+    uint8_t cdc_tx_state;
+    uint32_t tx_start_tick;
+    uint32_t enqueue_count;
+    uint32_t complete_count;
+    uint32_t timeout_count;
+    uint32_t reset_count;
+    uint32_t dropped_count;
+    uint32_t stale_complete_count;
+} USB_Tx_Debug_s;
+
+extern USB_Tx_Debug_s g_usb_tx_debug;
+
 /**
  * @brief USB模块初始化
  * 
@@ -65,8 +83,10 @@ void USB_RegisterRxCallback(usb_rx_callback_t callback);
  */
 uint8_t USB_Transmit(uint8_t *data, uint16_t len);
 uint8_t USB_TransmitCopy(const uint8_t *data, uint16_t len);
+uint8_t USB_TransmitCopyHighPriority(const uint8_t *data, uint16_t len);
 void USB_TxTask(void);
-void USB_TxCompleteHandler(void);
+void USB_TxCompleteHandler(uint8_t *data);
+void USB_ConnectionResetHandler(void);
 
 /**
  * @brief 通过USB发送字符串

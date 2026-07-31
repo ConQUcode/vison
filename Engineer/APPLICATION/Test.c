@@ -6,6 +6,7 @@
 #include "buzzer.h"
 #include "hsl_servo.h"
 #include "protocol.h"
+#include "usb.h"
 #include "gpio.h"
 #include "math.h"
 #include "string.h"
@@ -303,6 +304,7 @@ void all_init_Task(void)
            sizeof(g_feetech_servo_test_debug));
 	memset(&g_user_key_debug, 0, sizeof(g_user_key_debug));
 	g_arm_host_sim_debug.enabled = ARM_REALTIME_HOST_SIM_ENABLE != 0u;
+	USB_Init();
 	protocol_init();
 	ArmUsbBridgeInit();
 	BuzzerInit();

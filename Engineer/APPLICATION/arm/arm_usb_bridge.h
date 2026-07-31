@@ -58,6 +58,11 @@ typedef struct {
     uint32_t duplicate_count;
     uint32_t usb_rx_overflow_count;
     uint32_t usb_tx_fail_count;
+    uint8_t usb_tx_busy;
+    uint8_t usb_tx_high_queue_count;
+    uint8_t usb_tx_normal_queue_count;
+    uint32_t usb_tx_timeout_count;
+    uint32_t usb_tx_reset_count;
 } Arm_Usb_Debug_s;
 
 typedef struct {
@@ -98,6 +103,11 @@ typedef struct {
     uint32_t callback_status_tx_count;
     uint32_t usb_rx_overflow_count;
     uint32_t usb_tx_fail_count;
+    uint8_t usb_tx_busy;
+    uint8_t usb_tx_high_queue_count;
+    uint8_t usb_tx_normal_queue_count;
+    uint32_t usb_tx_timeout_count;
+    uint32_t usb_tx_reset_count;
 } Arm_Usb_Comm_Debug_s;
 
 extern Arm_Usb_Debug_s g_arm_usb_debug;

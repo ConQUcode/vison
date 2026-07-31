@@ -188,6 +188,13 @@ motors in position-speed mode.
 - [completed] Disable the current power-on tool/magnet/ID2 test for the formal USB-control firmware.
 - [completed] Run source inspection and `git diff --check`; do not run Keil build unless explicitly requested.
 
+### Phase 20 - USB command rejection and transport recovery
+
+- [completed] Split Cartesian preflight rejection from running-motion failure so an unreachable target reports `FAILED` and immediately releases the USB business lock without submitting a redundant cancel command.
+- [completed] Make `FAULT_RETRY` clear recoverable bridge state when no real arm fault or motion remains.
+- [completed] Add USB CDC TX timeout/re-enumeration recovery and reserve a dedicated high-priority queue for command ACK traffic.
+- [completed] Expose concise TX queue recovery diagnostics and run source/diff validation without a Keil build.
+
 ## Environment Notes
 
 - PowerShell startup fails with `8009001d`; native `cmd.exe` is used.
@@ -198,3 +205,5 @@ motors in position-speed mode.
 - 2026-07-30: a compound `cmd.exe` `rg` inspection failed because cmd parsed the quoted search expression as commands; use `C:\w64devkit\bin\bash.exe` for compound source inspection.
 - 2026-07-30: a multiline Python `-c` path simulation failed under `cmd.exe` with an unterminated string; use Bash stdin/heredoc for the numerical reproduction.
 - 2026-07-30: the first Phase 18 combined patch did not apply because a mojibake comment in `arm_config.h` made the context unstable. No source changes were made; subsequent patches use stable macro/function boundaries.
+- 2026-08-01: one combined Phase 20 cleanup patch did not apply after `usb.c` context changed during the same turn. No part of that patch was applied; the cleanup is split into small symbol-bound patches.
+- 2026-08-01: the first optional GCC syntax-check wrapper failed before compilation because the Windows Bash invocation rejected its array syntax. No build artifacts or source files were changed; validation continues with explicit commands.
