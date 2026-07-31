@@ -31,9 +31,17 @@ static float ArmToolServo2HalfRangePos(void)
             (float)ARM_TOOL_SERVO2_POS_MIN);
 }
 
-static uint8_t ArmToolServoAngleFiniteAndInRange(float angle_deg)
+static uint8_t ArmToolServoAngleFiniteAndInRange(uint8_t servo_id,
+                                                  float angle_deg)
 {
-    return isfinite(angle_deg) &&
+    if (!isfinite(angle_deg)) {
+        return 0u;
+    }
+    if (servo_id == ARM_TOOL_SERVO2_ID) {
+        return angle_deg >= ARM_TOOL_SERVO2_LOGIC_MIN_DEG &&
+               angle_deg <= ARM_TOOL_SERVO2_LOGIC_MAX_DEG;
+    }
+    return servo_id == ARM_TOOL_SERVO1_ID &&
            angle_deg >= ARM_TOOL_SERVO_DEG_MIN &&
            angle_deg <= ARM_TOOL_SERVO_DEG_MAX;
 }
@@ -60,7 +68,7 @@ static Arm_Command_Result_e ArmToolSendServo(uint8_t servo_id,
         return ARM_COMMAND_NOT_READY;
     }
     if ((servo_id != ARM_TOOL_SERVO1_ID && servo_id != ARM_TOOL_SERVO2_ID) ||
-        !ArmToolServoAngleFiniteAndInRange(angle_deg) ||
+        !ArmToolServoAngleFiniteAndInRange(servo_id, angle_deg) ||
         time_ms > HSL_SERVO_MAX_TIME_MS) {
         g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_RANGE;
         return ARM_COMMAND_INVALID;
@@ -114,17 +122,27 @@ uint16_t ArmToolAngleDegToPos(uint8_t servo_id, float angle_deg)
     float pos_f;
     float pos_min;
     float pos_max;
+    float angle_min;
+    float angle_max;
+    float angle_range;
 
     if (!isfinite(angle_deg) ||
         (servo_id != ARM_TOOL_SERVO1_ID &&
          servo_id != ARM_TOOL_SERVO2_ID)) {
         return ARM_TOOL_SERVO_POS_MIN;
     }
-    if (angle_deg < ARM_TOOL_SERVO_DEG_MIN) {
-        angle_deg = ARM_TOOL_SERVO_DEG_MIN;
+    angle_min = servo_id == ARM_TOOL_SERVO2_ID ?
+        ARM_TOOL_SERVO2_LOGIC_MIN_DEG : ARM_TOOL_SERVO_DEG_MIN;
+    angle_max = servo_id == ARM_TOOL_SERVO2_ID ?
+        ARM_TOOL_SERVO2_LOGIC_MAX_DEG : ARM_TOOL_SERVO_DEG_MAX;
+    angle_range = servo_id == ARM_TOOL_SERVO2_ID ?
+        ARM_TOOL_SERVO2_RANGE_DEG :
+        (ARM_TOOL_SERVO_DEG_MAX - ARM_TOOL_SERVO_DEG_MIN);
+    if (angle_deg < angle_min) {
+        angle_deg = angle_min;
     }
-    if (angle_deg > ARM_TOOL_SERVO_DEG_MAX) {
-        angle_deg = ARM_TOOL_SERVO_DEG_MAX;
+    if (angle_deg > angle_max) {
+        angle_deg = angle_max;
     }
     neutral_pos = servo_id == ARM_TOOL_SERVO1_ID ?
         (float)ARM_TOOL_SERVO1_NEUTRAL_POS :
@@ -133,8 +151,7 @@ uint16_t ArmToolAngleDegToPos(uint8_t servo_id, float angle_deg)
         (float)ARM_TOOL_SERVO2_POS_MIN : (float)ARM_TOOL_SERVO_POS_MIN;
     pos_max = servo_id == ARM_TOOL_SERVO2_ID ?
         (float)ARM_TOOL_SERVO2_POS_MAX : (float)ARM_TOOL_SERVO_POS_MAX;
-    pos_per_deg = (pos_max - pos_min) /
-        (ARM_TOOL_SERVO_DEG_MAX - ARM_TOOL_SERVO_DEG_MIN);
+    pos_per_deg = (pos_max - pos_min) / angle_range;
     pos_f = neutral_pos +
         (angle_deg - ARM_TOOL_SERVO_NEUTRAL_DEG) * pos_per_deg;
     if (pos_f < pos_min) {
@@ -163,7 +180,8 @@ float ArmToolServo1AngleForVerticalDown(float small_link_pitch_deg)
 
 uint8_t ArmToolServo1AngleValid(float angle_deg)
 {
-    return ArmToolServoAngleFiniteAndInRange(angle_deg);
+    return ArmToolServoAngleFiniteAndInRange(ARM_TOOL_SERVO1_ID,
+                                              angle_deg);
 }
 
 void ArmToolInit(void)
@@ -181,6 +199,17 @@ void ArmToolInit(void)
         ARM_TOOL_VERTICAL_COMPENSATION_ENABLE != 0u ? 1u : 0u;
     g_arm_tool_debug.servo_target_deg[0] = ARM_TOOL_SERVO1_INIT_DEG;
     g_arm_tool_debug.servo_target_deg[1] = ARM_TOOL_SERVO2_FIXED_DEG;
+    g_arm_tool_debug.servo2_base_compensation_enabled =
+        ARM_TOOL_SERVO2_BASE_COMPENSATION_ENABLE != 0u ? 1u : 0u;
+    g_arm_tool_debug.servo2_target_in_range = 1u;
+    g_arm_tool_debug.servo2_world_yaw_target_deg = 0.0f;
+    g_arm_tool_debug.servo2_q1_feedback_deg = 0.0f;
+    g_arm_tool_debug.servo2_base_compensation_deg = 0.0f;
+    g_arm_tool_debug.servo2_relative_target_deg = 0.0f;
+    g_arm_tool_debug.servo2_logic_target_deg = ARM_TOOL_SERVO2_FIXED_DEG;
+    g_arm_tool_debug.servo2_compensated_target_pos =
+        ARM_TOOL_SERVO2_NEUTRAL_POS;
+    g_arm_tool_debug.servo2_tracking_tick = HAL_GetTick();
     g_arm_tool_debug.servo1_compensation_target_deg =
         ARM_TOOL_SERVO1_INIT_DEG;
     g_arm_tool_debug.servo1_slew_tick = HAL_GetTick();
@@ -393,7 +422,7 @@ Arm_Command_Result_e ArmToolSetServo1Angle(float angle_deg)
 
 Arm_Command_Result_e ArmToolSetServo2Angle(float angle_deg)
 {
-    if (!ArmToolServoAngleFiniteAndInRange(angle_deg)) {
+    if (!ArmToolServoAngleFiniteAndInRange(ARM_TOOL_SERVO2_ID, angle_deg)) {
         return ARM_COMMAND_INVALID;
     }
     return ArmToolSendServo(ARM_TOOL_SERVO2_ID, angle_deg,
@@ -447,7 +476,7 @@ Arm_Command_Result_e ArmToolSetServo2Position(uint16_t position,
     g_arm_tool_debug.servo_target_deg[1] =
         ARM_USB_YAW_NEUTRAL_DEG +
         ((float)position - (float)ARM_TOOL_SERVO2_NEUTRAL_POS) *
-        (ARM_TOOL_SERVO_DEG_MAX - ARM_TOOL_SERVO_DEG_MIN) /
+        ARM_TOOL_SERVO2_RANGE_DEG /
         half_range_pos /
         ARM_TOOL_SERVO2_YAW_DIRECTION;
     g_arm_tool_debug.servo_target_pos[1] = position;
@@ -464,6 +493,112 @@ Arm_Command_Result_e ArmToolSetServo2Position(uint16_t position,
     g_arm_tool_debug.error_code = ARM_TOOL_ERROR_NONE;
     return ARM_COMMAND_OK;
 #endif
+}
+
+Arm_Command_Result_e ArmToolSetServo2WorldYawTarget(float world_yaw_deg)
+{
+#if ARM_TOOL_ENABLE == 0u
+    (void)world_yaw_deg;
+    return ARM_COMMAND_UNSUPPORTED;
+#else
+    if (!isfinite(world_yaw_deg) ||
+        world_yaw_deg < ARM_USB_YAW_MIN_DEG ||
+        world_yaw_deg > ARM_USB_YAW_MAX_DEG) {
+        g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_RANGE;
+        return ARM_COMMAND_INVALID;
+    }
+    g_arm_tool_debug.servo2_world_yaw_target_deg = world_yaw_deg;
+    /* 旧目标的补发不得覆盖新的q1动态补偿目标。 */
+    g_arm_tool_debug.servo2_repeat_remaining = 0u;
+    return ARM_COMMAND_OK;
+#endif
+}
+
+uint8_t ArmToolServo2WorldYawValidForQ1(float world_yaw_deg,
+                                        float q1_deg)
+{
+    float compensation_deg;
+    float logic_deg;
+
+    if (!isfinite(world_yaw_deg) || !isfinite(q1_deg)) {
+        return 0u;
+    }
+    compensation_deg = ARM_TOOL_SERVO2_BASE_COMPENSATION_ENABLE != 0u ?
+        -ARM_TOOL_SERVO2_BASE_COMPENSATION_SCALE * q1_deg : 0.0f;
+    logic_deg = ARM_TOOL_SERVO_NEUTRAL_DEG + world_yaw_deg +
+        compensation_deg;
+    return ArmToolServoAngleFiniteAndInRange(ARM_TOOL_SERVO2_ID,
+                                              logic_deg);
+}
+
+Arm_Command_Result_e ArmToolTrackServo2WorldYaw(float q1_feedback_deg,
+                                                uint32_t now_ms)
+{
+#if ARM_TOOL_ENABLE == 0u
+    (void)q1_feedback_deg;
+    (void)now_ms;
+    return ARM_COMMAND_UNSUPPORTED;
+#else
+    float compensation_deg;
+    float relative_deg;
+    float logic_deg;
+    Arm_Command_Result_e result;
+
+    if (g_arm_tool_debug.init_state != ARM_TOOL_INIT_DONE ||
+        g_arm_tool_debug.servo2_base_compensation_enabled == 0u) {
+        return ARM_COMMAND_NOT_READY;
+    }
+    if (!isfinite(q1_feedback_deg)) {
+        g_arm_tool_debug.error_code = ARM_TOOL_ERROR_INVALID_ARGUMENT;
+        return ARM_COMMAND_INVALID;
+    }
+
+    compensation_deg = -ARM_TOOL_SERVO2_BASE_COMPENSATION_SCALE *
+        q1_feedback_deg;
+    relative_deg = g_arm_tool_debug.servo2_world_yaw_target_deg +
+        compensation_deg;
+    logic_deg = ARM_TOOL_SERVO_NEUTRAL_DEG + relative_deg;
+
+    g_arm_tool_debug.servo2_q1_feedback_deg = q1_feedback_deg;
+    g_arm_tool_debug.servo2_base_compensation_deg = compensation_deg;
+    g_arm_tool_debug.servo2_relative_target_deg = relative_deg;
+    g_arm_tool_debug.servo2_logic_target_deg = logic_deg;
+
+    if (!ArmToolServoAngleFiniteAndInRange(ARM_TOOL_SERVO2_ID, logic_deg)) {
+        if (g_arm_tool_debug.servo2_target_in_range != 0u) {
+            g_arm_tool_debug.servo2_limit_reject_count++;
+        }
+        g_arm_tool_debug.servo2_target_in_range = 0u;
+        g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_RANGE;
+        return ARM_COMMAND_INVALID;
+    }
+    g_arm_tool_debug.servo2_target_in_range = 1u;
+    if (g_arm_tool_debug.error_code == ARM_TOOL_ERROR_SERVO_RANGE) {
+        g_arm_tool_debug.error_code = ARM_TOOL_ERROR_NONE;
+    }
+    g_arm_tool_debug.servo2_compensated_target_pos =
+        ArmToolAngleDegToPos(ARM_TOOL_SERVO2_ID, logic_deg);
+
+    if ((uint32_t)(now_ms - g_arm_tool_debug.servo2_tracking_tick) <
+        ARM_TOOL_SERVO2_TRACK_UPDATE_PERIOD_MS ||
+        fabsf(logic_deg - g_arm_tool_debug.servo_target_deg[1]) <
+            ARM_TOOL_SERVO2_TRACK_DEADBAND_DEG) {
+        return ARM_COMMAND_OK;
+    }
+
+    result = ArmToolSendServo(ARM_TOOL_SERVO2_ID, logic_deg,
+                              ARM_TOOL_SERVO2_TRACK_TIME_MS, 1u);
+    if (result == ARM_COMMAND_OK) {
+        g_arm_tool_debug.servo2_tracking_tick = now_ms;
+        g_arm_tool_debug.servo2_compensation_tx_count++;
+    }
+    return result;
+#endif
+}
+
+float ArmToolGetServo2WorldYawTarget(void)
+{
+    return g_arm_tool_debug.servo2_world_yaw_target_deg;
 }
 
 Arm_Command_Result_e ArmToolSetVerticalDownFromPitch(

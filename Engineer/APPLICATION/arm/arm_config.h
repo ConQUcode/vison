@@ -212,7 +212,29 @@
 #define ARM_TOOL_SERVO2_NEUTRAL_POS                500u
 #define ARM_TOOL_SERVO2_POS_MIN                      0u
 #define ARM_TOOL_SERVO2_POS_MAX                   1000u
+/*
+ * ID2实机/上位机标定：控制位置0~1000对应约270deg机械转角。
+ * 位置500仍作为装配中位，对应逻辑90deg；因此当前可表示的逻辑角约为
+ * -45deg~225deg。该独立量程不得用于ID1，ID1继续沿用0~180deg映射。
+ */
+#define ARM_TOOL_SERVO2_RANGE_DEG                  270.0f
+#define ARM_TOOL_SERVO2_LOGIC_MIN_DEG              \
+    (ARM_TOOL_SERVO_NEUTRAL_DEG -                   \
+     ((float)(ARM_TOOL_SERVO2_NEUTRAL_POS - ARM_TOOL_SERVO2_POS_MIN) * \
+      ARM_TOOL_SERVO2_RANGE_DEG /                   \
+      (float)(ARM_TOOL_SERVO2_POS_MAX - ARM_TOOL_SERVO2_POS_MIN)))
+#define ARM_TOOL_SERVO2_LOGIC_MAX_DEG              \
+    (ARM_TOOL_SERVO_NEUTRAL_DEG +                   \
+     ((float)(ARM_TOOL_SERVO2_POS_MAX - ARM_TOOL_SERVO2_NEUTRAL_POS) * \
+      ARM_TOOL_SERVO2_RANGE_DEG /                   \
+      (float)(ARM_TOOL_SERVO2_POS_MAX - ARM_TOOL_SERVO2_POS_MIN)))
 #define ARM_TOOL_SERVO2_YAW_DIRECTION                1.0f
+/* ID2底座偏航补偿方向经实机确认需相对理论方向反转。 */
+#define ARM_TOOL_SERVO2_BASE_COMPENSATION_ENABLE     1u
+#define ARM_TOOL_SERVO2_BASE_COMPENSATION_SCALE     (-1.0f)
+#define ARM_TOOL_SERVO2_TRACK_UPDATE_PERIOD_MS      30u
+#define ARM_TOOL_SERVO2_TRACK_DEADBAND_DEG           0.5f
+#define ARM_TOOL_SERVO2_TRACK_TIME_MS                0u
 /* ID1上电初始化目标；不改变90deg机械中位及其位置标定。 */
 #define ARM_TOOL_SERVO1_INIT_DEG                    45.0f
 /* ID1角度增大用于抵消小臂向上俯仰，保持电磁铁末端竖直向下。 */
@@ -246,9 +268,9 @@
 #define ARM_TOOL_SERVO_UPDATE_PERIOD_MS             30u
 #define ARM_TOOL_SERVO_COMMAND_DEADBAND_DEG          0.5f
 
-#define ARM_USB_MOVE_Z_MM                           29.0f
+#define ARM_USB_MOVE_Z_MM                           24.0f
 #define ARM_USB_MOVE_SPEED_MM_S                    450.0f
-#define ARM_USB_MAGNET_ACTION_Z_MM                  19.0f
+#define ARM_USB_MAGNET_ACTION_Z_MM                  15.0f
 #define ARM_USB_MAGNET_ACTION_DELAY_MS            1000u
 #define ARM_USB_MAGNET_DWELL_MS                   1000u
 #define ARM_USB_MAGNET_Z_SPEED_MM_S                100.0f
@@ -256,8 +278,8 @@
 #define ARM_USB_HOME_Y_MM                            0.0f
 #define ARM_USB_HOME_Z_MM                           80.0f
 #define ARM_USB_HOME_SPEED_MM_S                    200.0f
-#define ARM_USB_YAW_MIN_DEG                        (-60.0f)
-#define ARM_USB_YAW_MAX_DEG                          60.0f
+#define ARM_USB_YAW_MIN_DEG                        (-90.0f)
+#define ARM_USB_YAW_MAX_DEG                          90.0f
 #define ARM_USB_YAW_NEUTRAL_DEG                      90.0f
 #define ARM_USB_YAW_MOVE_TIME_MS                    500u
 #define ARM_USB_YAW_SETTLE_MS                       100u

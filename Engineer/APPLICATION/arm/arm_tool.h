@@ -41,6 +41,17 @@ typedef struct {
     uint16_t servo2_repeat_time_ms;
     uint8_t servo2_repeat_remaining;
     uint32_t servo2_repeat_tick;
+    uint8_t servo2_base_compensation_enabled;
+    uint8_t servo2_target_in_range;
+    float servo2_q1_feedback_deg;
+    float servo2_world_yaw_target_deg;
+    float servo2_base_compensation_deg;
+    float servo2_relative_target_deg;
+    float servo2_logic_target_deg;
+    uint16_t servo2_compensated_target_pos;
+    uint32_t servo2_tracking_tick;
+    uint32_t servo2_compensation_tx_count;
+    uint32_t servo2_limit_reject_count;
     uint8_t vertical_down_enabled;
     uint32_t error_code;
     uint32_t tx_count[2];
@@ -61,6 +72,12 @@ Arm_Command_Result_e ArmToolSetServo1Angle(float angle_deg);
 Arm_Command_Result_e ArmToolSetServo2Angle(float angle_deg);
 Arm_Command_Result_e ArmToolSetServo2Position(uint16_t position,
                                               uint16_t time_ms);
+Arm_Command_Result_e ArmToolSetServo2WorldYawTarget(float world_yaw_deg);
+Arm_Command_Result_e ArmToolTrackServo2WorldYaw(float q1_feedback_deg,
+                                                uint32_t now_ms);
+float ArmToolGetServo2WorldYawTarget(void);
+uint8_t ArmToolServo2WorldYawValidForQ1(float world_yaw_deg,
+                                        float q1_deg);
 Arm_Command_Result_e ArmToolSetVerticalDownFromPitch(
     float small_link_pitch_deg);
 uint8_t ArmToolGetTipFromWrist(const Arm_Position_s *wrist,

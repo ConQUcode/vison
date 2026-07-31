@@ -51,21 +51,6 @@ static float ArmUsbServo2HalfRangePos(void)
             (float)ARM_TOOL_SERVO2_POS_MIN);
 }
 
-static float ArmUsbServo2PositionToYaw(uint16_t position)
-{
-    float max_yaw_deg = ArmUsbServo2MaxYawAbsDeg();
-    float half_range_pos = ArmUsbServo2HalfRangePos();
-
-    if (max_yaw_deg <= 0.000001f ||
-        half_range_pos <= 0.000001f ||
-        fabsf(ARM_TOOL_SERVO2_YAW_DIRECTION) <= 0.000001f) {
-        return 0.0f;
-    }
-    return ((float)position - (float)ARM_TOOL_SERVO2_NEUTRAL_POS) *
-        (ARM_TOOL_SERVO_DEG_MAX - ARM_TOOL_SERVO_DEG_MIN) /
-        half_range_pos / ARM_TOOL_SERVO2_YAW_DIRECTION;
-}
-
 static uint16_t ArmUsbYawToServo2Position(float yaw_deg)
 {
     float max_yaw_deg = ArmUsbServo2MaxYawAbsDeg();
@@ -79,7 +64,7 @@ static uint16_t ArmUsbYawToServo2Position(float yaw_deg)
     }
     pos_f = (float)ARM_TOOL_SERVO2_NEUTRAL_POS +
         ARM_TOOL_SERVO2_YAW_DIRECTION * yaw_deg * half_range_pos /
-        (ARM_TOOL_SERVO_DEG_MAX - ARM_TOOL_SERVO_DEG_MIN);
+        ARM_TOOL_SERVO2_RANGE_DEG;
     if (pos_f < (float)ARM_TOOL_SERVO2_POS_MIN) {
         pos_f = (float)ARM_TOOL_SERVO2_POS_MIN;
     }
@@ -145,11 +130,13 @@ static void ArmUsbFillCurrentFromHost(const Arm_Host_Status_s *host)
     if (host == NULL) {
         return;
     }
-    current_yaw_deg = ArmUsbServo2PositionToYaw(host->servo_target_pos[1]);
+    current_yaw_deg = host->tool_yaw_target_deg;
     g_arm_usb_debug.current_x_mm = host->tool_tip_mm.x_mm;
     g_arm_usb_debug.current_y_mm = host->tool_tip_mm.y_mm;
     g_arm_usb_debug.current_z_mm = host->tool_tip_mm.z_mm;
     g_arm_usb_debug.current_yaw_deg = current_yaw_deg;
+    g_arm_usb_debug.target_yaw_servo_deg = host->servo_target_deg[1];
+    g_arm_usb_debug.target_yaw_pos = host->servo_target_pos[1];
     g_arm_usb_debug.magnet_on = host->magnet_on;
 
     g_arm_usb_comm_debug.current_x_mm = host->tool_tip_mm.x_mm;
@@ -171,7 +158,7 @@ static void ArmUsbSendMotionStatus(MotionState state, MotionFault fault)
         ArmUsbFillCurrentFromHost(&host);
         status.x_mm = host.tool_tip_mm.x_mm;
         status.y_mm = host.tool_tip_mm.y_mm;
-        status.yaw_deg = ArmUsbServo2PositionToYaw(host.servo_target_pos[1]);
+        status.yaw_deg = host.tool_yaw_target_deg;
     }
     if (state != last_motion_state || fault != last_motion_fault) {
         (void)protocol_send_motion_status(&status);
@@ -301,8 +288,8 @@ static Arm_Command_Result_e ArmUsbSubmitServo2Reset(void)
     active_arm_command_id = ArmUsbNextInternalCommandId();
     command.command_id = active_arm_command_id;
     command.type = ARM_COMMAND_TYPE_TOOL;
-    command.payload.tool.action = ARM_TOOL_ACTION_SERVO2_ANGLE;
-    command.payload.tool.servo2_deg = ARM_TOOL_SERVO2_FIXED_DEG;
+    command.payload.tool.action = ARM_TOOL_ACTION_SERVO2_WORLD_YAW;
+    command.payload.tool.servo2_deg = 0.0f;
     g_arm_usb_debug.internal_arm_command_id = active_arm_command_id;
     g_arm_usb_debug.target_yaw_servo_deg = ARM_TOOL_SERVO2_FIXED_DEG;
     g_arm_usb_debug.target_yaw_pos = ARM_TOOL_SERVO2_NEUTRAL_POS;

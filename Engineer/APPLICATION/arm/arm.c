@@ -1906,6 +1906,8 @@ arm_task_finish:
         ARM_BOOT_MODE != ARM_BOOT_MODE_TOOL_SERVO_INIT_ONLY) {
         (void)ArmToolSetVerticalDownFromPitch(
             g_arm_state.small_link_pitch_deg);
+        (void)ArmToolTrackServo2WorldYaw(
+            g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW], now_ms);
     }
     (void)ArmToolGetTipFromWrist(&g_arm_state.wrist_center,
         g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW],
@@ -2010,6 +2012,7 @@ static Arm_Command_Result_e ArmExecuteJointCommand(
     const Arm_Joint_Command_s *command)
 {
     Arm_Motion_Result_e result;
+    float world_yaw_deg;
 
     if (command == NULL || !ArmJointPoseWithinSoftLimits(command->q_deg)) {
         return ARM_COMMAND_INVALID;
@@ -2023,6 +2026,14 @@ static Arm_Command_Result_e ArmExecuteJointCommand(
     }
     if (ArmTrajectoryIsBusy()) {
         return ARM_COMMAND_BUSY;
+    }
+    world_yaw_deg = ArmToolGetServo2WorldYawTarget();
+    if (!ArmToolServo2WorldYawValidForQ1(
+            world_yaw_deg,
+            g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW]) ||
+        !ArmToolServo2WorldYawValidForQ1(
+            world_yaw_deg, command->q_deg[ARM_JOINT_BASE_YAW])) {
+        return ARM_COMMAND_PREFLIGHT_FAILED;
     }
     result = command->move_type == ARM_MOVE_DIRECT ?
         ArmTrajectorySetJointDirect(command->q_deg) :
@@ -2044,8 +2055,9 @@ static Arm_Command_Result_e ArmExecuteCartesianCommand(
 {
     Arm_Motion_Result_e result;
     Arm_IK_Result_s ik_result;
-    float servo2_deg = ARM_USB_YAW_NEUTRAL_DEG;
     Arm_Command_Result_e yaw_result;
+    float world_yaw_deg;
+    float target_q1_deg;
 
     if (command == NULL) {
         return ARM_COMMAND_INVALID;
@@ -2063,8 +2075,11 @@ static Arm_Command_Result_e ArmExecuteCartesianCommand(
             command->tool_yaw_deg > ARM_USB_YAW_MAX_DEG) {
             return ARM_COMMAND_INVALID;
         }
-        servo2_deg = ARM_USB_YAW_NEUTRAL_DEG + command->tool_yaw_deg;
     }
+    world_yaw_deg = command->tool_yaw_valid != 0u ?
+        command->tool_yaw_deg : ArmToolGetServo2WorldYawTarget();
+    target_q1_deg = atan2f(command->target_mm.y_mm,
+                          command->target_mm.x_mm) * ARM_RAD_TO_DEG;
     if (g_arm_state.mode != ARM_MODE_READY ||
         g_arm_state.start_state != ARM_START_READY ||
         g_arm_state.fault_latched != ARM_FAULT_NONE ||
@@ -2074,6 +2089,12 @@ static Arm_Command_Result_e ArmExecuteCartesianCommand(
     }
     if (ArmTrajectoryIsBusy()) {
         return ARM_COMMAND_BUSY;
+    }
+    if (!ArmToolServo2WorldYawValidForQ1(
+            world_yaw_deg,
+            g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW]) ||
+        !ArmToolServo2WorldYawValidForQ1(world_yaw_deg, target_q1_deg)) {
+        return ARM_COMMAND_PREFLIGHT_FAILED;
     }
     memset(&ik_result, 0, sizeof(ik_result));
     if (command->move_type == ARM_MOVE_DIRECT) {
@@ -2092,7 +2113,8 @@ static Arm_Command_Result_e ArmExecuteCartesianCommand(
     }
     if (result == ARM_MOTION_RESULT_OK) {
         if (command->tool_yaw_valid != 0u) {
-            yaw_result = ArmToolSetServo2Angle(servo2_deg);
+            yaw_result = ArmToolSetServo2WorldYawTarget(
+                command->tool_yaw_deg);
             if (yaw_result != ARM_COMMAND_OK) {
                 ArmTrajectoryCancel();
                 return yaw_result;
@@ -2126,6 +2148,13 @@ static Arm_Command_Result_e ArmExecuteRealtimeTarget(
         ArmTemperatureAtOrAbove(ARM_TEMPERATURE_HOLD_C) ||
         !ArmToolReadyForMotion()) {
         return ARM_COMMAND_NOT_READY;
+    }
+    if (target == NULL ||
+        !ArmToolServo2WorldYawValidForQ1(
+            ArmToolGetServo2WorldYawTarget(),
+            atan2f(target->target_mm.y_mm, target->target_mm.x_mm) *
+                ARM_RAD_TO_DEG)) {
+        return ARM_COMMAND_PREFLIGHT_FAILED;
     }
     return ArmTrajectorySubmitRealtimeTarget(target);
 }
@@ -2166,6 +2195,12 @@ static Arm_Command_Result_e ArmExecuteToolCommand(
             }
             return ArmToolSetServo2Angle(command->servo2_deg);
 
+        case ARM_TOOL_ACTION_SERVO2_WORLD_YAW:
+            if (!ready) {
+                return ARM_COMMAND_NOT_READY;
+            }
+            return ArmToolSetServo2WorldYawTarget(command->servo2_deg);
+
         case ARM_TOOL_ACTION_RESET_DEFAULT:
         {
             Arm_Command_Result_e r1;
@@ -2174,7 +2209,7 @@ static Arm_Command_Result_e ArmExecuteToolCommand(
             ArmToolSetMagnet(0u);
             r1 = ArmToolSetVerticalDownFromPitch(
                 g_arm_state.small_link_pitch_deg);
-            r2 = ArmToolSetServo2Angle(ARM_TOOL_SERVO2_FIXED_DEG);
+            r2 = ArmToolSetServo2WorldYawTarget(0.0f);
             if (r1 != ARM_COMMAND_OK) {
                 return r1;
             }
@@ -2779,7 +2814,7 @@ static void ArmUpdateHostStatus(void)
     g_arm_host_status.tool_error_code = tool->error_code;
     g_arm_host_status.tool_yaw_active = yaw_busy;
     g_arm_host_status.tool_yaw_target_deg =
-        arm_command_mailbox.yaw_target_deg;
+        ArmToolGetServo2WorldYawTarget();
     g_arm_host_status.trajectory_progress =
         g_arm_motion_debug.trajectory_progress;
     memcpy(g_arm_host_status.mos_temperature_c,
