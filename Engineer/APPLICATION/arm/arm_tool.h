@@ -37,6 +37,10 @@ typedef struct {
     float servo1_compensation_target_deg;
     uint32_t servo1_slew_tick;
     uint8_t servo1_slew_active;
+    uint16_t servo2_repeat_pos;
+    uint16_t servo2_repeat_time_ms;
+    uint8_t servo2_repeat_remaining;
+    uint32_t servo2_repeat_tick;
     uint8_t vertical_down_enabled;
     uint32_t error_code;
     uint32_t tx_count[2];
@@ -55,6 +59,8 @@ void ArmToolSetMagnet(uint8_t on);
 void ArmToolStopServo1Tracking(void);
 Arm_Command_Result_e ArmToolSetServo1Angle(float angle_deg);
 Arm_Command_Result_e ArmToolSetServo2Angle(float angle_deg);
+Arm_Command_Result_e ArmToolSetServo2Position(uint16_t position,
+                                              uint16_t time_ms);
 Arm_Command_Result_e ArmToolSetVerticalDownFromPitch(
     float small_link_pitch_deg);
 uint8_t ArmToolGetTipFromWrist(const Arm_Position_s *wrist,

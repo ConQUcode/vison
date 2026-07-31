@@ -6,7 +6,7 @@
 #define HSL_SERVO_MIN_ID             1u
 #define HSL_SERVO_MAX_ID           253u
 #define HSL_SERVO_MIN_POSITION       0u
-#define HSL_SERVO_MAX_POSITION    1000u
+#define HSL_SERVO_MAX_POSITION    2000u
 #define HSL_SERVO_MAX_TIME_MS     30000u
 
 typedef enum {
@@ -92,6 +92,11 @@ uint8_t HSLServoInit(void);
 HSLServo_Result_e HSLServoMove(uint8_t id,
                                uint16_t position,
                                uint16_t time_ms);
+HSLServo_Result_e HSLServoMove2(uint8_t id1,
+                                uint16_t position1,
+                                uint8_t id2,
+                                uint16_t position2,
+                                uint16_t time_ms);
 HSLServo_Result_e HSLServoStop(uint8_t id);
 HSLServo_Result_e HSLServoRequestPosition(uint8_t id);
 uint8_t HSLServoGetStatus(uint8_t id, HSLServo_Status_s *status);

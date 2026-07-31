@@ -31,7 +31,62 @@ static float pending_target_x_mm;
 static float pending_target_y_mm;
 static float pending_target_yaw_deg;
 static uint8_t target_move_phase;
+static uint8_t target_yaw_pending;
+static uint8_t target_yaw_waiting;
+static uint32_t target_yaw_complete_tick;
+static uint8_t magnet_action_done;
+static uint8_t magnet_off_reset_done;
+static uint32_t magnet_off_reset_tick;
 static uint32_t state_tick;
+
+static float ArmUsbServo2MaxYawAbsDeg(void)
+{
+    return fmaxf(fabsf(ARM_USB_YAW_MIN_DEG),
+                 fabsf(ARM_USB_YAW_MAX_DEG));
+}
+
+static float ArmUsbServo2HalfRangePos(void)
+{
+    return ((float)ARM_TOOL_SERVO2_POS_MAX -
+            (float)ARM_TOOL_SERVO2_POS_MIN) * 0.5f;
+}
+
+static float ArmUsbServo2PositionToYaw(uint16_t position)
+{
+    float max_yaw_deg = ArmUsbServo2MaxYawAbsDeg();
+    float half_range_pos = ArmUsbServo2HalfRangePos();
+
+    if (max_yaw_deg <= 0.000001f ||
+        half_range_pos <= 0.000001f ||
+        fabsf(ARM_TOOL_SERVO2_YAW_DIRECTION) <= 0.000001f) {
+        return 0.0f;
+    }
+    return ((float)position - (float)ARM_TOOL_SERVO2_NEUTRAL_POS) *
+        max_yaw_deg / half_range_pos / ARM_TOOL_SERVO2_YAW_DIRECTION;
+}
+
+static uint16_t ArmUsbYawToServo2Position(float yaw_deg)
+{
+    float max_yaw_deg = ArmUsbServo2MaxYawAbsDeg();
+    float half_range_pos = ArmUsbServo2HalfRangePos();
+    float pos_f;
+
+    if (!isfinite(yaw_deg) ||
+        max_yaw_deg <= 0.000001f ||
+        half_range_pos <= 0.000001f) {
+        return ARM_TOOL_SERVO2_NEUTRAL_POS;
+    }
+    pos_f = (float)ARM_TOOL_SERVO2_NEUTRAL_POS +
+        ARM_TOOL_SERVO2_YAW_DIRECTION * yaw_deg * half_range_pos /
+        max_yaw_deg;
+    if (pos_f < (float)ARM_TOOL_SERVO2_POS_MIN) {
+        pos_f = (float)ARM_TOOL_SERVO2_POS_MIN;
+    }
+    if (pos_f > (float)ARM_TOOL_SERVO2_POS_MAX) {
+        pos_f = (float)ARM_TOOL_SERVO2_POS_MAX;
+    }
+    return (uint16_t)(pos_f + 0.5f);
+}
 
 static uint8_t ArmUsbFinite3(float a, float b, float c)
 {
@@ -84,19 +139,22 @@ static MotionFault ArmUsbFaultFromHost(const Arm_Host_Status_s *status)
 
 static void ArmUsbFillCurrentFromHost(const Arm_Host_Status_s *host)
 {
+    float current_yaw_deg;
+
     if (host == NULL) {
         return;
     }
+    current_yaw_deg = ArmUsbServo2PositionToYaw(host->servo_target_pos[1]);
     g_arm_usb_debug.current_x_mm = host->tool_tip_mm.x_mm;
     g_arm_usb_debug.current_y_mm = host->tool_tip_mm.y_mm;
     g_arm_usb_debug.current_z_mm = host->tool_tip_mm.z_mm;
-    g_arm_usb_debug.current_yaw_deg = host->tool_yaw_target_deg;
+    g_arm_usb_debug.current_yaw_deg = current_yaw_deg;
     g_arm_usb_debug.magnet_on = host->magnet_on;
 
     g_arm_usb_comm_debug.current_x_mm = host->tool_tip_mm.x_mm;
     g_arm_usb_comm_debug.current_y_mm = host->tool_tip_mm.y_mm;
     g_arm_usb_comm_debug.current_z_mm = host->tool_tip_mm.z_mm;
-    g_arm_usb_comm_debug.current_yaw_deg = host->tool_yaw_target_deg;
+    g_arm_usb_comm_debug.current_yaw_deg = current_yaw_deg;
     g_arm_usb_comm_debug.magnet_on = host->magnet_on;
 }
 
@@ -112,7 +170,7 @@ static void ArmUsbSendMotionStatus(MotionState state, MotionFault fault)
         ArmUsbFillCurrentFromHost(&host);
         status.x_mm = host.tool_tip_mm.x_mm;
         status.y_mm = host.tool_tip_mm.y_mm;
-        status.yaw_deg = host.tool_yaw_target_deg;
+        status.yaw_deg = ArmUsbServo2PositionToYaw(host.servo_target_pos[1]);
     }
     if (state != last_motion_state || fault != last_motion_fault) {
         (void)protocol_send_motion_status(&status);
@@ -152,6 +210,14 @@ static void ArmUsbSetState(Arm_Usb_Action_State_e state, uint32_t now_ms)
     state_tick = now_ms;
     g_arm_usb_debug.state_tick = now_ms;
     g_arm_usb_debug.dwell_elapsed_ms = 0u;
+    if (state == ARM_USB_MAGNET_ON_DWELL ||
+        state == ARM_USB_MAGNET_OFF_DWELL) {
+        magnet_action_done = 0u;
+    }
+    if (state == ARM_USB_MAGNET_OFF_RAISING) {
+        magnet_off_reset_done = 0u;
+        magnet_off_reset_tick = 0u;
+    }
 }
 
 static void ArmUsbSetBusiness(Arm_Usb_Business_e business)
@@ -172,7 +238,9 @@ static Arm_Command_Result_e ArmUsbSubmitTipMove(float x_mm, float y_mm,
     active_target_x_mm = x_mm;
     active_target_y_mm = y_mm;
     active_target_z_mm = z_mm;
-    active_target_yaw_deg = yaw_deg;
+    if (yaw_valid != 0u) {
+        active_target_yaw_deg = yaw_deg;
+    }
     active_arm_command_id = ArmUsbNextInternalCommandId();
     command.command_id = active_arm_command_id;
     command.type = ARM_COMMAND_TYPE_CARTESIAN;
@@ -203,21 +271,29 @@ static Arm_Command_Result_e ArmUsbSubmitTargetMoveLift(
                                0u, 0.0f);
 }
 
-static uint8_t ArmUsbTargetMoveLiftNeeded(const Arm_Host_Status_s *host)
-{
-    if (host == NULL || !isfinite(host->tool_tip_mm.z_mm)) {
-        return 1u;
-    }
-    return fabsf(host->tool_tip_mm.z_mm - ARM_USB_MOVE_Z_MM) >
-           ARM_USB_MOVE_Z_SKIP_TOL_MM;
-}
-
 static Arm_Command_Result_e ArmUsbSubmitTargetMoveFinal(void)
 {
     return ArmUsbSubmitTipMove(pending_target_x_mm, pending_target_y_mm,
                                ARM_USB_MOVE_Z_MM,
                                ARM_USB_MOVE_SPEED_MM_S,
                                1u, pending_target_yaw_deg);
+}
+
+static Arm_Command_Result_e ArmUsbSubmitServo2Reset(void)
+{
+    Arm_Command_s command;
+
+    memset(&command, 0, sizeof(command));
+    active_arm_command_id = ArmUsbNextInternalCommandId();
+    command.command_id = active_arm_command_id;
+    command.type = ARM_COMMAND_TYPE_TOOL;
+    command.payload.tool.action = ARM_TOOL_ACTION_SERVO2_ANGLE;
+    command.payload.tool.servo2_deg = ARM_TOOL_SERVO2_FIXED_DEG;
+    g_arm_usb_debug.internal_arm_command_id = active_arm_command_id;
+    g_arm_usb_debug.target_yaw_servo_deg = ARM_TOOL_SERVO2_FIXED_DEG;
+    g_arm_usb_debug.target_yaw_pos = ARM_TOOL_SERVO2_NEUTRAL_POS;
+    g_arm_usb_debug.target_yaw_result = ARM_COMMAND_BUSY;
+    return ArmSubmitCommand(&command);
 }
 
 static uint8_t ArmUsbHostReadyAndIdle(const Arm_Host_Status_s *status)
@@ -248,6 +324,10 @@ static void ArmUsbFailActive(MotionFault fault, uint8_t release_magnet)
 
     target_move_phase = 0u;
     g_arm_usb_debug.target_move_phase = target_move_phase;
+    target_yaw_pending = 0u;
+    target_yaw_waiting = 0u;
+    g_arm_usb_debug.target_yaw_pending = target_yaw_pending;
+    g_arm_usb_debug.target_yaw_waiting = target_yaw_waiting;
     if (release_magnet != 0u) {
         ArmToolSetMagnet(0u);
     }
@@ -284,6 +364,10 @@ static void ArmUsbCompleteActive(uint32_t now_ms)
 
     target_move_phase = 0u;
     g_arm_usb_debug.target_move_phase = target_move_phase;
+    target_yaw_pending = 0u;
+    target_yaw_waiting = 0u;
+    g_arm_usb_debug.target_yaw_pending = target_yaw_pending;
+    g_arm_usb_debug.target_yaw_waiting = target_yaw_waiting;
     if (finished_business == ARM_USB_BUSINESS_TARGET_MOVE) {
         ArmUsbSendMotionStatus(MOTIONSTATE_COMPLETED, MOTIONFAULT_NONE);
     } else if (finished_business == ARM_USB_BUSINESS_HOME ||
@@ -319,6 +403,12 @@ void ArmUsbBridgeInit(void)
     pending_target_y_mm = 0.0f;
     pending_target_yaw_deg = 0.0f;
     target_move_phase = 0u;
+    target_yaw_pending = 0u;
+    target_yaw_waiting = 0u;
+    target_yaw_complete_tick = 0u;
+    magnet_action_done = 0u;
+    magnet_off_reset_done = 0u;
+    magnet_off_reset_tick = 0u;
     ArmUsbSetState(ARM_USB_ACTION_IDLE, 0u);
 }
 
@@ -464,7 +554,17 @@ void ArmUsbBridgeOnTargetControl(const Packet_TargetControl *pkt)
     pending_target_x_mm = pkt->x_mm;
     pending_target_y_mm = pkt->y_mm;
     pending_target_yaw_deg = pkt->yaw_deg;
-    target_move_phase = ArmUsbTargetMoveLiftNeeded(&host) ? 1u : 2u;
+    active_target_yaw_deg = pkt->yaw_deg;
+    g_arm_usb_debug.target_yaw_servo_deg =
+        ARM_USB_YAW_NEUTRAL_DEG + pkt->yaw_deg;
+    g_arm_usb_debug.target_yaw_pos = ArmUsbYawToServo2Position(pkt->yaw_deg);
+    g_arm_usb_debug.target_yaw_result = ARM_COMMAND_BUSY;
+    /*
+     * 只有电磁铁吸住工件后移动XY时，才强制先抬到安全Z高度。
+     * 空载普通移动直接去目标点，避免HOME等低位姿态后“当前XY抬Z”
+     * 这一段先被IK/限位拒绝，导致motion看起来完全不执行。
+     */
+    target_move_phase = host.magnet_on != 0u ? 1u : 2u;
     g_arm_usb_debug.target_move_phase = target_move_phase;
     result = target_move_phase == 1u ?
         ArmUsbSubmitTargetMoveLift(&host) : ArmUsbSubmitTargetMoveFinal();
@@ -555,6 +655,13 @@ void ArmUsbBridgeTask(uint32_t now_ms)
                         last_action_failed = 1u;
                     }
                 } else {
+                    if (target_yaw_pending != 0u ||
+                        target_yaw_waiting != 0u) {
+                        break;
+                    }
+                    g_arm_usb_debug.target_yaw_result = ARM_COMMAND_OK;
+                    g_arm_usb_debug.target_yaw_pos =
+                        host.servo_target_pos[1];
                     target_move_phase = 0u;
                     g_arm_usb_debug.target_move_phase = target_move_phase;
                     ArmUsbCompleteActive(now_ms);
@@ -594,8 +701,9 @@ void ArmUsbBridgeTask(uint32_t now_ms)
                 ARM_USB_MAGNET_ACTION_DELAY_MS) {
                 break;
             }
-            if (host.magnet_on == 0u) {
+            if (magnet_action_done == 0u && host.magnet_on == 0u) {
                 ArmToolSetMagnet(1u);
+                magnet_action_done = 1u;
             }
             if ((uint32_t)(now_ms - state_tick) >=
                 ARM_USB_MAGNET_ACTION_DELAY_MS +
@@ -633,15 +741,19 @@ void ArmUsbBridgeTask(uint32_t now_ms)
 
         case ARM_USB_MAGNET_OFF_DWELL:
             g_arm_usb_debug.dwell_elapsed_ms = now_ms - state_tick;
-            if (g_arm_usb_debug.dwell_elapsed_ms <
-                ARM_USB_MAGNET_ACTION_DELAY_MS) {
+            if (magnet_action_done == 0u) {
+                if (g_arm_usb_debug.dwell_elapsed_ms <
+                    ARM_USB_MAGNET_ACTION_DELAY_MS) {
+                    break;
+                }
+                ArmToolSetMagnet(0u);
+                magnet_action_done = 1u;
+                state_tick = now_ms;
+                g_arm_usb_debug.state_tick = now_ms;
+                g_arm_usb_debug.dwell_elapsed_ms = 0u;
                 break;
             }
-            if (host.magnet_on != 0u) {
-                ArmToolSetMagnet(0u);
-            }
             if ((uint32_t)(now_ms - state_tick) >=
-                ARM_USB_MAGNET_ACTION_DELAY_MS +
                 ARM_USB_MAGNET_DWELL_MS) {
                 result = ArmUsbSubmitTipMove(action_x_mm, action_y_mm,
                     ARM_USB_MOVE_Z_MM, ARM_USB_MAGNET_Z_SPEED_MM_S,
@@ -660,7 +772,35 @@ void ArmUsbBridgeTask(uint32_t now_ms)
             break;
 
         case ARM_USB_MAGNET_OFF_RAISING:
-            if (ArmUsbCommandCompleted(&host)) {
+            if (magnet_off_reset_done == 0u) {
+                if (ArmUsbCommandCompleted(&host)) {
+                    result = ArmUsbSubmitServo2Reset();
+                    if (result == ARM_COMMAND_BUSY) {
+                        break;
+                    }
+                    if (result != ARM_COMMAND_OK) {
+                        ArmUsbSendCallbackStatus(ArmUsbBusinessCallbackId(),
+                                                 STATUS_FAULT_RETRY);
+                        last_action_failed = 1u;
+                        ArmUsbSetState(ARM_USB_ACTION_FAILED, now_ms);
+                        break;
+                    }
+                    magnet_off_reset_done = 1u;
+                    magnet_off_reset_tick = now_ms;
+                    break;
+                }
+                if (ArmUsbCommandFailed(&host)) {
+                    ArmUsbSendCallbackStatus(ArmUsbBusinessCallbackId(),
+                                             STATUS_FAULT_RETRY);
+                    last_action_failed = 1u;
+                    ArmUsbSetState(ARM_USB_ACTION_FAILED, now_ms);
+                }
+            } else if (ArmUsbCommandCompleted(&host)) {
+                if ((uint32_t)(now_ms - magnet_off_reset_tick) <
+                    ARM_USB_YAW_MOVE_TIME_MS + ARM_USB_YAW_SETTLE_MS) {
+                    break;
+                }
+                g_arm_usb_debug.target_yaw_result = ARM_COMMAND_OK;
                 ArmUsbCompleteActive(now_ms);
             } else if (ArmUsbCommandFailed(&host)) {
                 ArmUsbSendCallbackStatus(ArmUsbBusinessCallbackId(),

@@ -33,12 +33,17 @@ typedef struct {
     uint8_t active_task_id;
     uint8_t action_state;
     uint8_t target_move_phase;
+    uint8_t target_yaw_pending;
+    uint8_t target_yaw_waiting;
+    uint8_t target_yaw_result;
+    uint16_t target_yaw_pos;
     uint32_t internal_arm_command_id;
     uint8_t active_business;
     float requested_x_mm;
     float requested_y_mm;
     float requested_yaw_deg;
     float commanded_z_mm;
+    float target_yaw_servo_deg;
     float current_x_mm;
     float current_y_mm;
     float current_z_mm;

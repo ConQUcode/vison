@@ -7,6 +7,7 @@
 
 #define HSL_SERVO_HEADER                    0x55u
 #define HSL_SERVO_MOVE_FRAME_LENGTH            10u
+#define HSL_SERVO_MOVE2_FRAME_LENGTH           13u
 #define HSL_SERVO_SHORT_FRAME_LENGTH            6u
 #define HSL_SERVO_POSITION_REPLY_LENGTH          8u
 #define HSL_SERVO_RX_BUFFER_LENGTH              16u
@@ -18,6 +19,8 @@
 #define HSL_SERVO_LEGACY_ERROR_UNSUPPORTED      (-1)
 #define HSL_SERVO_BOARD_MOVE_DATA_LENGTH         8u
 #define HSL_SERVO_BOARD_MOVE_SERVO_COUNT         1u
+#define HSL_SERVO_BOARD_MOVE2_DATA_LENGTH       11u
+#define HSL_SERVO_BOARD_MOVE2_SERVO_COUNT        2u
 
 typedef struct {
     uint8_t initialized;
@@ -452,6 +455,118 @@ static HSLServo_Result_e HSLServoTransmitBoardFrame(uint8_t id,
     return HSL_SERVO_RESULT_HAL_ERROR;
 }
 
+static HSLServo_Result_e HSLServoTransmitBoardFrame2(uint8_t id1,
+                                                     uint16_t position1,
+                                                     uint8_t id2,
+                                                     uint16_t position2,
+                                                     uint16_t time_ms)
+{
+    HAL_StatusTypeDef hal_result;
+    HSLServo_Status_s *status;
+
+    if (hsl_runtime.initialized == 0u) {
+        return HSL_SERVO_RESULT_NOT_INITIALIZED;
+    }
+    if (!HSLServoIdValid(id1) || !HSLServoIdValid(id2) || id1 == id2 ||
+        position1 > HSL_SERVO_MAX_POSITION ||
+        position2 > HSL_SERVO_MAX_POSITION ||
+        time_ms > HSL_SERVO_MAX_TIME_MS) {
+        return HSL_SERVO_RESULT_INVALID;
+    }
+
+    memset(hsl_runtime.tx_buffer, 0, sizeof(hsl_runtime.tx_buffer));
+    hsl_runtime.tx_buffer[0] = HSL_SERVO_HEADER;
+    hsl_runtime.tx_buffer[1] = HSL_SERVO_HEADER;
+    hsl_runtime.tx_buffer[2] = HSL_SERVO_BOARD_MOVE2_DATA_LENGTH;
+    hsl_runtime.tx_buffer[3] = (uint8_t)HSL_SERVO_COMMAND_MOVE;
+    hsl_runtime.tx_buffer[4] = HSL_SERVO_BOARD_MOVE2_SERVO_COUNT;
+    hsl_runtime.tx_buffer[5] = (uint8_t)(time_ms & 0xffu);
+    hsl_runtime.tx_buffer[6] = (uint8_t)(time_ms >> 8u);
+    hsl_runtime.tx_buffer[7] = id1;
+    hsl_runtime.tx_buffer[8] = (uint8_t)(position1 & 0xffu);
+    hsl_runtime.tx_buffer[9] = (uint8_t)(position1 >> 8u);
+    hsl_runtime.tx_buffer[10] = id2;
+    hsl_runtime.tx_buffer[11] = (uint8_t)(position2 & 0xffu);
+    hsl_runtime.tx_buffer[12] = (uint8_t)(position2 >> 8u);
+    hsl_runtime.tx_length = HSL_SERVO_MOVE2_FRAME_LENGTH;
+    hsl_runtime.expects_response = 0u;
+    hsl_runtime.expected_command = (uint8_t)HSL_SERVO_COMMAND_MOVE;
+    hsl_runtime.tx_complete = 0u;
+    hsl_runtime.rx_complete = 0u;
+    hsl_runtime.uart_error = 0u;
+    hsl_runtime.rx_size = 0u;
+    hsl_runtime.rx_armed = 0u;
+    memset(hsl_runtime.rx_buffer, 0, sizeof(hsl_runtime.rx_buffer));
+
+    g_hsl_servo_debug.current_id = id2;
+    g_hsl_servo_debug.current_command = HSL_SERVO_COMMAND_MOVE;
+    g_hsl_servo_debug.last_command = HSL_SERVO_COMMAND_MOVE;
+    g_hsl_servo_debug.last_result = HSL_SERVO_RESULT_BUSY;
+    g_hsl_servo_debug.busy = 1u;
+    g_hsl_servo_debug.state = HSL_SERVO_STATE_TX_DMA;
+    g_hsl_servo_debug.transaction_start_tick = HAL_GetTick();
+    g_hsl_servo_debug.last_position = position2;
+    g_hsl_servo_debug.last_position_valid = 1u;
+    HSLServoUpdateDebugFrames();
+
+    if (huart6.hdmarx != NULL) {
+        HAL_UART_DMAStop(&huart6);
+    }
+
+    hal_result = HAL_UART_Transmit(&huart6,
+                                   hsl_runtime.tx_buffer,
+                                   hsl_runtime.tx_length,
+                                   HSL_SERVO_TX_TIMEOUT_MS);
+    if (hal_result == HAL_OK) {
+        while (__HAL_UART_GET_FLAG(&huart6, UART_FLAG_TC) == RESET) {
+        }
+        HAL_Delay(HSL_SERVO_BOARD_TX_GAP_MS);
+        hsl_runtime.tx_complete = 1u;
+        g_hsl_servo_debug.tx_count++;
+        g_hsl_servo_debug.last_result = HSL_SERVO_RESULT_OK;
+        g_hsl_servo_debug.busy = 0u;
+        g_hsl_servo_debug.state = HSL_SERVO_STATE_COMPLETE;
+        status = HSLServoFindStatus(id1, 1u);
+        if (status != NULL) {
+            status->last_command = HSL_SERVO_COMMAND_MOVE;
+            status->last_result = HSL_SERVO_RESULT_OK;
+            status->position = position1;
+            status->position_valid = 1u;
+            status->online = 1u;
+            status->tx_count++;
+        }
+        status = HSLServoFindStatus(id2, 1u);
+        if (status != NULL) {
+            status->last_command = HSL_SERVO_COMMAND_MOVE;
+            status->last_result = HSL_SERVO_RESULT_OK;
+            status->position = position2;
+            status->position_valid = 1u;
+            status->online = 1u;
+            status->tx_count++;
+        }
+        g_hsl_servo_debug.online = 1u;
+        g_hsl_servo_debug.current_command = HSL_SERVO_COMMAND_NONE;
+        return HSL_SERVO_RESULT_OK;
+    }
+
+    g_hsl_servo_debug.hal_error_count++;
+    g_hsl_servo_debug.last_result = HSL_SERVO_RESULT_HAL_ERROR;
+    g_hsl_servo_debug.busy = 0u;
+    g_hsl_servo_debug.state = HSL_SERVO_STATE_ERROR;
+    g_hsl_servo_debug.current_command = HSL_SERVO_COMMAND_NONE;
+    status = HSLServoFindStatus(id1, 1u);
+    if (status != NULL) {
+        status->last_command = HSL_SERVO_COMMAND_MOVE;
+        status->last_result = HSL_SERVO_RESULT_HAL_ERROR;
+    }
+    status = HSLServoFindStatus(id2, 1u);
+    if (status != NULL) {
+        status->last_command = HSL_SERVO_COMMAND_MOVE;
+        status->last_result = HSL_SERVO_RESULT_HAL_ERROR;
+    }
+    return HSL_SERVO_RESULT_HAL_ERROR;
+}
+
 uint8_t HSLServoInit(void)
 {
     memset(&hsl_runtime, 0, sizeof(hsl_runtime));
@@ -468,6 +583,16 @@ HSLServo_Result_e HSLServoMove(uint8_t id,
                                uint16_t time_ms)
 {
     return HSLServoTransmitBoardFrame(id, position, time_ms);
+}
+
+HSLServo_Result_e HSLServoMove2(uint8_t id1,
+                                uint16_t position1,
+                                uint8_t id2,
+                                uint16_t position2,
+                                uint16_t time_ms)
+{
+    return HSLServoTransmitBoardFrame2(id1, position1, id2, position2,
+                                      time_ms);
 }
 
 HSLServo_Result_e HSLServoStop(uint8_t id)

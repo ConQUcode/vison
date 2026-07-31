@@ -209,7 +209,10 @@
 #define ARM_TOOL_SERVO_POS_MAX                    1000u
 /* 各舵机机械装配中位：逻辑90deg分别对应以下控制板位置。 */
 #define ARM_TOOL_SERVO1_NEUTRAL_POS                520u
-#define ARM_TOOL_SERVO2_NEUTRAL_POS                615u
+#define ARM_TOOL_SERVO2_NEUTRAL_POS               1000u
+#define ARM_TOOL_SERVO2_POS_MIN                      0u
+#define ARM_TOOL_SERVO2_POS_MAX                   2000u
+#define ARM_TOOL_SERVO2_YAW_DIRECTION                1.0f
 /* ID1上电初始化目标；不改变90deg机械中位及其位置标定。 */
 #define ARM_TOOL_SERVO1_INIT_DEG                    45.0f
 /* ID1角度增大用于抵消小臂向上俯仰，保持电磁铁末端竖直向下。 */
@@ -246,19 +249,20 @@
 #define ARM_USB_MOVE_Z_MM                           25.0f
 #define ARM_USB_MOVE_SPEED_MM_S                    450.0f
 #define ARM_USB_MAGNET_ACTION_Z_MM                  15.0f
-#define ARM_USB_MOVE_Z_SKIP_TOL_MM                   3.0f
 #define ARM_USB_MAGNET_ACTION_DELAY_MS            1000u
-#define ARM_USB_MAGNET_DWELL_MS                   3000u
+#define ARM_USB_MAGNET_DWELL_MS                   1000u
 #define ARM_USB_MAGNET_Z_SPEED_MM_S                100.0f
 #define ARM_USB_HOME_X_MM                          230.0f
 #define ARM_USB_HOME_Y_MM                            0.0f
 #define ARM_USB_HOME_Z_MM                           80.0f
 #define ARM_USB_HOME_SPEED_MM_S                    200.0f
-#define ARM_USB_YAW_MIN_DEG                        (-60.0f)
-#define ARM_USB_YAW_MAX_DEG                          60.0f
+#define ARM_USB_YAW_MIN_DEG                        (-90.0f)
+#define ARM_USB_YAW_MAX_DEG                          90.0f
 #define ARM_USB_YAW_NEUTRAL_DEG                      90.0f
 #define ARM_USB_YAW_MOVE_TIME_MS                    500u
 #define ARM_USB_YAW_SETTLE_MS                       100u
+#define ARM_TOOL_SERVO2_REPEAT_COUNT                  3u
+#define ARM_TOOL_SERVO2_REPEAT_PERIOD_MS            100u
 
 #define ARM_MAGNET_GPIO_PORT                       GPIOB
 #define ARM_MAGNET_GPIO_PIN                        GPIO_PIN_12

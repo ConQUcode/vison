@@ -125,13 +125,17 @@ static uint8_t send_frame(uint8_t id, const void *payload, uint8_t size,
 static uint8_t send_ack(uint8_t id, uint8_t seq)
 {
     Packet_Ack ack;
+    uint8_t ok;
 
     ack.acked_id = id;
     ack.ack_seq = seq;
     protocol_debug.last_ack_id = id;
     protocol_debug.last_ack_seq = seq;
-    protocol_debug.ack_tx_count++;
-    return send_frame(PACKET_ID_ACK, &ack, sizeof(ack), -1);
+    ok = send_frame(PACKET_ID_ACK, &ack, sizeof(ack), -1);
+    if (ok != 0u) {
+        protocol_debug.ack_tx_count++;
+    }
+    return ok;
 }
 
 static uint8_t send_callback_head(uint32_t now_ms)
@@ -289,7 +293,9 @@ static void dispatch(uint8_t id, uint8_t len)
         uint8_t seq = rx_data[sizeof(Packet_TaskStatus)];
         Packet_TaskStatus packet;
 
-        (void)send_ack(id, seq);
+        if (send_ack(id, seq) == 0u) {
+            return;
+        }
         if (task_seen != 0u && seq == task_seq) {
             protocol_debug.duplicate_count++;
             return;
@@ -308,7 +314,9 @@ static void dispatch(uint8_t id, uint8_t len)
         uint8_t seq = rx_data[sizeof(Packet_TargetControl)];
         Packet_TargetControl packet;
 
-        (void)send_ack(id, seq);
+        if (send_ack(id, seq) == 0u) {
+            return;
+        }
         if (target_control_seen != 0u && seq == target_control_seq) {
             protocol_debug.duplicate_count++;
             return;
