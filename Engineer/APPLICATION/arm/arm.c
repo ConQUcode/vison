@@ -514,6 +514,10 @@ static void ArmProcessEnableOnly(uint32_t now_ms)
 
     switch (g_arm_state.start_state) {
         case ARM_START_REGISTERED:
+            if ((uint32_t)(now_ms - arm_runtime.boot_tick) <
+                ARM_DM_POWER_ON_DELAY_MS) {
+                break;
+            }
             ArmSetStartState(ARM_START_WAIT_PASSIVE_FEEDBACK, now_ms);
             break;
 
@@ -1030,6 +1034,20 @@ static void ArmUpdateFeedback(uint32_t now_ms)
     g_arm_dm_debug.mode = g_arm_state.mode;
     g_arm_dm_debug.start_state = g_arm_state.start_state;
     g_arm_dm_debug.fault = g_arm_state.fault_latched;
+    g_arm_dm_debug.power_on_delay_elapsed_ms =
+        (uint32_t)(now_ms - arm_runtime.boot_tick);
+    if (g_arm_dm_debug.power_on_delay_elapsed_ms >
+        ARM_DM_POWER_ON_DELAY_MS) {
+        g_arm_dm_debug.power_on_delay_elapsed_ms =
+            ARM_DM_POWER_ON_DELAY_MS;
+    }
+    g_arm_dm_debug.power_on_delay_active =
+        g_arm_state.start_state == ARM_START_REGISTERED &&
+        g_arm_dm_debug.power_on_delay_elapsed_ms <
+            ARM_DM_POWER_ON_DELAY_MS;
+    g_arm_dm_debug.power_on_delay_done =
+        g_arm_dm_debug.power_on_delay_elapsed_ms >=
+            ARM_DM_POWER_ON_DELAY_MS;
     g_arm_dm_debug.fault_reset_request = g_arm_state.fault_reset_request;
     g_arm_dm_debug.fault_reset_applied = g_arm_state.fault_reset_applied;
     g_arm_dm_debug.fault_reset_result = g_arm_state.fault_reset_result;
@@ -1574,6 +1592,10 @@ void ArmProcessStartup(uint32_t now_ms)
 
     switch (g_arm_state.start_state) {
         case ARM_START_REGISTERED:
+            if ((uint32_t)(now_ms - arm_runtime.boot_tick) <
+                ARM_DM_POWER_ON_DELAY_MS) {
+                break;
+            }
             ArmSetStartState(ARM_START_WAIT_PASSIVE_FEEDBACK, now_ms);
             break;
 

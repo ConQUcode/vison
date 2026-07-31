@@ -3624,9 +3624,9 @@
       </Doc>
       <Doc>
         <Name>../Core/Src/main.c</Name>
-        <ColumnNumber>0</ColumnNumber>
+        <ColumnNumber>34</ColumnNumber>
         <TopLine>76</TopLine>
-        <CurrentLine>87</CurrentLine>
+        <CurrentLine>90</CurrentLine>
         <Folding>1</Folding>
         <ContractedFolders></ContractedFolders>
         <PaneID>0</PaneID>
@@ -3939,9 +3939,9 @@
       </Doc>
       <Doc>
         <Name>../Middlewares/Third_Party/FreeRTOS/Source/tasks.c</Name>
-        <ColumnNumber>0</ColumnNumber>
+        <ColumnNumber>3</ColumnNumber>
         <TopLine>3642</TopLine>
-        <CurrentLine>3650</CurrentLine>
+        <CurrentLine>3663</CurrentLine>
         <Folding>1</Folding>
         <ContractedFolders></ContractedFolders>
         <PaneID>0</PaneID>

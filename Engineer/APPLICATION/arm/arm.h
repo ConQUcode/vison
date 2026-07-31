@@ -340,6 +340,9 @@ typedef struct {
     uint8_t elbow_coupling_active;
     uint8_t passive_feedback_observed[3];
     uint8_t enter_mode_sent[3];
+    uint8_t power_on_delay_active;
+    uint8_t power_on_delay_done;
+    uint32_t power_on_delay_elapsed_ms;
     Arm_DM_Auto_Init_Debug_s auto_init;
     uint32_t fault_reset_request;
     uint32_t fault_reset_applied;

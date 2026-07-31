@@ -140,6 +140,8 @@
 #define ARM_SAFE_Q3_DEG                  (-60.0f)
 
 /* 启动、脱困、回位和保护参数。 */
+/* 主控与达妙同时上电时，先留出电机自身启动时间，再进入原初始化流程。 */
+#define ARM_DM_POWER_ON_DELAY_MS          1000u
 #define ARM_PASSIVE_FEEDBACK_WAIT_MS       300u
 #define ARM_ENTER_MODE_FEEDBACK_WAIT_MS    500u
 #define ARM_DM_ENABLE_REFRESH_MS            100u
@@ -268,9 +270,9 @@
 #define ARM_TOOL_SERVO_UPDATE_PERIOD_MS             30u
 #define ARM_TOOL_SERVO_COMMAND_DEADBAND_DEG          0.5f
 
-#define ARM_USB_MOVE_Z_MM                           24.0f
+#define ARM_USB_MOVE_Z_MM                           26.0f
 #define ARM_USB_MOVE_SPEED_MM_S                    450.0f
-#define ARM_USB_MAGNET_ACTION_Z_MM                  15.0f
+#define ARM_USB_MAGNET_ACTION_Z_MM                  16.0f
 #define ARM_USB_MAGNET_ACTION_DELAY_MS            1000u
 #define ARM_USB_MAGNET_DWELL_MS                   1000u
 #define ARM_USB_MAGNET_Z_SPEED_MM_S                100.0f
