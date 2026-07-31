@@ -306,6 +306,9 @@ typedef struct {
     float speed_deg_s;
     float start_deg;
     float target_deg;
+    Arm_Position_s target_tool_tip_mm;
+    Arm_Position_s target_wrist_mm;
+    Arm_IK_Status_e ik_status;
     float target_q_deg[3];
     uint32_t elapsed_ms;
     uint32_t cycle_count;

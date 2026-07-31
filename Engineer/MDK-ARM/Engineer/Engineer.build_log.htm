@@ -29,19 +29,19 @@ Project File Date:  07/31/2026
 Build target 'Engineer'
 compiling arm_kinematics.c...
 compiling arm_wrist.c...
-compiling arm_tool.c...
-..\APPLICATION\arm\arm_tool.c(448): warning:  #186-D: pointless comparison of unsigned integer with zero
-      if (position < ARM_TOOL_SERVO2_POS_MIN ||
-..\APPLICATION\arm\arm_tool.c: 1 warning, 0 errors
 compiling arm_usb_bridge.c...
 ..\APPLICATION\arm\arm_usb_bridge.c(36): warning:  #550-D: variable "target_yaw_complete_tick"  was set but never used
   static uint32_t target_yaw_complete_tick;
 ..\APPLICATION\arm\arm_usb_bridge.c: 1 warning, 0 errors
-compiling arm_trajectory.c...
+compiling arm_tool.c...
+..\APPLICATION\arm\arm_tool.c(448): warning:  #186-D: pointless comparison of unsigned integer with zero
+      if (position < ARM_TOOL_SERVO2_POS_MIN ||
+..\APPLICATION\arm\arm_tool.c: 1 warning, 0 errors
 compiling Test.c...
 ..\APPLICATION\Test.c(29): warning:  #177-D: variable "feetech_servo_sweep_pos"  was declared but never referenced
   static const uint16_t feetech_servo_sweep_pos[] = {
 ..\APPLICATION\Test.c: 1 warning, 0 errors
+compiling arm_trajectory.c...
 compiling main.c...
 ../APPLICATION/nac.h(107): warning:  #1295-D: Deprecated declaration NacSend - give arg types
   void NacSend();
@@ -51,7 +51,7 @@ compiling main.c...
   void ChassisTest_OldVersion();
 ../Core/Src/main.c: 3 warnings, 0 errors
 compiling arm.c...
-..\APPLICATION\arm\arm.c(594): warning:  #177-D: function "ArmSetJointCommandRaw"  was declared but never referenced
+..\APPLICATION\arm\arm.c(639): warning:  #177-D: function "ArmSetJointCommandRaw"  was declared but never referenced
   static uint8_t ArmSetJointCommandRaw(uint8_t axis,
 ..\APPLICATION\arm\arm.c: 1 warning, 0 errors
 compiling freertos.c...
@@ -69,7 +69,7 @@ compiling freertos.c...
   #endif
 ../Core/Src/freertos.c: 6 warnings, 0 errors
 linking...
-Program Size: Code=85420 RO-data=748 RW-data=1028 ZI-data=105676  
+Program Size: Code=85420 RO-data=724 RW-data=1024 ZI-data=105708  
 FromELF: creating hex file...
 "Engineer\Engineer.axf" - 0 Error(s), 13 Warning(s).
 
@@ -94,7 +94,7 @@ Package Vendor: Keil
 
    * Component: ARM::CMSIS:CORE:5.5.0
       Include file:  CMSIS\Core\Include\tz_context.h
-Build Time Elapsed:  00:00:05
+Build Time Elapsed:  00:00:04
 </pre>
 </body>
 </html>

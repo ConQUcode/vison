@@ -5,8 +5,8 @@
 
 /*
  * 当前为三轴联调模式：复用已验证的三电机使能/当前位置保持流程，
- * 三轴同时进入前向机械初始化姿态[0,60,-60]，随后保持同一前向
- * 安全姿态。稳定到位后才报告READY并等待正式上位机命令。
+ * 三轴使能后直接将ARM_USB_HOME_*电磁铁末端点换算为关节角，低速
+ * 同步进入HOME姿态。稳定到位后才报告READY并等待正式上位机命令。
  * 三轴方向确认后，将ARM_BOOT_MODE切到ARM_BOOT_MODE_NORMAL即可进入
  * 自动脱困和小臂/大臂/底座顺序回安全姿态。
  */
@@ -160,14 +160,14 @@
 #define ARM_TEMPERATURE_DISABLE_C              80.0f
 #define ARM_DM_TX_FAIL_LIMIT                    5u
 
-/* 三轴自动初始化姿态验证：三轴同时运动到目标姿态。 */
+/*
+ * 三轴上电初始化：反馈和使能就绪后，直接解算并低速移动到HOME末端点。
+ * HOME坐标统一复用ARM_USB_HOME_*，不再先经过固定关节初始化姿态。
+ */
 #define ARM_DM_AUTO_INIT_ENABLE                  1u
 #define ARM_DM_AUTO_INIT_START_DELAY_MS       1000u
 #define ARM_DM_AUTO_INIT_STEP_TIMEOUT_MS     25000u
-#define ARM_DM_AUTO_INIT_SPEED_DEG_S           240.0f
-#define ARM_DM_AUTO_INIT_BASE_Q_DEG              0.0f
-#define ARM_DM_AUTO_INIT_SHOULDER_Q_DEG         60.0f
-#define ARM_DM_AUTO_INIT_ELBOW_Q_DEG          (-60.0f)
+#define ARM_DM_AUTO_INIT_SPEED_DEG_S            60.0f
 
 /* 四点循环仅保留为台架测试；正式上位机接口版默认关闭。 */
 

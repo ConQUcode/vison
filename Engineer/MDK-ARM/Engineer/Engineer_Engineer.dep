@@ -79,7 +79,7 @@ I (../MODULE/remote/remote.h)(0x67CDA97C)
 I (../APPLICATION/nac.h)(0x68879D7A)
 I (../BSP/USART/bsp_usart.h)(0x6A6A9BED)
 I (../APPLICATION/Test.h)(0x6A6CA438)
-I (../APPLICATION/arm/arm.h)(0x6A6CC2FB)
+I (../APPLICATION/arm/arm.h)(0x6A6CC89C)
 I (../APPLICATION/arm/arm_host.h)(0x6A6CB77B)
 I (../MODULE/feite_motor/hsl_servo.h)(0x6A6C9A6A)
 F (../Core/Src/gpio.c)(0x6A6CA017)(--c99 --gnu -c --cpu Cortex-M4.fp.sp -g -O0 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F4xx/Include -I ../Drivers/CMSIS/Include -I ../MODULE/algorithm -I ../MODULE/C_comm -I ../MODULE/motor -I ../MODULE/motor/DJImotor -I ../MODULE/motor/DMmotor -I ../BSP/CAN -I ../BSP/DWT -I ../BSP/USART -I ../APPLICATION -I ../MODULE/remote -I ../Middlewares/Third_Party/FreeRTOS/Source/include -I ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F -I ../Middlewares/ST/ARM/DSP/Inc -I ../MODULE/daemon -I ../MODULE -I ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS -I ../APPLICATION/dribble -I ../APPLICATION/chassis -I ../MODULE/imu -I ../APPLICATION/cmd -I ../MODULE/relay -I ./Engineer -I ../USB_DEVICE/App -I ../USB_DEVICE/Target -I ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc -I ../MODULE/usb -I ../MODULE/protocol -I ../MODULE/feite_motor -I ../MODULE/buzzer -I ../APPLICATION/catch -I ../APPLICATION/arm-I.\RTE\_Engineer-IC:\Users\11737\AppData\Local\Arm\Packs\ARM\CMSIS\5.8.0\CMSIS\Core\Include-D__UVISION_VERSION="536" -D_RTE_ -DSTM32F407xx -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F407xx-o engineer\gpio.o --omf_browse engineer\gpio.crf --depend engineer\gpio.d)
@@ -206,7 +206,7 @@ I (C:\Keil_v5\ARM\ARMCC\include\stdio.h)(0x60252374)
 I (../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_core.h)(0x68CEA67D)
 I (../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ctlreq.h)(0x68CEA67D)
 I (../APPLICATION/Test.h)(0x6A6CA438)
-I (../APPLICATION/arm/arm.h)(0x6A6CC2FB)
+I (../APPLICATION/arm/arm.h)(0x6A6CC89C)
 I (../APPLICATION/arm/arm_host.h)(0x6A6CB77B)
 I (../MODULE/feite_motor/hsl_servo.h)(0x6A6C9A6A)
 I (../APPLICATION/catch/catch.h)(0x69E0FEA9)
@@ -2388,19 +2388,19 @@ I (../MODULE/algorithm/ramp_contorller.h)(0x67CDA97C)
 I (../MODULE/daemon/daemon.h)(0x67CDA97C)
 I (../MODULE/motor/DMmotor/dmmotor.h)(0x6A6A4D08)
 I (..\APPLICATION\Test.h)(0x6A6CA438)
-I (../APPLICATION/arm/arm.h)(0x6A6CC2FB)
+I (../APPLICATION/arm/arm.h)(0x6A6CC89C)
 I (../APPLICATION/arm/arm_host.h)(0x6A6CB77B)
 I (../MODULE/feite_motor/hsl_servo.h)(0x6A6C9A6A)
-I (../APPLICATION/arm/arm_config.h)(0x6A6CC387)
+I (../APPLICATION/arm/arm_config.h)(0x6A6CC8D7)
 I (../APPLICATION/arm/arm_usb_bridge.h)(0x6A6CA429)
 I (../MODULE/protocol/protocol.h)(0x6A6C0487)
 I (../MODULE/buzzer/buzzer.h)(0x6A6BC798)
 I (../Core/Inc/gpio.h)(0x67CDA964)
-F (..\APPLICATION\arm\arm.c)(0x6A6CC326)(--c99 --gnu -c --cpu Cortex-M4.fp.sp -g -O0 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F4xx/Include -I ../Drivers/CMSIS/Include -I ../MODULE/algorithm -I ../MODULE/C_comm -I ../MODULE/motor -I ../MODULE/motor/DJImotor -I ../MODULE/motor/DMmotor -I ../BSP/CAN -I ../BSP/DWT -I ../BSP/USART -I ../APPLICATION -I ../MODULE/remote -I ../Middlewares/Third_Party/FreeRTOS/Source/include -I ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F -I ../Middlewares/ST/ARM/DSP/Inc -I ../MODULE/daemon -I ../MODULE -I ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS -I ../APPLICATION/dribble -I ../APPLICATION/chassis -I ../MODULE/imu -I ../APPLICATION/cmd -I ../MODULE/relay -I ./Engineer -I ../USB_DEVICE/App -I ../USB_DEVICE/Target -I ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc -I ../MODULE/usb -I ../MODULE/protocol -I ../MODULE/feite_motor -I ../MODULE/buzzer -I ../APPLICATION/catch -I ../APPLICATION/arm-I.\RTE\_Engineer-IC:\Users\11737\AppData\Local\Arm\Packs\ARM\CMSIS\5.8.0\CMSIS\Core\Include-D__UVISION_VERSION="536" -D_RTE_ -DSTM32F407xx -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F407xx-o engineer\arm.o --omf_browse engineer\arm.crf --depend engineer\arm.d)
-I (..\APPLICATION\arm\arm.h)(0x6A6CC2FB)
+F (..\APPLICATION\arm\arm.c)(0x6A6CC9A4)(--c99 --gnu -c --cpu Cortex-M4.fp.sp -g -O0 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F4xx/Include -I ../Drivers/CMSIS/Include -I ../MODULE/algorithm -I ../MODULE/C_comm -I ../MODULE/motor -I ../MODULE/motor/DJImotor -I ../MODULE/motor/DMmotor -I ../BSP/CAN -I ../BSP/DWT -I ../BSP/USART -I ../APPLICATION -I ../MODULE/remote -I ../Middlewares/Third_Party/FreeRTOS/Source/include -I ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F -I ../Middlewares/ST/ARM/DSP/Inc -I ../MODULE/daemon -I ../MODULE -I ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS -I ../APPLICATION/dribble -I ../APPLICATION/chassis -I ../MODULE/imu -I ../APPLICATION/cmd -I ../MODULE/relay -I ./Engineer -I ../USB_DEVICE/App -I ../USB_DEVICE/Target -I ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc -I ../MODULE/usb -I ../MODULE/protocol -I ../MODULE/feite_motor -I ../MODULE/buzzer -I ../APPLICATION/catch -I ../APPLICATION/arm-I.\RTE\_Engineer-IC:\Users\11737\AppData\Local\Arm\Packs\ARM\CMSIS\5.8.0\CMSIS\Core\Include-D__UVISION_VERSION="536" -D_RTE_ -DSTM32F407xx -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F407xx-o engineer\arm.o --omf_browse engineer\arm.crf --depend engineer\arm.d)
+I (..\APPLICATION\arm\arm.h)(0x6A6CC89C)
 I (C:\Keil_v5\ARM\ARMCC\include\stdint.h)(0x6025237E)
 I (..\APPLICATION\arm\arm_host.h)(0x6A6CB77B)
-I (..\APPLICATION\arm\arm_config.h)(0x6A6CC387)
+I (..\APPLICATION\arm\arm_config.h)(0x6A6CC8D7)
 I (..\APPLICATION\arm\arm_internal.h)(0x6A6B298A)
 I (..\APPLICATION\arm\arm_kinematics.h)(0x6A6897FD)
 I (..\APPLICATION\arm\arm_tool.h)(0x6A6CB754)
@@ -2458,18 +2458,18 @@ I (../MODULE/algorithm/ramp_contorller.h)(0x67CDA97C)
 I (../Core/Inc/tim.h)(0x6A6BA078)
 F (..\APPLICATION\arm\arm_kinematics.c)(0x6A6B8E1A)(--c99 --gnu -c --cpu Cortex-M4.fp.sp -g -O0 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F4xx/Include -I ../Drivers/CMSIS/Include -I ../MODULE/algorithm -I ../MODULE/C_comm -I ../MODULE/motor -I ../MODULE/motor/DJImotor -I ../MODULE/motor/DMmotor -I ../BSP/CAN -I ../BSP/DWT -I ../BSP/USART -I ../APPLICATION -I ../MODULE/remote -I ../Middlewares/Third_Party/FreeRTOS/Source/include -I ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F -I ../Middlewares/ST/ARM/DSP/Inc -I ../MODULE/daemon -I ../MODULE -I ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS -I ../APPLICATION/dribble -I ../APPLICATION/chassis -I ../MODULE/imu -I ../APPLICATION/cmd -I ../MODULE/relay -I ./Engineer -I ../USB_DEVICE/App -I ../USB_DEVICE/Target -I ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc -I ../MODULE/usb -I ../MODULE/protocol -I ../MODULE/feite_motor -I ../MODULE/buzzer -I ../APPLICATION/catch -I ../APPLICATION/arm-I.\RTE\_Engineer-IC:\Users\11737\AppData\Local\Arm\Packs\ARM\CMSIS\5.8.0\CMSIS\Core\Include-D__UVISION_VERSION="536" -D_RTE_ -DSTM32F407xx -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F407xx-o engineer\arm_kinematics.o --omf_browse engineer\arm_kinematics.crf --depend engineer\arm_kinematics.d)
 I (..\APPLICATION\arm\arm_kinematics.h)(0x6A6897FD)
-I (..\APPLICATION\arm\arm.h)(0x6A6CC2FB)
+I (..\APPLICATION\arm\arm.h)(0x6A6CC89C)
 I (C:\Keil_v5\ARM\ARMCC\include\stdint.h)(0x6025237E)
 I (..\APPLICATION\arm\arm_host.h)(0x6A6CB77B)
-I (..\APPLICATION\arm\arm_config.h)(0x6A6CC387)
+I (..\APPLICATION\arm\arm_config.h)(0x6A6CC8D7)
 I (C:\Keil_v5\ARM\ARMCC\include\math.h)(0x60252378)
 I (C:\Keil_v5\ARM\ARMCC\include\string.h)(0x6025237E)
 F (..\APPLICATION\arm\arm_trajectory.c)(0x6A6B4D29)(--c99 --gnu -c --cpu Cortex-M4.fp.sp -g -O0 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F4xx/Include -I ../Drivers/CMSIS/Include -I ../MODULE/algorithm -I ../MODULE/C_comm -I ../MODULE/motor -I ../MODULE/motor/DJImotor -I ../MODULE/motor/DMmotor -I ../BSP/CAN -I ../BSP/DWT -I ../BSP/USART -I ../APPLICATION -I ../MODULE/remote -I ../Middlewares/Third_Party/FreeRTOS/Source/include -I ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F -I ../Middlewares/ST/ARM/DSP/Inc -I ../MODULE/daemon -I ../MODULE -I ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS -I ../APPLICATION/dribble -I ../APPLICATION/chassis -I ../MODULE/imu -I ../APPLICATION/cmd -I ../MODULE/relay -I ./Engineer -I ../USB_DEVICE/App -I ../USB_DEVICE/Target -I ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc -I ../MODULE/usb -I ../MODULE/protocol -I ../MODULE/feite_motor -I ../MODULE/buzzer -I ../APPLICATION/catch -I ../APPLICATION/arm-I.\RTE\_Engineer-IC:\Users\11737\AppData\Local\Arm\Packs\ARM\CMSIS\5.8.0\CMSIS\Core\Include-D__UVISION_VERSION="536" -D_RTE_ -DSTM32F407xx -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F407xx-o engineer\arm_trajectory.o --omf_browse engineer\arm_trajectory.crf --depend engineer\arm_trajectory.d)
 I (..\APPLICATION\arm\arm_trajectory.h)(0x6A6A9352)
-I (..\APPLICATION\arm\arm.h)(0x6A6CC2FB)
+I (..\APPLICATION\arm\arm.h)(0x6A6CC89C)
 I (C:\Keil_v5\ARM\ARMCC\include\stdint.h)(0x6025237E)
 I (..\APPLICATION\arm\arm_host.h)(0x6A6CB77B)
-I (..\APPLICATION\arm\arm_config.h)(0x6A6CC387)
+I (..\APPLICATION\arm\arm_config.h)(0x6A6CC8D7)
 I (..\APPLICATION\arm\arm_internal.h)(0x6A6B298A)
 I (..\APPLICATION\arm\arm_kinematics.h)(0x6A6897FD)
 I (..\APPLICATION\arm\arm_tool.h)(0x6A6CB754)
@@ -2512,7 +2512,7 @@ I (C:\Keil_v5\ARM\ARMCC\include\string.h)(0x6025237E)
 F (..\APPLICATION\arm\arm_wrist.c)(0x6A689DE0)(--c99 --gnu -c --cpu Cortex-M4.fp.sp -g -O0 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy -I ../Drivers/CMSIS/Device/ST/STM32F4xx/Include -I ../Drivers/CMSIS/Include -I ../MODULE/algorithm -I ../MODULE/C_comm -I ../MODULE/motor -I ../MODULE/motor/DJImotor -I ../MODULE/motor/DMmotor -I ../BSP/CAN -I ../BSP/DWT -I ../BSP/USART -I ../APPLICATION -I ../MODULE/remote -I ../Middlewares/Third_Party/FreeRTOS/Source/include -I ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F -I ../Middlewares/ST/ARM/DSP/Inc -I ../MODULE/daemon -I ../MODULE -I ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS -I ../APPLICATION/dribble -I ../APPLICATION/chassis -I ../MODULE/imu -I ../APPLICATION/cmd -I ../MODULE/relay -I ./Engineer -I ../USB_DEVICE/App -I ../USB_DEVICE/Target -I ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc -I ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc -I ../MODULE/usb -I ../MODULE/protocol -I ../MODULE/feite_motor -I ../MODULE/buzzer -I ../APPLICATION/catch -I ../APPLICATION/arm-I.\RTE\_Engineer-IC:\Users\11737\AppData\Local\Arm\Packs\ARM\CMSIS\5.8.0\CMSIS\Core\Include-D__UVISION_VERSION="536" -D_RTE_ -DSTM32F407xx -D_RTE_ -DUSE_HAL_DRIVER -DSTM32F407xx-o engineer\arm_wrist.o --omf_browse engineer\arm_wrist.crf --depend engineer\arm_wrist.d)
 I (..\APPLICATION\arm\arm_wrist.h)(0x6A6897DC)
 I (C:\Keil_v5\ARM\ARMCC\include\stdint.h)(0x6025237E)
-I (..\APPLICATION\arm\arm_config.h)(0x6A6CC387)
+I (..\APPLICATION\arm\arm_config.h)(0x6A6CC8D7)
 I (C:\Keil_v5\ARM\ARMCC\include\math.h)(0x60252378)
 I (C:\Keil_v5\ARM\ARMCC\include\string.h)(0x6025237E)
 I (../Core/Inc/tim.h)(0x6A6BA078)
@@ -2555,7 +2555,7 @@ F (..\APPLICATION\arm\arm_tool.c)(0x6A6CBD85)(--c99 --gnu -c --cpu Cortex-M4.fp.
 I (..\APPLICATION\arm\arm_tool.h)(0x6A6CB754)
 I (..\APPLICATION\arm\arm_host.h)(0x6A6CB77B)
 I (C:\Keil_v5\ARM\ARMCC\include\stdint.h)(0x6025237E)
-I (..\APPLICATION\arm\arm_config.h)(0x6A6CC387)
+I (..\APPLICATION\arm\arm_config.h)(0x6A6CC8D7)
 I (../Core/Inc/gpio.h)(0x67CDA964)
 I (../Core/Inc/main.h)(0x6855415A)
 I (../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h)(0x68CEA67E)
@@ -2600,8 +2600,8 @@ I (..\APPLICATION\arm\arm_usb_bridge.h)(0x6A6CA429)
 I (../MODULE/protocol/protocol.h)(0x6A6C0487)
 I (C:\Keil_v5\ARM\ARMCC\include\stddef.h)(0x6025237E)
 I (C:\Keil_v5\ARM\ARMCC\include\stdint.h)(0x6025237E)
-I (..\APPLICATION\arm\arm_config.h)(0x6A6CC387)
-I (..\APPLICATION\arm\arm.h)(0x6A6CC2FB)
+I (..\APPLICATION\arm\arm_config.h)(0x6A6CC8D7)
+I (..\APPLICATION\arm\arm.h)(0x6A6CC89C)
 I (..\APPLICATION\arm\arm_host.h)(0x6A6CB77B)
 I (..\APPLICATION\arm\arm_tool.h)(0x6A6CB754)
 I (../MODULE/buzzer/buzzer.h)(0x6A6BC798)
