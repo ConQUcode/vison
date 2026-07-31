@@ -56,3 +56,6 @@ engineer\test.o: ../APPLICATION/arm/arm.h
 engineer\test.o: ../APPLICATION/arm/arm_host.h
 engineer\test.o: ../MODULE/feite_motor/hsl_servo.h
 engineer\test.o: ../APPLICATION/arm/arm_config.h
+engineer\test.o: ../APPLICATION/arm/arm_usb_bridge.h
+engineer\test.o: ../MODULE/protocol/protocol.h
+engineer\test.o: ../MODULE/buzzer/buzzer.h

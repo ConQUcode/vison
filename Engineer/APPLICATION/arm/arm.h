@@ -179,6 +179,8 @@ typedef struct {
     float max_speed_mm_s;
     uint8_t tool_pitch_valid;
     float tool_pitch_deg;
+    uint8_t tool_yaw_valid;
+    float tool_yaw_deg;
 } Arm_Cartesian_Command_s;
 
 typedef struct {
@@ -195,6 +197,8 @@ typedef struct {
     float max_acceleration_mm_s2;
     uint8_t tool_pitch_valid;
     float tool_pitch_deg;
+    uint8_t tool_yaw_valid;
+    float tool_yaw_deg;
 } Arm_Realtime_Cartesian_Target_s;
 
 typedef struct {

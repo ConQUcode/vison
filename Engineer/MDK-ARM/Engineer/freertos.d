@@ -90,3 +90,6 @@ engineer\freertos.o: ../APPLICATION/arm/arm.h
 engineer\freertos.o: ../APPLICATION/arm/arm_host.h
 engineer\freertos.o: ../MODULE/feite_motor/hsl_servo.h
 engineer\freertos.o: ../APPLICATION/catch/catch.h
+engineer\freertos.o: ../MODULE/protocol/protocol.h
+engineer\freertos.o: ../APPLICATION/arm/arm_usb_bridge.h
+engineer\freertos.o: ../MODULE/buzzer/buzzer.h

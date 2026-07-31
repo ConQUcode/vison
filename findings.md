@@ -1,5 +1,14 @@
 # Findings
 
+## 2026-07-31 USB host protocol integration audit
+
+- The active protocol under `Engineer/MODULE/protocol` is still the old `Handshake/Heartbeat/CmdVel` version. The desktop source `C:/Users/11737/Desktop/protocol.h/.c` contains the requested puzzle-arm messages and keeps `Packet_CartesianMotionCommand` at 16 bytes.
+- USB CDC RX already follows the correct low-level shape: `CDC_Receive_FS()` calls `USB_RxHandler()`, and `USB_ProcessTask()` feeds `protocol_fsm_feed()` byte by byte. However `Usb_f()` currently comments out `USB_ProcessTask()`, so no host frames are consumed.
+- `USB_Transmit()` currently forwards caller buffers directly to `CDC_Transmit_FS()`. Since CDC transmit is asynchronous, protocol stack frames must be copied into a persistent USB TX queue before calling the CDC driver.
+- The arm application has `ArmSubmitCommand()` and `ArmGetHostStatus()`, but Cartesian commands currently do not expose `tool_yaw_valid/tool_yaw_deg`; `ARM_TOOL_ACTION_SERVO2_ANGLE` is still rejected in `ArmExecuteToolCommand()`.
+- `arm_tool` already owns ID1/ID2 Huaner servo commands and PB12 magnet control. Current live calibration values are retained: ID1 neutral pos 520, ID2 neutral pos 615, ID1 compensation scale 0.80, magnet offset 54 mm.
+- Current boot config still enables the power-on internal tool test, magnet hold, ID2 135/45 test and boot buzzer path. Formal USB control requires disabling that test so READY waits for host commands.
+
 ## 2026-07-30 ID1 vertical-down compensation direction
 
 - Restored `ARM_TOOL_SERVO1_DIRECTION` from `-1.0f` to the previously correct `+1.0f` physical convention.

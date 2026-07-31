@@ -32,29 +32,24 @@
  * 三达妙与末端初始化完成后移动到一个TOOL_TIP点，末端保持竖直向下；
  * 整个流程完成后才向外发布READY。
  */
-#define ARM_BOOT_TOOL_TEST_ENABLE          1u
+#define ARM_BOOT_TOOL_TEST_ENABLE          0u
 #define ARM_REALTIME_HOST_SIM_ENABLE       0u
 #define ARM_BOOT_TOOL_TEST_X_MM          250.0f
-#define ARM_BOOT_TOOL_TEST_Y_MM            40.0f
-#define ARM_BOOT_TOOL_TEST_Z_MM          20.0f
+#define ARM_BOOT_TOOL_TEST_Y_MM            00.0f
+#define ARM_BOOT_TOOL_TEST_Z_MM          10.0f
 #define ARM_BOOT_TOOL_TEST_SPEED_MM_S    250.0f
 #define ARM_BOOT_TOOL_TEST_STABLE_MS      500u
 #define ARM_BOOT_TOOL_INIT_TIMEOUT_MS    8000u
 #define ARM_BOOT_TOOL_TEST_TIMEOUT_MS   25000u
-/*
- * 到达内部测试点并开启电磁铁后，ID2执行末端旋转测试：
- * 90deg -> 135deg -> 45deg。每段命令运动时间500ms，额外等待200ms
- * 确保机构基本到位；第二段完成后关闭电磁铁并进入READY。
- */
+/* 到达内部测试点后，电磁铁吸取5s，再自动释放并进入READY。 */
+#define ARM_BOOT_MAGNET_TEST_HOLD_MS     5000u
 #define ARM_BOOT_SERVO2_TEST_FORWARD_DEG  135.0f
 #define ARM_BOOT_SERVO2_TEST_REVERSE_DEG   45.0f
-#define ARM_BOOT_SERVO2_TEST_MOVE_TIME_MS  500u
-#define ARM_BOOT_SERVO2_TEST_SETTLE_MS     200u
-
-/* 完整上电测试完成后的板载蜂鸣器提示：TIM4_CH3 / PB8，4kHz。 */
-#define ARM_BOOT_BUZZER_ENABLE                1u
-#define ARM_BOOT_BUZZER_DURATION_MS        3000u
-#define ARM_BOOT_BUZZER_COMPARE             125u
+#define ARM_BOOT_SERVO2_TEST_MOVE_TIME_MS 500u
+#define ARM_BOOT_SERVO2_TEST_SETTLE_MS    100u
+#define ARM_BOOT_BUZZER_ENABLE              0u
+#define ARM_BOOT_BUZZER_COMPARE           125u
+#define ARM_BOOT_BUZZER_DURATION_MS      3000u
 #define ARM_REALTIME_HOST_SIM_PERIOD_MS    10u
 #define ARM_REALTIME_HOST_SIM_CYCLE_MS   6000u
 #define ARM_REALTIME_HOST_SIM_SPEED_MM_S   20.0f
@@ -247,6 +242,24 @@
 #define ARM_TOOL_SERVO_TRACK_TIME_MS                  0u
 #define ARM_TOOL_SERVO_UPDATE_PERIOD_MS             30u
 #define ARM_TOOL_SERVO_COMMAND_DEADBAND_DEG          0.5f
+
+#define ARM_USB_MOVE_Z_MM                           25.0f
+#define ARM_USB_MOVE_SPEED_MM_S                    450.0f
+#define ARM_USB_MAGNET_ACTION_Z_MM                  15.0f
+#define ARM_USB_MOVE_Z_SKIP_TOL_MM                   3.0f
+#define ARM_USB_MAGNET_ACTION_DELAY_MS            1000u
+#define ARM_USB_MAGNET_DWELL_MS                   3000u
+#define ARM_USB_MAGNET_Z_SPEED_MM_S                100.0f
+#define ARM_USB_HOME_X_MM                          230.0f
+#define ARM_USB_HOME_Y_MM                            0.0f
+#define ARM_USB_HOME_Z_MM                           80.0f
+#define ARM_USB_HOME_SPEED_MM_S                    200.0f
+#define ARM_USB_YAW_MIN_DEG                        (-60.0f)
+#define ARM_USB_YAW_MAX_DEG                          60.0f
+#define ARM_USB_YAW_NEUTRAL_DEG                      90.0f
+#define ARM_USB_YAW_MOVE_TIME_MS                    500u
+#define ARM_USB_YAW_SETTLE_MS                       100u
+
 #define ARM_MAGNET_GPIO_PORT                       GPIOB
 #define ARM_MAGNET_GPIO_PIN                        GPIO_PIN_12
 #define ARM_MAGNET_ACTIVE_LEVEL                    GPIO_PIN_SET

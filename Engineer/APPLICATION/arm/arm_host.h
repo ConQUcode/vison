@@ -79,6 +79,8 @@ typedef struct {
     float max_speed_mm_s;
     uint8_t tool_pitch_valid;
     float tool_pitch_deg;
+    uint8_t tool_yaw_valid;
+    float tool_yaw_deg;
 } Arm_Command_Cartesian_s;
 
 typedef struct {
@@ -88,6 +90,8 @@ typedef struct {
     float max_acceleration_mm_s2;
     uint8_t tool_pitch_valid;
     float tool_pitch_deg;
+    uint8_t tool_yaw_valid;
+    float tool_yaw_deg;
 } Arm_Command_Realtime_s;
 
 typedef enum {
@@ -153,6 +157,8 @@ typedef struct {
     uint8_t servo_online[2];
     float servo_target_deg[2];
     uint16_t servo_target_pos[2];
+    uint8_t tool_yaw_active;
+    float tool_yaw_target_deg;
     Arm_Position_s wrist_center_mm;
     Arm_Position_s tool_tip_mm;
     uint8_t tool_vertical_down_enabled;

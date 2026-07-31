@@ -62,6 +62,10 @@ typedef struct {
     uint32_t fault_reset_command_id;
     uint32_t active_fault_reset_request;
     uint32_t latest_received_command_id;
+    uint8_t yaw_active;
+    uint32_t yaw_command_id;
+    uint32_t yaw_complete_tick;
+    float yaw_target_deg;
 } Arm_Command_Mailbox_s;
 
 Arm_State_s g_arm_state;
@@ -114,6 +118,9 @@ static Arm_Command_Result_e ArmExecuteRealtimeTarget(
     const Arm_Realtime_Cartesian_Target_s *target);
 static Arm_Command_Result_e ArmExecuteToolCommand(
     const Arm_Command_Tool_s *command);
+static uint8_t ArmHostYawActive(uint32_t now_ms);
+static void ArmHostStartYawWait(uint32_t command_id, float yaw_deg,
+                                uint32_t now_ms);
 static void ArmProcessCommandMailbox(uint32_t now_ms);
 static void ArmUpdateHostStatus(void);
 
@@ -2037,6 +2044,8 @@ static Arm_Command_Result_e ArmExecuteCartesianCommand(
 {
     Arm_Motion_Result_e result;
     Arm_IK_Result_s ik_result;
+    float servo2_deg = ARM_USB_YAW_NEUTRAL_DEG;
+    Arm_Command_Result_e yaw_result;
 
     if (command == NULL) {
         return ARM_COMMAND_INVALID;
@@ -2047,6 +2056,14 @@ static Arm_Command_Result_e ArmExecuteCartesianCommand(
     if (command->control_point != ARM_CONTROL_POINT_WRIST_CENTER &&
         command->control_point != ARM_CONTROL_POINT_TOOL_TIP) {
         return ARM_COMMAND_INVALID;
+    }
+    if (command->tool_yaw_valid != 0u) {
+        if (!isfinite(command->tool_yaw_deg) ||
+            command->tool_yaw_deg < ARM_USB_YAW_MIN_DEG ||
+            command->tool_yaw_deg > ARM_USB_YAW_MAX_DEG) {
+            return ARM_COMMAND_INVALID;
+        }
+        servo2_deg = ARM_USB_YAW_NEUTRAL_DEG + command->tool_yaw_deg;
     }
     if (g_arm_state.mode != ARM_MODE_READY ||
         g_arm_state.start_state != ARM_START_READY ||
@@ -2074,6 +2091,15 @@ static Arm_Command_Result_e ArmExecuteCartesianCommand(
             ArmMoveLinear(&command->target_mm, speed_mm_s);
     }
     if (result == ARM_MOTION_RESULT_OK) {
+        if (command->tool_yaw_valid != 0u) {
+            yaw_result = ArmToolSetServo2Angle(servo2_deg);
+            if (yaw_result != ARM_COMMAND_OK) {
+                ArmTrajectoryCancel();
+                return yaw_result;
+            }
+            ArmHostStartYawWait(command->command_id, command->tool_yaw_deg,
+                                HAL_GetTick());
+        }
         return ARM_COMMAND_OK;
     }
     if (result == ARM_MOTION_RESULT_BUSY) {
@@ -2091,6 +2117,9 @@ static Arm_Command_Result_e ArmExecuteCartesianCommand(
 static Arm_Command_Result_e ArmExecuteRealtimeTarget(
     const Arm_Realtime_Cartesian_Target_s *target)
 {
+    if (target != NULL && target->tool_yaw_valid != 0u) {
+        return ARM_COMMAND_UNSUPPORTED;
+    }
     if (g_arm_state.mode != ARM_MODE_READY ||
         g_arm_state.start_state != ARM_START_READY ||
         g_arm_state.fault_latched != ARM_FAULT_NONE ||
@@ -2132,8 +2161,10 @@ static Arm_Command_Result_e ArmExecuteToolCommand(
             return ArmToolSetServo1Angle(command->servo1_deg);
 
         case ARM_TOOL_ACTION_SERVO2_ANGLE:
-            (void)command->servo2_deg;
-            return ARM_COMMAND_UNSUPPORTED;
+            if (!ready) {
+                return ARM_COMMAND_NOT_READY;
+            }
+            return ArmToolSetServo2Angle(command->servo2_deg);
 
         case ARM_TOOL_ACTION_RESET_DEFAULT:
         {
@@ -2263,6 +2294,28 @@ static void ArmHostStartCommand(uint32_t command_id,
     g_arm_host_status.active_command_id = command_id;
     g_arm_host_status.active_command_type = type;
     g_arm_host_status.active_command_state = state;
+}
+
+static uint8_t ArmHostYawActive(uint32_t now_ms)
+{
+    if (arm_command_mailbox.yaw_active == 0u) {
+        return 0u;
+    }
+    if ((int32_t)(now_ms - arm_command_mailbox.yaw_complete_tick) >= 0) {
+        arm_command_mailbox.yaw_active = 0u;
+        return 0u;
+    }
+    return 1u;
+}
+
+static void ArmHostStartYawWait(uint32_t command_id, float yaw_deg,
+                                uint32_t now_ms)
+{
+    arm_command_mailbox.yaw_active = 1u;
+    arm_command_mailbox.yaw_command_id = command_id;
+    arm_command_mailbox.yaw_target_deg = yaw_deg;
+    arm_command_mailbox.yaw_complete_tick = now_ms +
+        ARM_USB_YAW_MOVE_TIME_MS + ARM_USB_YAW_SETTLE_MS;
 }
 
 Arm_Command_Result_e ArmSubmitCommand(const Arm_Command_s *command)
@@ -2481,6 +2534,10 @@ static void ArmProcessCommandMailbox(uint32_t now_ms)
             command.payload.cartesian.tool_pitch_valid;
         cartesian_command.tool_pitch_deg =
             command.payload.cartesian.tool_pitch_deg;
+        cartesian_command.tool_yaw_valid =
+            command.payload.cartesian.tool_yaw_valid;
+        cartesian_command.tool_yaw_deg =
+            command.payload.cartesian.tool_yaw_deg;
         result = ArmExecuteCartesianCommand(&cartesian_command);
     } else if (command.type == ARM_COMMAND_TYPE_REALTIME_CARTESIAN) {
         Arm_Realtime_Cartesian_Target_s realtime_target;
@@ -2496,6 +2553,10 @@ static void ArmProcessCommandMailbox(uint32_t now_ms)
             command.payload.realtime.tool_pitch_valid;
         realtime_target.tool_pitch_deg =
             command.payload.realtime.tool_pitch_deg;
+        realtime_target.tool_yaw_valid =
+            command.payload.realtime.tool_yaw_valid;
+        realtime_target.tool_yaw_deg =
+            command.payload.realtime.tool_yaw_deg;
         result = ArmExecuteRealtimeTarget(&realtime_target);
     } else if (command.type == ARM_COMMAND_TYPE_TOOL) {
         result = ArmExecuteToolCommand(&command.payload.tool);
@@ -2554,6 +2615,8 @@ Arm_Command_Result_e ArmSubmitCartesianCommand(
     host_command.payload.cartesian.tool_pitch_valid =
         command->tool_pitch_valid;
     host_command.payload.cartesian.tool_pitch_deg = command->tool_pitch_deg;
+    host_command.payload.cartesian.tool_yaw_valid = command->tool_yaw_valid;
+    host_command.payload.cartesian.tool_yaw_deg = command->tool_yaw_deg;
     return ArmSubmitCommand(&host_command);
 }
 
@@ -2576,6 +2639,8 @@ Arm_Command_Result_e ArmSubmitRealtimeCartesianTarget(
     host_command.payload.realtime.tool_pitch_valid =
         target->tool_pitch_valid;
     host_command.payload.realtime.tool_pitch_deg = target->tool_pitch_deg;
+    host_command.payload.realtime.tool_yaw_valid = target->tool_yaw_valid;
+    host_command.payload.realtime.tool_yaw_deg = target->tool_yaw_deg;
     return ArmSubmitCommand(&host_command);
 }
 
@@ -2625,6 +2690,7 @@ static void ArmUpdateHostStatus(void)
         ArmToolReadyForMotion();
     uint8_t trajectory_busy = ArmTrajectoryIsBusy();
     uint8_t realtime_active = ArmTrajectoryRealtimeActive();
+    uint8_t yaw_busy = ArmHostYawActive(HAL_GetTick());
 
     if (g_arm_host_status.active_command_id != 0u &&
         g_arm_host_status.active_command_type ==
@@ -2656,7 +2722,7 @@ static void ArmUpdateHostStatus(void)
             ArmHostFinishCommand(g_arm_host_status.active_command_id,
                 g_arm_host_status.active_command_type,
                 ARM_COMMAND_STATE_FAULTED, ARM_COMMAND_NOT_READY);
-        } else if (!trajectory_busy &&
+        } else if (!trajectory_busy && !yaw_busy &&
                    g_arm_motion_debug.motion_state == ARM_MOTION_HOLDING &&
                    g_arm_motion_debug.trajectory_progress >= 1.0f) {
             ArmHostFinishCommand(g_arm_host_status.active_command_id,
@@ -2674,7 +2740,7 @@ static void ArmUpdateHostStatus(void)
 
     g_arm_host_status.update_count++;
     g_arm_host_status.ready = ready;
-    g_arm_host_status.busy = trajectory_busy ||
+    g_arm_host_status.busy = trajectory_busy || yaw_busy ||
         arm_command_mailbox.pending != 0u ||
         g_arm_host_status.active_command_id != 0u;
     g_arm_host_status.realtime_active = realtime_active;
@@ -2711,6 +2777,9 @@ static void ArmUpdateHostStatus(void)
     g_arm_host_status.tool_vertical_down_enabled =
         tool->vertical_down_enabled;
     g_arm_host_status.tool_error_code = tool->error_code;
+    g_arm_host_status.tool_yaw_active = yaw_busy;
+    g_arm_host_status.tool_yaw_target_deg =
+        arm_command_mailbox.yaw_target_deg;
     g_arm_host_status.trajectory_progress =
         g_arm_motion_debug.trajectory_progress;
     memcpy(g_arm_host_status.mos_temperature_c,
@@ -2726,7 +2795,7 @@ static void ArmUpdateHostStatus(void)
         g_arm_host_status.state = ARM_HOST_STATE_FAULT;
     } else if (realtime_active) {
         g_arm_host_status.state = ARM_HOST_STATE_REALTIME;
-    } else if (trajectory_busy ||
+    } else if (trajectory_busy || yaw_busy ||
                g_arm_host_status.active_command_id != 0u) {
         g_arm_host_status.state = ARM_HOST_STATE_MOVING;
     } else if (ready) {

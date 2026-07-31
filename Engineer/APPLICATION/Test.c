@@ -2,7 +2,10 @@
 #include "dmmotor.h"
 #include "Test.h"
 #include "arm_config.h"
+#include "arm_usb_bridge.h"
+#include "buzzer.h"
 #include "hsl_servo.h"
+#include "protocol.h"
 #include "math.h"
 #include "string.h"
 
@@ -214,6 +217,9 @@ void all_init_Task(void)
 	memset(&g_feetech_servo_test_debug, 0,
            sizeof(g_feetech_servo_test_debug));
 	g_arm_host_sim_debug.enabled = ARM_REALTIME_HOST_SIM_ENABLE != 0u;
+	protocol_init();
+	ArmUsbBridgeInit();
+	BuzzerInit();
 	ArmInit();
 	g_feetech_servo_test_debug.enabled =
         FEETECH_SERVO_SWEEP_TEST_ENABLE != 0u;

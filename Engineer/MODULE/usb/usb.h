@@ -40,6 +40,8 @@ typedef struct {
 /* 外部变量声明 */
 extern USB_Chassis_Cmd_s usb_chassis_cmd;
 extern uint32_t usb_last_recv_time;
+extern volatile uint32_t g_usb_rx_overflow_count;
+extern volatile uint32_t g_usb_tx_fail_count;
 
 /**
  * @brief USB模块初始化
@@ -62,6 +64,9 @@ void USB_RegisterRxCallback(usb_rx_callback_t callback);
  * @return uint8_t 发送状态 (USBD_OK, USBD_BUSY, USBD_FAIL)
  */
 uint8_t USB_Transmit(uint8_t *data, uint16_t len);
+uint8_t USB_TransmitCopy(const uint8_t *data, uint16_t len);
+void USB_TxTask(void);
+void USB_TxCompleteHandler(void);
 
 /**
  * @brief 通过USB发送字符串

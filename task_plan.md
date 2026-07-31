@@ -178,6 +178,16 @@ motors in position-speed mode.
 - [completed] Keep `Test.c` as scheduling/observation only and disable its duplicate command submission path.
 - [completed] Add one concise Watch-visible boot state/result structure and run source/diff validation without a Keil build.
 
+### Phase 19 - USB host protocol and compound arm actions
+
+- [completed] Replace the old `CmdVel` protocol with the puzzle-arm protocol (`TaskStatus`, `CartesianMotionCommand`, `MotionStatus`, ACK and heartbeat).
+- [completed] Add a USB CDC copy-based TX queue so protocol frames never point at stack buffers.
+- [completed] Add an `ArmUsbBridge` state machine for `MOVE`, `MAGNET_ON`, `MAGNET_OFF`, `HOME`, `STOP` and `TaskStatus END`.
+- [completed] Add internal Cartesian yaw support for ID2 servo commands without changing Damiao geometry, ID1 compensation, USART6 servo transport, or CubeMX USB configuration.
+- [completed] Move buzzer use to a reusable non-blocking module and use it for task-complete notification.
+- [completed] Disable the current power-on tool/magnet/ID2 test for the formal USB-control firmware.
+- [completed] Run source inspection and `git diff --check`; do not run Keil build unless explicitly requested.
+
 ## Environment Notes
 
 - PowerShell startup fails with `8009001d`; native `cmd.exe` is used.

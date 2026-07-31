@@ -1,166 +1,498 @@
 #include "protocol.h"
+
 #include <string.h>
 
+#if defined(__CC_ARM)
+#define PROTOCOL_WEAK __weak
+#else
+#define PROTOCOL_WEAK __attribute__((weak))
+#endif
 
-// 解析器状态定义
 typedef enum {
-    STATE_WAIT_HEADER1,
-    STATE_WAIT_HEADER2,
-    STATE_WAIT_ID,
-    STATE_WAIT_LEN,
-    STATE_WAIT_DATA,
-    STATE_WAIT_CRC
-} State;
+    WAIT_H1 = 0,
+    WAIT_H2,
+    WAIT_ID,
+    WAIT_LEN,
+    WAIT_DATA,
+    WAIT_CRC
+} ParseState;
 
-static State rx_state = STATE_WAIT_HEADER1;
-#define PROTOCOL_BUFFER_SIZE 256
-static uint8_t rx_buffer[PROTOCOL_BUFFER_SIZE]; // 定义的最大包长
-static uint16_t rx_cnt = 0;
-static uint8_t rx_data_len = 0;
-static uint8_t rx_id = 0;
-static uint8_t rx_crc = 0;
+typedef struct {
+    Packet_CallbackStatus packet;
+    uint8_t seq;
+    uint8_t retries;
+    uint8_t sent;
+    uint32_t last_tx_ms;
+} CallbackSlot;
 
-// CRC8 计算函数 (查表法)
-uint8_t calculate_crc8(const uint8_t* data, uint8_t len, uint8_t initial_crc) {
-    uint8_t crc = initial_crc;
-    for (uint8_t i = 0; i < len; i++) {
-        crc = CRC8_TABLE[crc ^ data[i]];
+typedef struct {
+    Packet_MotionStatus packet;
+    uint8_t seq;
+    uint8_t retries;
+    uint8_t sent;
+    uint32_t last_tx_ms;
+} MotionStatusSlot;
+
+static CallbackSlot callback_fifo[PROTOCOL_CALLBACK_FIFO_DEPTH];
+static MotionStatusSlot motion_status_fifo[PROTOCOL_MOTION_FIFO_DEPTH];
+static uint8_t callback_head;
+static uint8_t callback_count;
+static uint8_t callback_next_seq;
+static uint8_t motion_status_head;
+static uint8_t motion_status_count;
+static uint8_t motion_status_next_seq;
+static ParseState rx_state;
+static uint8_t rx_id;
+static uint8_t rx_len;
+static uint8_t rx_pos;
+static uint8_t rx_crc;
+static uint8_t rx_data[PROTOCOL_MAX_PAYLOAD_LEN];
+static uint8_t connection_ready;
+static uint8_t task_seen;
+static uint8_t task_seq;
+static uint8_t target_control_seen;
+static uint8_t target_control_seq;
+static uint8_t next_queue_selector;
+static uint32_t protocol_now_ms;
+static Protocol_Debug_s protocol_debug;
+
+static uint8_t crc_update(uint8_t crc, uint8_t byte)
+{
+    uint8_t i;
+
+    crc ^= byte;
+    for (i = 0u; i < 8u; ++i) {
+        crc = (uint8_t)((crc & 0x80u) != 0u ?
+            (uint8_t)((uint8_t)(crc << 1) ^ 0x31u) :
+            (uint8_t)(crc << 1));
     }
     return crc;
 }
 
-// 用户需要实现的回调函数 (弱定义或外部声明)
-void on_receive_Handshake(const Packet_Handshake* pkt);
-void on_receive_Heartbeat(const Packet_Heartbeat* pkt);
-void on_receive_CmdVel(const Packet_CmdVel* pkt);
+uint8_t protocol_crc8(const uint8_t *data, size_t len)
+{
+    uint8_t crc = 0u;
 
-/**
- * @brief 协议解析状态机，在串口中断或轮询中调用此函数处理每个接收到的字节
- * @param byte 接收到的单个字节
- */
-void protocol_fsm_feed(uint8_t byte) {
+    while (len-- != 0u) {
+        crc = crc_update(crc, *data++);
+    }
+    return crc;
+}
+
+static uint8_t send_frame(uint8_t id, const void *payload, uint8_t size,
+                          int seq)
+{
+    uint8_t frame[4u + PROTOCOL_MAX_PAYLOAD_LEN + 1u];
+    uint8_t i = 0u;
+    uint8_t payload_len = (uint8_t)(size + (seq >= 0 ? 1u : 0u));
+
+    if (payload_len > PROTOCOL_MAX_PAYLOAD_LEN) {
+        protocol_debug.tx_fail_count++;
+        return 0u;
+    }
+
+    frame[i++] = FRAME_HEADER1;
+    frame[i++] = FRAME_HEADER2;
+    frame[i++] = id;
+    frame[i++] = payload_len;
+    if (size != 0u && payload != NULL) {
+        memcpy(frame + i, payload, size);
+        i = (uint8_t)(i + size);
+    }
+    if (seq >= 0) {
+        frame[i++] = (uint8_t)seq;
+    }
+    frame[i] = protocol_crc8(frame + 2u, (size_t)i - 2u);
+    ++i;
+
+    if (!serial_write(frame, i)) {
+        protocol_debug.tx_fail_count++;
+        return 0u;
+    }
+
+    protocol_debug.last_tx_id = id;
+    protocol_debug.last_tx_len = i;
+    if (id == PACKET_ID_HEARTBEAT) {
+        protocol_debug.heartbeat_tx_count++;
+    } else if (id == PACKET_ID_CALLBACKSTATUS) {
+        protocol_debug.callback_status_tx_count++;
+    } else if (id == PACKET_ID_MOTIONSTATUS) {
+        protocol_debug.motion_status_tx_count++;
+    }
+    return 1u;
+}
+
+static uint8_t send_ack(uint8_t id, uint8_t seq)
+{
+    Packet_Ack ack;
+
+    ack.acked_id = id;
+    ack.ack_seq = seq;
+    protocol_debug.last_ack_id = id;
+    protocol_debug.last_ack_seq = seq;
+    protocol_debug.ack_tx_count++;
+    return send_frame(PACKET_ID_ACK, &ack, sizeof(ack), -1);
+}
+
+static uint8_t send_callback_head(uint32_t now_ms)
+{
+    CallbackSlot *slot = &callback_fifo[callback_head];
+
+    if (!send_frame(PACKET_ID_CALLBACKSTATUS, &slot->packet,
+                    sizeof(slot->packet), slot->seq)) {
+        return 0u;
+    }
+    slot->sent = 1u;
+    slot->last_tx_ms = now_ms;
+    return 1u;
+}
+
+static uint8_t send_motion_status_head(uint32_t now_ms)
+{
+    MotionStatusSlot *slot = &motion_status_fifo[motion_status_head];
+
+    if (!send_frame(PACKET_ID_MOTIONSTATUS, &slot->packet,
+                    sizeof(slot->packet), slot->seq)) {
+        return 0u;
+    }
+    slot->sent = 1u;
+    slot->last_tx_ms = now_ms;
+    return 1u;
+}
+
+int protocol_send_callback_status(const Packet_CallbackStatus *pkt)
+{
+    uint8_t tail;
+
+    if (pkt == NULL || callback_count >= PROTOCOL_CALLBACK_FIFO_DEPTH) {
+        return 0;
+    }
+    tail = (uint8_t)((callback_head + callback_count) %
+                     PROTOCOL_CALLBACK_FIFO_DEPTH);
+    callback_fifo[tail].packet = *pkt;
+    callback_fifo[tail].seq = callback_next_seq++;
+    callback_fifo[tail].retries = 0u;
+    callback_fifo[tail].sent = 0u;
+    callback_fifo[tail].last_tx_ms = 0u;
+    ++callback_count;
+    protocol_debug.callback_queue_count = callback_count;
+    return 1;
+}
+
+int protocol_send_motion_status(const Packet_MotionStatus *pkt)
+{
+    uint8_t tail;
+
+    if (pkt == NULL || motion_status_count >= PROTOCOL_MOTION_FIFO_DEPTH) {
+        return 0;
+    }
+    tail = (uint8_t)((motion_status_head + motion_status_count) %
+                     PROTOCOL_MOTION_FIFO_DEPTH);
+    motion_status_fifo[tail].packet = *pkt;
+    motion_status_fifo[tail].seq = motion_status_next_seq++;
+    motion_status_fifo[tail].retries = 0u;
+    motion_status_fifo[tail].sent = 0u;
+    motion_status_fifo[tail].last_tx_ms = 0u;
+    ++motion_status_count;
+    protocol_debug.motion_queue_count = motion_status_count;
+    return 1;
+}
+
+size_t protocol_callback_queue_size(void)
+{
+    return callback_count;
+}
+
+uint8_t protocol_link_is_online(void)
+{
+    return connection_ready;
+}
+
+uint8_t protocol_connection_ready(void)
+{
+    return connection_ready;
+}
+
+const Protocol_Debug_s *protocol_get_debug(void)
+{
+    return &protocol_debug;
+}
+
+PROTOCOL_WEAK void on_receive_TaskStatus(const Packet_TaskStatus *pkt)
+{
+    (void)pkt;
+}
+
+PROTOCOL_WEAK void on_receive_TargetControl(const Packet_TargetControl *pkt)
+{
+    (void)pkt;
+}
+
+static void dispatch(uint8_t id, uint8_t len)
+{
+    protocol_debug.rx_frame_count++;
+    protocol_debug.last_rx_id = id;
+    protocol_debug.last_rx_len = len;
+
+    if (id == PACKET_ID_HANDSHAKE && len == sizeof(Packet_Handshake)) {
+        Packet_Handshake packet;
+
+        memcpy(&packet, rx_data, sizeof(packet));
+        if (packet.protocol_hash == PROTOCOL_HASH) {
+            connection_ready = 1u;
+            task_seen = 0u;
+            target_control_seen = 0u;
+            (void)send_frame(id, &packet, sizeof(packet), -1);
+        }
+        protocol_debug.connection_ready = connection_ready;
+        protocol_debug.link_online = connection_ready;
+        return;
+    }
+
+    if (connection_ready == 0u) {
+        return;
+    }
+
+    if (id == PACKET_ID_HEARTBEAT && len == sizeof(Packet_Heartbeat)) {
+        protocol_debug.heartbeat_rx_count++;
+        protocol_debug.link_online = 1u;
+        (void)send_frame(PACKET_ID_HEARTBEAT, rx_data, len, -1);
+        return;
+    }
+
+    if (id == PACKET_ID_ACK && len == sizeof(Packet_Ack)) {
+        Packet_Ack ack;
+
+        memcpy(&ack, rx_data, sizeof(ack));
+        protocol_debug.ack_rx_count++;
+        if (callback_count != 0u &&
+            ack.acked_id == PACKET_ID_CALLBACKSTATUS &&
+            ack.ack_seq == callback_fifo[callback_head].seq) {
+            callback_head = (uint8_t)((callback_head + 1u) %
+                                      PROTOCOL_CALLBACK_FIFO_DEPTH);
+            --callback_count;
+            protocol_debug.callback_queue_count = callback_count;
+        }
+        if (motion_status_count != 0u &&
+            ack.acked_id == PACKET_ID_MOTIONSTATUS &&
+            ack.ack_seq == motion_status_fifo[motion_status_head].seq) {
+            motion_status_head = (uint8_t)((motion_status_head + 1u) %
+                                           PROTOCOL_MOTION_FIFO_DEPTH);
+            --motion_status_count;
+            protocol_debug.motion_queue_count = motion_status_count;
+        }
+        return;
+    }
+
+    if (id == PACKET_ID_TASKSTATUS &&
+        len == sizeof(Packet_TaskStatus) + 1u) {
+        uint8_t seq = rx_data[sizeof(Packet_TaskStatus)];
+        Packet_TaskStatus packet;
+
+        (void)send_ack(id, seq);
+        if (task_seen != 0u && seq == task_seq) {
+            protocol_debug.duplicate_count++;
+            return;
+        }
+        task_seen = 1u;
+        task_seq = seq;
+        memcpy(&packet, rx_data, sizeof(packet));
+        protocol_debug.last_task_id = packet.task_id;
+        protocol_debug.last_task_status = packet.task_status;
+        on_receive_TaskStatus(&packet);
+        return;
+    }
+
+    if (id == PACKET_ID_TARGETCONTROL &&
+        len == sizeof(Packet_TargetControl) + 1u) {
+        uint8_t seq = rx_data[sizeof(Packet_TargetControl)];
+        Packet_TargetControl packet;
+
+        (void)send_ack(id, seq);
+        if (target_control_seen != 0u && seq == target_control_seq) {
+            protocol_debug.duplicate_count++;
+            return;
+        }
+        target_control_seen = 1u;
+        target_control_seq = seq;
+        memcpy(&packet, rx_data, sizeof(packet));
+        protocol_debug.last_target_valid = 1u;
+        protocol_debug.last_target_x_mm = packet.x_mm;
+        protocol_debug.last_target_y_mm = packet.y_mm;
+        protocol_debug.last_target_yaw_deg = packet.yaw_deg;
+        on_receive_TargetControl(&packet);
+        return;
+    }
+}
+
+void protocol_fsm_feed(uint8_t byte)
+{
+    protocol_debug.parse_state = (uint8_t)rx_state;
+    protocol_debug.current_rx_id = rx_id;
+    protocol_debug.current_rx_len = rx_len;
+    protocol_debug.current_rx_pos = rx_pos;
+
     switch (rx_state) {
-        case STATE_WAIT_HEADER1:
+        case WAIT_H1:
             if (byte == FRAME_HEADER1) {
-                rx_state = STATE_WAIT_HEADER2;
-                rx_crc = 0; // CRC 重置，校验不包含 Frame Header
+                rx_state = WAIT_H2;
             }
             break;
-            
-        case STATE_WAIT_HEADER2:
-            if (byte == FRAME_HEADER2) {
-                rx_state = STATE_WAIT_ID;
-            } else {
-                rx_state = STATE_WAIT_HEADER1; // 重置
-            }
+
+        case WAIT_H2:
+            rx_state = byte == FRAME_HEADER2 ? WAIT_ID :
+                (byte == FRAME_HEADER1 ? WAIT_H2 : WAIT_H1);
             break;
-            
-        case STATE_WAIT_ID:
+
+        case WAIT_ID:
             rx_id = byte;
-            rx_crc = CRC8_TABLE[0 ^ rx_id]; // 开始计算 CRC，校验包含 ID
-            rx_state = STATE_WAIT_LEN;
+            rx_crc = crc_update(0u, byte);
+            rx_state = WAIT_LEN;
             break;
-            
-        case STATE_WAIT_LEN:
-            rx_data_len = byte;
-            rx_crc = CRC8_TABLE[rx_crc ^ rx_data_len]; // CRC 计算，校验包含 Len
-            rx_cnt = 0;
-            if (rx_data_len > 0) {
-                rx_state = STATE_WAIT_DATA;
+
+        case WAIT_LEN:
+            rx_len = byte;
+            rx_crc = crc_update(rx_crc, byte);
+            rx_pos = 0u;
+            if (rx_len > sizeof(rx_data)) {
+                protocol_debug.length_fail_count++;
+                rx_state = WAIT_H1;
             } else {
-                rx_state = STATE_WAIT_CRC; // 数据长度为0的情况
+                rx_state = rx_len != 0u ? WAIT_DATA : WAIT_CRC;
             }
             break;
-            
-        case STATE_WAIT_DATA:
-            rx_buffer[rx_cnt++] = byte;
-            rx_crc = CRC8_TABLE[rx_crc ^ byte]; // CRC 计算，校验包含 Data
-            if (rx_cnt >= rx_data_len) {
-                rx_state = STATE_WAIT_CRC;
+
+        case WAIT_DATA:
+            rx_data[rx_pos++] = byte;
+            rx_crc = crc_update(rx_crc, byte);
+            if (rx_pos == rx_len) {
+                rx_state = WAIT_CRC;
             }
             break;
-            
-        case STATE_WAIT_CRC:
+
+        case WAIT_CRC:
             if (byte == rx_crc) {
-                // 校验通过，分发数据
-                switch (rx_id) {
-                    case PACKET_ID_HANDSHAKE:
-                        if (rx_data_len == sizeof(Packet_Handshake)) {
-                            on_receive_Handshake((Packet_Handshake*)rx_buffer);
-                        }
-                        break;
-                    case PACKET_ID_HEARTBEAT:
-                        if (rx_data_len == sizeof(Packet_Heartbeat)) {
-                            on_receive_Heartbeat((Packet_Heartbeat*)rx_buffer);
-                        }
-                        break;
-                    case PACKET_ID_CMDVEL:
-                        if (rx_data_len == sizeof(Packet_CmdVel)) {
-                            on_receive_CmdVel((Packet_CmdVel*)rx_buffer);
-                        }
-                        break;
-
-                    default:
-                        break;
-                }
-                // 新增：每次接收有效包后自动发送握手包，内容为协议哈希
-                Packet_Handshake handshake = { .protocol_hash = PROTOCOL_HASH };
-                send_Handshake(&handshake);
+                dispatch(rx_id, rx_len);
+            } else {
+                protocol_debug.crc_fail_count++;
             }
-            // 无论校验成功与否，都重置状态
-            rx_state = STATE_WAIT_HEADER1;
+            rx_state = byte == FRAME_HEADER1 ? WAIT_H2 : WAIT_H1;
             break;
-            
+
         default:
-            rx_state = STATE_WAIT_HEADER1;
+            rx_state = WAIT_H1;
             break;
     }
+
+    protocol_debug.parse_state = (uint8_t)rx_state;
+    protocol_debug.current_rx_id = rx_id;
+    protocol_debug.current_rx_len = rx_len;
+    protocol_debug.current_rx_pos = rx_pos;
 }
 
-// --- 发送函数 ---
-// 外部依赖：用户必须实现 void serial_write_byte(uint8_t byte);
-extern void serial_write_byte(uint8_t byte);
+static uint8_t protocol_service_callback(uint32_t now_ms)
+{
+    CallbackSlot *slot;
 
-void send_Handshake(const Packet_Handshake* pkt) {
-    uint8_t buf[4 + sizeof(Packet_Handshake) + 1];
-    buf[0] = FRAME_HEADER1;
-    buf[1] = FRAME_HEADER2;
-    buf[2] = PACKET_ID_HANDSHAKE;
-    buf[3] = sizeof(Packet_Handshake);
-    // 拷贝数据区
-    const uint8_t* data = (const uint8_t*)pkt;
-    for (int i = 0; i < sizeof(Packet_Handshake); i++) {
-        buf[4 + i] = data[i];
+    if (callback_count == 0u) {
+        return 0u;
     }
-    // 计算CRC
-    uint8_t crc = 0;
-    crc = CRC8_TABLE[crc ^ buf[2]]; // ID
-    crc = CRC8_TABLE[crc ^ buf[3]]; // Len
-    for (int i = 0; i < sizeof(Packet_Handshake); i++) {
-        crc = CRC8_TABLE[crc ^ buf[4 + i]];
+    slot = &callback_fifo[callback_head];
+    if (slot->sent == 0u) {
+        return send_callback_head(now_ms);
     }
-    buf[4 + sizeof(Packet_Handshake)] = crc;
-    // 一次性发送完整包
-    extern uint8_t USB_Transmit(uint8_t *data, uint16_t len);
-    USB_Transmit(buf, 4 + sizeof(Packet_Handshake) + 1);
+    if ((uint32_t)(now_ms - slot->last_tx_ms) >=
+        PROTOCOL_RETRY_INTERVAL_MS) {
+        if (slot->retries >= PROTOCOL_MAX_RETRIES) {
+            callback_head = (uint8_t)((callback_head + 1u) %
+                                      PROTOCOL_CALLBACK_FIFO_DEPTH);
+            --callback_count;
+            protocol_debug.callback_queue_count = callback_count;
+            protocol_debug.retry_drop_count++;
+            return 1u;
+        }
+        ++slot->retries;
+        return send_callback_head(now_ms);
+    }
+    return 0u;
 }
-void send_Heartbeat(const Packet_Heartbeat* pkt) {
-    uint8_t header[4] = {FRAME_HEADER1, FRAME_HEADER2, PACKET_ID_HEARTBEAT, sizeof(Packet_Heartbeat)};
-    uint8_t crc = 0;
-    // Send Header
-    for(int i=0; i<4; i++) { serial_write_byte(header[i]); }
-    
-    // Calc CRC part 1
-    crc = CRC8_TABLE[crc ^ header[2]]; // ID
-    crc = CRC8_TABLE[crc ^ header[3]]; // Len
-    
-    // Send Data & Calc CRC
-    const uint8_t* data = (const uint8_t*)pkt;
-    for(int i=0; i<sizeof(Packet_Heartbeat); i++) {
-        serial_write_byte(data[i]);
-        crc = CRC8_TABLE[crc ^ data[i]];
+
+static uint8_t protocol_service_motion(uint32_t now_ms)
+{
+    MotionStatusSlot *slot;
+
+    if (motion_status_count == 0u) {
+        return 0u;
     }
-    
-    // Send CRC
-    serial_write_byte(crc);
+    slot = &motion_status_fifo[motion_status_head];
+    if (slot->sent == 0u) {
+        return send_motion_status_head(now_ms);
+    }
+    if ((uint32_t)(now_ms - slot->last_tx_ms) >=
+        PROTOCOL_RETRY_INTERVAL_MS) {
+        if (slot->retries >= PROTOCOL_MAX_RETRIES) {
+            motion_status_head = (uint8_t)((motion_status_head + 1u) %
+                                           PROTOCOL_MOTION_FIFO_DEPTH);
+            --motion_status_count;
+            protocol_debug.motion_queue_count = motion_status_count;
+            protocol_debug.retry_drop_count++;
+            return 1u;
+        }
+        ++slot->retries;
+        return send_motion_status_head(now_ms);
+    }
+    return 0u;
+}
+
+void protocol_tick(uint32_t now_ms)
+{
+    protocol_now_ms = now_ms;
+    protocol_debug.connection_ready = connection_ready;
+    protocol_debug.link_online = connection_ready;
+    protocol_debug.callback_queue_count = callback_count;
+    protocol_debug.motion_queue_count = motion_status_count;
+
+    if (connection_ready == 0u) {
+        return;
+    }
+
+    if (next_queue_selector == 0u) {
+        if (protocol_service_callback(now_ms) == 0u) {
+            (void)protocol_service_motion(now_ms);
+        }
+        next_queue_selector = 1u;
+    } else {
+        if (protocol_service_motion(now_ms) == 0u) {
+            (void)protocol_service_callback(now_ms);
+        }
+        next_queue_selector = 0u;
+    }
+}
+
+void protocol_reset_connection(void)
+{
+    rx_state = WAIT_H1;
+    rx_id = 0u;
+    rx_len = 0u;
+    rx_pos = 0u;
+    rx_crc = 0u;
+    connection_ready = (uint8_t)(PROTOCOL_REQUIRE_HANDSHAKE == 0u);
+    task_seen = 0u;
+    target_control_seen = 0u;
+    callback_head = 0u;
+    callback_count = 0u;
+    motion_status_head = 0u;
+    motion_status_count = 0u;
+    next_queue_selector = 0u;
+    protocol_now_ms = 0u;
+    memset(&protocol_debug, 0, sizeof(protocol_debug));
+    protocol_debug.connection_ready = connection_ready;
+    protocol_debug.link_online = connection_ready;
+}
+
+void protocol_init(void)
+{
+    callback_next_seq = 0u;
+    motion_status_next_seq = 0u;
+    protocol_reset_connection();
 }

@@ -32,6 +32,9 @@
 #include "Test.h"
 #include "catch.h"
 #include "daemon.h"
+#include "protocol.h"
+#include "arm_usb_bridge.h"
+#include "buzzer.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -185,12 +188,21 @@ void ChassisTask_f(void const * argument)
 void Usb_f(void const * argument)
 {
   /* USER CODE BEGIN Usb_f */
+  uint32_t last_daemon_tick = 0u;
   /* Infinite loop */
   for(;;)
   {
-		//USB_ProcessTask();
-		DaemonTask();
-    osDelay(10);
+		uint32_t now_ms = HAL_GetTick();
+		USB_ProcessTask();
+		USB_TxTask();
+		protocol_tick(now_ms);
+		ArmUsbBridgeTask(now_ms);
+		BuzzerTask(now_ms);
+		if ((uint32_t)(now_ms - last_daemon_tick) >= 10u) {
+			last_daemon_tick = now_ms;
+			DaemonTask();
+		}
+    osDelay(1);
   }
   /* USER CODE END Usb_f */
 }

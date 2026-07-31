@@ -19,13 +19,26 @@
 /* 全局变量 */
 USB_Chassis_Cmd_s usb_chassis_cmd;
 uint32_t usb_last_recv_time = 0;
+volatile uint32_t g_usb_rx_overflow_count = 0;
+volatile uint32_t g_usb_tx_fail_count = 0;
 
 /* 私有变量 */
 // 环形缓冲区定义
 #define RING_BUFFER_SIZE 1024
+#define USB_TX_QUEUE_DEPTH 8u
+#define USB_TX_ITEM_MAX_LEN 64u
 static uint8_t ring_buffer[RING_BUFFER_SIZE];
 static volatile uint32_t rb_head = 0; // 写入位置
 static volatile uint32_t rb_tail = 0; // 读取位置
+typedef struct {
+    uint8_t data[USB_TX_ITEM_MAX_LEN];
+    uint16_t len;
+} USB_Tx_Item_s;
+
+static USB_Tx_Item_s tx_queue[USB_TX_QUEUE_DEPTH];
+static volatile uint8_t tx_head = 0u;
+static volatile uint8_t tx_count = 0u;
+static volatile uint8_t tx_busy = 0u;
 
 static usb_rx_callback_t rx_callback = NULL;       // 接收回调函数
 static uint8_t usb_initialized = 0;                // 初始化标志
@@ -42,6 +55,11 @@ void USB_Init(void)
         memset(ring_buffer, 0, RING_BUFFER_SIZE);
         rb_head = 0;
         rb_tail = 0;
+        tx_head = 0u;
+        tx_count = 0u;
+        tx_busy = 0u;
+        g_usb_rx_overflow_count = 0u;
+        g_usb_tx_fail_count = 0u;
         rx_callback = NULL;
         usb_initialized = 1;
         
@@ -68,6 +86,65 @@ uint8_t USB_Transmit(uint8_t *data, uint16_t len)
         return USBD_FAIL;
     
     return CDC_Transmit_FS(data, len);
+}
+
+uint8_t USB_TransmitCopy(const uint8_t *data, uint16_t len)
+{
+    uint32_t primask;
+    uint8_t tail;
+
+    if (data == NULL || len == 0u || len > USB_TX_ITEM_MAX_LEN) {
+        g_usb_tx_fail_count++;
+        return USBD_FAIL;
+    }
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    if (tx_count >= USB_TX_QUEUE_DEPTH) {
+        if (primask == 0u) {
+            __enable_irq();
+        }
+        g_usb_tx_fail_count++;
+        return USBD_BUSY;
+    }
+    tail = (uint8_t)((tx_head + tx_count) % USB_TX_QUEUE_DEPTH);
+    memcpy(tx_queue[tail].data, data, len);
+    tx_queue[tail].len = len;
+    tx_count++;
+    if (primask == 0u) {
+        __enable_irq();
+    }
+    return USBD_OK;
+}
+
+void USB_TxCompleteHandler(void)
+{
+    uint32_t primask = __get_PRIMASK();
+
+    __disable_irq();
+    if (tx_busy != 0u && tx_count != 0u) {
+        tx_head = (uint8_t)((tx_head + 1u) % USB_TX_QUEUE_DEPTH);
+        tx_count--;
+    }
+    tx_busy = 0u;
+    if (primask == 0u) {
+        __enable_irq();
+    }
+}
+
+void USB_TxTask(void)
+{
+    uint8_t result;
+
+    if (tx_busy != 0u || tx_count == 0u) {
+        return;
+    }
+    result = CDC_Transmit_FS(tx_queue[tx_head].data, tx_queue[tx_head].len);
+    if (result == USBD_OK) {
+        tx_busy = 1u;
+    } else if (result == USBD_FAIL) {
+        g_usb_tx_fail_count++;
+    }
 }
 
 /**
@@ -102,6 +179,7 @@ void USB_RxHandler(uint8_t *buf, uint32_t len)
             else
             {
                 // 缓冲区溢出，丢弃剩余数据
+                g_usb_rx_overflow_count += (len - i);
                 break;
             }
         }
@@ -151,33 +229,6 @@ static uint8_t RingBuffer_Peek(uint32_t offset, uint8_t *data)
     return 1;
 }
 
-/* 协议栈回调函数实现 */
-
-void serial_write_byte(uint8_t byte)
-{
-    USB_Transmit(&byte, 1);
-}
-
-void on_receive_Handshake(const Packet_Handshake* pkt)
-{
-    // 收到握手包处理，可在此处添加回复逻辑
-}
-
-void on_receive_Heartbeat(const Packet_Heartbeat* pkt)
-{
-    // 收到心跳包，更新时间戳
-    usb_last_recv_time = HAL_GetTick();
-}
-
-void on_receive_CmdVel(const Packet_CmdVel* pkt)
-{
-    // 收到速度控制包
-    usb_chassis_cmd.linear_x = pkt->linear_x;
-    usb_chassis_cmd.linear_y = pkt->linear_y;
-    usb_chassis_cmd.angular_z = pkt->angular_z;
-    usb_last_recv_time = HAL_GetTick();
-}
-
 /**
  * @brief USB数据解析任务
  * @note 建议在主循环或任务中周期性调用
@@ -193,3 +244,7 @@ void USB_ProcessTask(void)
     }
 }
 
+uint8_t serial_write(const uint8_t *data, uint16_t len)
+{
+    return USB_TransmitCopy(data, len) == USBD_OK ? 1u : 0u;
+}
