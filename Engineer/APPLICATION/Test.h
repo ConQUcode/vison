@@ -54,6 +54,32 @@ typedef struct {
 
 extern Feetech_Servo_Test_Debug_s g_feetech_servo_test_debug;
 
+typedef struct {
+    uint8_t pe11_raw;
+    uint8_t pe13_raw;
+    uint8_t pe14_raw;
+    uint8_t pc6_raw;
+    uint8_t pi6_raw;
+    uint8_t pe11_pressed;
+    uint8_t pe13_pressed;
+    uint8_t pe14_pressed;
+    uint8_t pc6_pressed;
+    uint8_t pi6_pressed;
+    uint8_t pressed_mask;
+    uint8_t last_pressed_mask;
+    uint8_t press_edge_mask;
+    uint8_t task_start_edge_mask;
+    uint8_t last_task_id;
+    uint8_t last_task_send_ok;
+    uint32_t buzzer_trigger_count;
+    uint32_t task_start_tx_count;
+    uint32_t task_start_tx_fail_count;
+    uint32_t last_buzzer_tick;
+    uint32_t update_count;
+} User_Key_Debug_s;
+
+extern User_Key_Debug_s g_user_key_debug;
+
 void all_init_Task(void);
 void all_cmd_Task(void);
 

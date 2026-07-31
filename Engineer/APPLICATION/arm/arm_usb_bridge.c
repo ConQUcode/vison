@@ -48,7 +48,7 @@ static float ArmUsbServo2MaxYawAbsDeg(void)
 static float ArmUsbServo2HalfRangePos(void)
 {
     return ((float)ARM_TOOL_SERVO2_POS_MAX -
-            (float)ARM_TOOL_SERVO2_POS_MIN) * 0.5f;
+            (float)ARM_TOOL_SERVO2_POS_MIN);
 }
 
 static float ArmUsbServo2PositionToYaw(uint16_t position)
@@ -62,7 +62,8 @@ static float ArmUsbServo2PositionToYaw(uint16_t position)
         return 0.0f;
     }
     return ((float)position - (float)ARM_TOOL_SERVO2_NEUTRAL_POS) *
-        max_yaw_deg / half_range_pos / ARM_TOOL_SERVO2_YAW_DIRECTION;
+        (ARM_TOOL_SERVO_DEG_MAX - ARM_TOOL_SERVO_DEG_MIN) /
+        half_range_pos / ARM_TOOL_SERVO2_YAW_DIRECTION;
 }
 
 static uint16_t ArmUsbYawToServo2Position(float yaw_deg)
@@ -78,7 +79,7 @@ static uint16_t ArmUsbYawToServo2Position(float yaw_deg)
     }
     pos_f = (float)ARM_TOOL_SERVO2_NEUTRAL_POS +
         ARM_TOOL_SERVO2_YAW_DIRECTION * yaw_deg * half_range_pos /
-        max_yaw_deg;
+        (ARM_TOOL_SERVO_DEG_MAX - ARM_TOOL_SERVO_DEG_MIN);
     if (pos_f < (float)ARM_TOOL_SERVO2_POS_MIN) {
         pos_f = (float)ARM_TOOL_SERVO2_POS_MIN;
     }
@@ -188,6 +189,19 @@ static void ArmUsbSendCallbackStatus(uint8_t callback_id, uint8_t status)
     packet.callback_id = callback_id;
     packet.callback_status = status;
     (void)protocol_send_callback_status(&packet);
+}
+
+uint8_t ArmUsbBridgeRequestTaskStartFromKey(uint8_t task_id)
+{
+    Packet_CallbackStatus packet;
+
+    if (task_id < 1u || task_id > 4u) {
+        return 0u;
+    }
+
+    packet.callback_id = task_id;
+    packet.callback_status = STATUS_START;
+    return protocol_send_callback_status(&packet) != 0 ? 1u : 0u;
 }
 
 static uint8_t ArmUsbBusinessCallbackId(void)

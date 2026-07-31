@@ -27,72 +27,7 @@ Project File Date:  07/31/2026
 <h2>Output:</h2>
 *** Using Compiler 'V5.06 update 7 (build 960)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
 Build target 'Engineer'
-compiling hsl_servo.c...
-..\MODULE\feite_motor\hsl_servo.c(210): warning:  #177-D: function "HSLServoQueueBoardMove"  was declared but never referenced
-  static HSLServo_Result_e HSLServoQueueBoardMove(uint8_t id,
-..\MODULE\feite_motor\hsl_servo.c(319): warning:  #177-D: function "HSLServoRxEvent"  was declared but never referenced
-  static void HSLServoRxEvent(uint16_t size)
-..\MODULE\feite_motor\hsl_servo.c(329): warning:  #177-D: function "HSLServoTxComplete"  was declared but never referenced
-  static void HSLServoTxComplete(void)
-..\MODULE\feite_motor\hsl_servo.c(334): warning:  #177-D: function "HSLServoUartError"  was declared but never referenced
-  static void HSLServoUartError(void)
-..\MODULE\feite_motor\hsl_servo.c: 4 warnings, 0 errors
-compiling arm_tool.c...
-..\APPLICATION\arm\arm_tool.c(483): warning:  #186-D: pointless comparison of unsigned integer with zero
-      if (position < ARM_TOOL_SERVO2_POS_MIN ||
-..\APPLICATION\arm\arm_tool.c: 1 warning, 0 errors
-compiling Test.c...
-..\APPLICATION\Test.c(23): warning:  #177-D: variable "feetech_servo_sweep_pos"  was declared but never referenced
-  static const uint16_t feetech_servo_sweep_pos[] = {
-..\APPLICATION\Test.c: 1 warning, 0 errors
-compiling catch.c...
-..\APPLICATION\catch\catch.h(4): warning:  #1295-D: Deprecated declaration catch_init - give arg types
-  void catch_init();
-..\APPLICATION\catch\catch.h(5): warning:  #1295-D: Deprecated declaration catch_all - give arg types
-  void catch_all();
-..\APPLICATION\catch\catch.h(7): warning:  #1-D: last line of file ends without a newline
-  #endif
-..\APPLICATION\catch\catch.c(72): warning:  #188-D: enumerated type mixed with another type
-                  .Improve           = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement | PID_DerivativeFilter | PID_ErrorHandle,
-..\APPLICATION\catch\catch.c(83): warning:  #188-D: enumerated type mixed with another type
-  							.Improve       = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
-..\APPLICATION\catch\catch.c(101): warning:  #188-D: enumerated type mixed with another type
-  					.close_loop_type       = CURRENT_LOOP | SPEED_LOOP | ANGLE_LOOP   ,
-..\APPLICATION\catch\catch.c(121): warning:  #188-D: enumerated type mixed with another type
-              .Improve           = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement | PID_DerivativeFilter | PID_ErrorHandle,
-..\APPLICATION\catch\catch.c(130): warning:  #188-D: enumerated type mixed with another type
-              .Improve       = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
-..\APPLICATION\catch\catch.c(146): warning:  #188-D: enumerated type mixed with another type
-          .close_loop_type       = CURRENT_LOOP | SPEED_LOOP | ANGLE_LOOP,
-..\APPLICATION\catch\catch.c(156): warning:  #177-D: function "LiftInit"  was declared but never referenced
-  static void LiftInit() {
-..\APPLICATION\catch\catch.c: 10 warnings, 0 errors
-compiling main.c...
-../APPLICATION/nac.h(107): warning:  #1295-D: Deprecated declaration NacSend - give arg types
-  void NacSend();
-../APPLICATION/nac.h(117): warning:  #1-D: last line of file ends without a newline
-  #endif
-../APPLICATION/chassis/chassis.h(11): warning:  #1295-D: Deprecated declaration ChassisTest_OldVersion - give arg types
-  void ChassisTest_OldVersion();
-../Core/Src/main.c: 3 warnings, 0 errors
-compiling freertos.c...
-../APPLICATION/nac.h(107): warning:  #1295-D: Deprecated declaration NacSend - give arg types
-  void NacSend();
-../APPLICATION/nac.h(117): warning:  #1-D: last line of file ends without a newline
-  #endif
-../APPLICATION/chassis/chassis.h(11): warning:  #1295-D: Deprecated declaration ChassisTest_OldVersion - give arg types
-  void ChassisTest_OldVersion();
-../APPLICATION/catch/catch.h(4): warning:  #1295-D: Deprecated declaration catch_init - give arg types
-  void catch_init();
-../APPLICATION/catch/catch.h(5): warning:  #1295-D: Deprecated declaration catch_all - give arg types
-  void catch_all();
-../APPLICATION/catch/catch.h(7): warning:  #1-D: last line of file ends without a newline
-  #endif
-../Core/Src/freertos.c: 6 warnings, 0 errors
-linking...
-Program Size: Code=85292 RO-data=748 RW-data=1028 ZI-data=105596  
-FromELF: creating hex file...
-"Engineer\Engineer.axf" - 0 Error(s), 25 Warning(s).
+"Engineer\Engineer.axf" - 0 Error(s), 0 Warning(s).
 
 <h2>Software Packages used:</h2>
 
@@ -115,7 +50,7 @@ Package Vendor: Keil
 
    * Component: ARM::CMSIS:CORE:5.5.0
       Include file:  CMSIS\Core\Include\tz_context.h
-Build Time Elapsed:  00:00:03
+Build Time Elapsed:  00:00:00
 </pre>
 </body>
 </html>

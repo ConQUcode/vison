@@ -28,7 +28,7 @@ static float ArmToolServo2MaxYawAbsDeg(void)
 static float ArmToolServo2HalfRangePos(void)
 {
     return ((float)ARM_TOOL_SERVO2_POS_MAX -
-            (float)ARM_TOOL_SERVO2_POS_MIN) * 0.5f;
+            (float)ARM_TOOL_SERVO2_POS_MIN);
 }
 
 static uint8_t ArmToolServoAngleFiniteAndInRange(float angle_deg)
@@ -82,20 +82,7 @@ static Arm_Command_Result_e ArmToolSendServo(uint8_t servo_id,
     }
 
     pos = ArmToolAngleDegToPos(servo_id, angle_deg);
-    if (servo_id == ARM_TOOL_SERVO1_ID &&
-        g_arm_tool_debug.init_state == ARM_TOOL_INIT_DONE &&
-        g_arm_tool_debug.servo_online[1] != 0u) {
-        /*
-         * 运行阶段ID1竖直补偿频繁更新；将ID2当前yaw目标放在同一条
-         * 控制板多舵机帧里，避免ID2单独帧被补偿帧节奏淹没。
-         */
-        result = HSLServoMove2(ARM_TOOL_SERVO1_ID, pos,
-                               ARM_TOOL_SERVO2_ID,
-                               g_arm_tool_debug.servo_target_pos[1],
-                               time_ms);
-    } else {
-        result = HSLServoMove(servo_id, pos, time_ms);
-    }
+    result = HSLServoMove(servo_id, pos, time_ms);
     if (result == HSL_SERVO_RESULT_BUSY) {
         return ARM_COMMAND_BUSY;
     }
@@ -108,16 +95,7 @@ static Arm_Command_Result_e ArmToolSendServo(uint8_t servo_id,
     }
 
     g_arm_tool_debug.tx_count[index]++;
-    if (servo_id == ARM_TOOL_SERVO1_ID &&
-        g_arm_tool_debug.init_state == ARM_TOOL_INIT_DONE &&
-        g_arm_tool_debug.servo_online[1] != 0u) {
-        g_arm_tool_debug.tx_count[1]++;
-    }
     g_arm_tool_debug.servo_online[index] = 1u;
-    if (servo_id == ARM_TOOL_SERVO1_ID &&
-        g_arm_tool_debug.init_state == ARM_TOOL_INIT_DONE) {
-        g_arm_tool_debug.servo_online[1] = 1u;
-    }
     g_arm_tool_debug.servo_target_deg[index] = angle_deg;
     g_arm_tool_debug.servo_target_pos[index] = pos;
     g_arm_tool_debug.last_update_tick = now_ms;
@@ -317,25 +295,13 @@ void ArmToolTask(uint32_t now_ms)
             ARM_TOOL_SERVO2_REPEAT_PERIOD_MS) {
         HSLServo_Result_e result;
 
-        if (g_arm_tool_debug.servo_online[0] != 0u) {
-            result = HSLServoMove2(
-                ARM_TOOL_SERVO1_ID,
-                g_arm_tool_debug.servo_target_pos[0],
-                ARM_TOOL_SERVO2_ID,
-                g_arm_tool_debug.servo2_repeat_pos,
-                g_arm_tool_debug.servo2_repeat_time_ms);
-        } else {
-            result = HSLServoMove(
-                ARM_TOOL_SERVO2_ID,
-                g_arm_tool_debug.servo2_repeat_pos,
-                g_arm_tool_debug.servo2_repeat_time_ms);
-        }
+        result = HSLServoMove(
+            ARM_TOOL_SERVO2_ID,
+            g_arm_tool_debug.servo2_repeat_pos,
+            g_arm_tool_debug.servo2_repeat_time_ms);
 
         g_arm_tool_debug.servo2_repeat_tick = now_ms;
         if (result == HSL_SERVO_RESULT_OK) {
-            if (g_arm_tool_debug.servo_online[0] != 0u) {
-                g_arm_tool_debug.tx_count[0]++;
-            }
             g_arm_tool_debug.tx_count[1]++;
             g_arm_tool_debug.servo_online[1] = 1u;
             g_arm_tool_debug.servo2_repeat_remaining--;
@@ -427,41 +393,11 @@ Arm_Command_Result_e ArmToolSetServo1Angle(float angle_deg)
 
 Arm_Command_Result_e ArmToolSetServo2Angle(float angle_deg)
 {
-    float yaw_deg;
-    float pos_f;
-    float max_yaw_deg;
-    float half_range_pos;
-
     if (!ArmToolServoAngleFiniteAndInRange(angle_deg)) {
         return ARM_COMMAND_INVALID;
     }
-    yaw_deg = angle_deg - ARM_USB_YAW_NEUTRAL_DEG;
-    if (yaw_deg < ARM_USB_YAW_MIN_DEG ||
-        yaw_deg > ARM_USB_YAW_MAX_DEG) {
-        return ARM_COMMAND_INVALID;
-    }
-    max_yaw_deg = ArmToolServo2MaxYawAbsDeg();
-    half_range_pos = ArmToolServo2HalfRangePos();
-    if (max_yaw_deg <= 0.000001f ||
-        half_range_pos <= 0.000001f ||
-        fabsf(ARM_TOOL_SERVO2_YAW_DIRECTION) <= 0.000001f) {
-        return ARM_COMMAND_INVALID;
-    }
-    /*
-     * ID2不是按普通0~180deg舵机角度控制，而是按上位机yaw控制：
-     * yaw=-90 -> pos=0，yaw=0 -> pos=1000，yaw=+90 -> pos=2000。
-     */
-    pos_f = (float)ARM_TOOL_SERVO2_NEUTRAL_POS +
-        ARM_TOOL_SERVO2_YAW_DIRECTION * yaw_deg * half_range_pos /
-        max_yaw_deg;
-    if (pos_f < (float)ARM_TOOL_SERVO2_POS_MIN) {
-        pos_f = (float)ARM_TOOL_SERVO2_POS_MIN;
-    }
-    if (pos_f > (float)ARM_TOOL_SERVO2_POS_MAX) {
-        pos_f = (float)ARM_TOOL_SERVO2_POS_MAX;
-    }
-    return ArmToolSetServo2Position((uint16_t)(pos_f + 0.5f),
-                                    ARM_USB_YAW_MOVE_TIME_MS);
+    return ArmToolSendServo(ARM_TOOL_SERVO2_ID, angle_deg,
+                            ARM_USB_YAW_MOVE_TIME_MS, 1u);
 }
 
 Arm_Command_Result_e ArmToolSetServo2Position(uint16_t position,
@@ -494,18 +430,7 @@ Arm_Command_Result_e ArmToolSetServo2Position(uint16_t position,
         g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_RANGE;
         return ARM_COMMAND_INVALID;
     }
-    if (g_arm_tool_debug.init_state == ARM_TOOL_INIT_DONE &&
-        g_arm_tool_debug.servo_online[0] != 0u) {
-        /*
-         * 运行阶段ID2 yaw目标与ID1当前补偿目标同帧发送，保证两个末端
-         * 舵机在同一控制板周期内刷新。
-         */
-        result = HSLServoMove2(ARM_TOOL_SERVO1_ID,
-                               g_arm_tool_debug.servo_target_pos[0],
-                               ARM_TOOL_SERVO2_ID, position, time_ms);
-    } else {
-        result = HSLServoMove(ARM_TOOL_SERVO2_ID, position, time_ms);
-    }
+    result = HSLServoMove(ARM_TOOL_SERVO2_ID, position, time_ms);
     if (result == HSL_SERVO_RESULT_BUSY) {
         return ARM_COMMAND_BUSY;
     }
@@ -517,16 +442,13 @@ Arm_Command_Result_e ArmToolSetServo2Position(uint16_t position,
         return ARM_COMMAND_NOT_READY;
     }
 
-    if (g_arm_tool_debug.init_state == ARM_TOOL_INIT_DONE &&
-        g_arm_tool_debug.servo_online[0] != 0u) {
-        g_arm_tool_debug.tx_count[0]++;
-    }
     g_arm_tool_debug.tx_count[1]++;
     g_arm_tool_debug.servo_online[1] = 1u;
     g_arm_tool_debug.servo_target_deg[1] =
         ARM_USB_YAW_NEUTRAL_DEG +
         ((float)position - (float)ARM_TOOL_SERVO2_NEUTRAL_POS) *
-        max_yaw_deg / half_range_pos /
+        (ARM_TOOL_SERVO_DEG_MAX - ARM_TOOL_SERVO_DEG_MIN) /
+        half_range_pos /
         ARM_TOOL_SERVO2_YAW_DIRECTION;
     g_arm_tool_debug.servo_target_pos[1] = position;
     g_arm_tool_debug.last_update_tick = HAL_GetTick();

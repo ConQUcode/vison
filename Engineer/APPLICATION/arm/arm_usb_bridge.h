@@ -107,5 +107,6 @@ void ArmUsbBridgeInit(void);
 void ArmUsbBridgeTask(uint32_t now_ms);
 void ArmUsbBridgeOnTaskStatus(const Packet_TaskStatus *pkt);
 void ArmUsbBridgeOnTargetControl(const Packet_TargetControl *pkt);
+uint8_t ArmUsbBridgeRequestTaskStartFromKey(uint8_t task_id);
 
 #endif
