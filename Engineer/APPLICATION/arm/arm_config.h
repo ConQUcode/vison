@@ -177,12 +177,12 @@
 #define ARM_LINEAR_DEFAULT_SPEED_MM_S           700.0f
 #define ARM_LINEAR_MAX_SPEED_MM_S               700.0f
 #define ARM_LINEAR_MAX_ACCEL_MM_S2             5000.0f
-#define ARM_LINEAR_Q1_MAX_SPEED_DEG_S            320.0f
-#define ARM_LINEAR_Q2_MAX_SPEED_DEG_S            380.0f
-#define ARM_LINEAR_Q3_MAX_SPEED_DEG_S            420.0f
-#define ARM_LINEAR_Q1_MAX_ACCEL_DEG_S2          2300.0f
-#define ARM_LINEAR_Q2_MAX_ACCEL_DEG_S2          2500.0f
-#define ARM_LINEAR_Q3_MAX_ACCEL_DEG_S2          3000.0f
+#define ARM_LINEAR_Q1_MAX_SPEED_DEG_S            150.0f
+#define ARM_LINEAR_Q2_MAX_SPEED_DEG_S            250.0f
+#define ARM_LINEAR_Q3_MAX_SPEED_DEG_S            260.0f
+#define ARM_LINEAR_Q1_MAX_ACCEL_DEG_S2          1400.0f
+#define ARM_LINEAR_Q2_MAX_ACCEL_DEG_S2          1600.0f
+#define ARM_LINEAR_Q3_MAX_ACCEL_DEG_S2          1800.0f
 #define ARM_LINEAR_SAMPLE_SPACING_MM               1.0f
 #define ARM_LINEAR_MAX_SAMPLES                    384u
 #define ARM_LINEAR_FK_ERROR_MAX_MM                  0.5f
@@ -213,7 +213,7 @@
 #define ARM_TOOL_SERVO_POS_MIN                       0u
 #define ARM_TOOL_SERVO_POS_MAX                    1000u
 /* 各舵机机械装配中位：逻辑90deg分别对应以下控制板位置。 */
-#define ARM_TOOL_SERVO1_NEUTRAL_POS                515u
+#define ARM_TOOL_SERVO1_NEUTRAL_POS                516u
 #define ARM_TOOL_SERVO2_NEUTRAL_POS                500u
 #define ARM_TOOL_SERVO2_POS_MIN                      0u
 #define ARM_TOOL_SERVO2_POS_MAX                   1000u
@@ -234,6 +234,16 @@
       ARM_TOOL_SERVO2_RANGE_DEG /                   \
       (float)(ARM_TOOL_SERVO2_POS_MAX - ARM_TOOL_SERVO2_POS_MIN)))
 #define ARM_TOOL_SERVO2_YAW_DIRECTION                1.0f
+/*
+ * 仅校正上位机下发的yaw分量，不改变底座q1补偿：
+ * yaw > 0使用正向增益，yaw < 0使用负向增益。
+ */
+#define ARM_TOOL_SERVO2_HOST_YAW_POS_GAIN            1.00f//顺时针应该减小
+#define ARM_TOOL_SERVO2_HOST_YAW_NEG_GAIN            1.00f//逆时针需要更多
+#define ARM_TOOL_SERVO2_APPLY_HOST_YAW_GAIN(yaw_deg) \
+    ((yaw_deg) > 0.0f ?                              \
+        (yaw_deg) * ARM_TOOL_SERVO2_HOST_YAW_POS_GAIN : \
+        (yaw_deg) * ARM_TOOL_SERVO2_HOST_YAW_NEG_GAIN)
 /* ID2底座偏航补偿方向经实机确认需相对理论方向反转。 */
 #define ARM_TOOL_SERVO2_BASE_COMPENSATION_ENABLE     1u
 #define ARM_TOOL_SERVO2_BASE_COMPENSATION_SCALE     (-1.0f)
@@ -282,10 +292,10 @@
  */
 #define ARM_USB_Z_MAP_X_MIN_MM                     240.0f
 #define ARM_USB_Z_MAP_X_MAX_MM                     450.0f
-#define ARM_USB_MOVE_Z_AT_X_MIN_MM                  36.0f
-#define ARM_USB_MOVE_Z_AT_X_MAX_MM                  43.0f
-#define ARM_USB_MAGNET_Z_AT_X_MIN_MM                21.0f
-#define ARM_USB_MAGNET_Z_AT_X_MAX_MM                23.0f
+#define ARM_USB_MOVE_Z_AT_X_MIN_MM                  37.2f
+#define ARM_USB_MOVE_Z_AT_X_MAX_MM                  51.7f
+#define ARM_USB_MAGNET_Z_AT_X_MIN_MM                21.6f
+#define ARM_USB_MAGNET_Z_AT_X_MAX_MM                21.8f
 #define ARM_USB_TARGET_TRAVEL_Z_MM                   45.0f
 #define ARM_USB_MOVE_SPEED_MM_S                    700.0f
 #define ARM_USB_MAGNET_ACTION_DELAY_MS             500u

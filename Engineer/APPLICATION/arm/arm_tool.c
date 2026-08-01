@@ -632,6 +632,7 @@ uint8_t ArmToolServo2WorldYawValidForQ1(float world_yaw_deg,
                                         float q1_deg)
 {
     float compensation_deg;
+    float host_yaw_deg;
     float logic_deg;
 
     if (!isfinite(world_yaw_deg) || !isfinite(q1_deg)) {
@@ -639,7 +640,8 @@ uint8_t ArmToolServo2WorldYawValidForQ1(float world_yaw_deg,
     }
     compensation_deg = ARM_TOOL_SERVO2_BASE_COMPENSATION_ENABLE != 0u ?
         -ARM_TOOL_SERVO2_BASE_COMPENSATION_SCALE * q1_deg : 0.0f;
-    logic_deg = ARM_TOOL_SERVO_NEUTRAL_DEG + world_yaw_deg +
+    host_yaw_deg = ARM_TOOL_SERVO2_APPLY_HOST_YAW_GAIN(world_yaw_deg);
+    logic_deg = ARM_TOOL_SERVO_NEUTRAL_DEG + host_yaw_deg +
         compensation_deg;
     return ArmToolServoAngleFiniteAndInRange(ARM_TOOL_SERVO2_ID,
                                               logic_deg);
@@ -654,6 +656,7 @@ Arm_Command_Result_e ArmToolTrackServo2WorldYaw(float q1_feedback_deg,
     return ARM_COMMAND_UNSUPPORTED;
 #else
     float compensation_deg;
+    float host_yaw_deg;
     float relative_deg;
     float logic_deg;
     Arm_Command_Result_e result;
@@ -669,7 +672,9 @@ Arm_Command_Result_e ArmToolTrackServo2WorldYaw(float q1_feedback_deg,
 
     compensation_deg = -ARM_TOOL_SERVO2_BASE_COMPENSATION_SCALE *
         q1_feedback_deg;
-    relative_deg = g_arm_tool_debug.servo2_world_yaw_target_deg +
+    host_yaw_deg = ARM_TOOL_SERVO2_APPLY_HOST_YAW_GAIN(
+        g_arm_tool_debug.servo2_world_yaw_target_deg);
+    relative_deg = host_yaw_deg +
         compensation_deg;
     logic_deg = ARM_TOOL_SERVO_NEUTRAL_DEG + relative_deg;
 

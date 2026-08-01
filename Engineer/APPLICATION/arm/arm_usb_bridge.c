@@ -65,7 +65,8 @@ static uint16_t ArmUsbYawToServo2Position(float yaw_deg)
         return ARM_TOOL_SERVO2_NEUTRAL_POS;
     }
     pos_f = (float)ARM_TOOL_SERVO2_NEUTRAL_POS +
-        ARM_TOOL_SERVO2_YAW_DIRECTION * yaw_deg * half_range_pos /
+        ARM_TOOL_SERVO2_YAW_DIRECTION *
+        ARM_TOOL_SERVO2_APPLY_HOST_YAW_GAIN(yaw_deg) * half_range_pos /
         ARM_TOOL_SERVO2_RANGE_DEG;
     if (pos_f < (float)ARM_TOOL_SERVO2_POS_MIN) {
         pos_f = (float)ARM_TOOL_SERVO2_POS_MIN;
@@ -774,7 +775,8 @@ void ArmUsbBridgeOnTargetControl(const Packet_TargetControl *pkt)
     pending_target_yaw_deg = pkt->yaw_deg;
     active_target_yaw_deg = pkt->yaw_deg;
     g_arm_usb_debug.target_yaw_servo_deg =
-        ARM_USB_YAW_NEUTRAL_DEG + pkt->yaw_deg;
+        ARM_USB_YAW_NEUTRAL_DEG +
+        ARM_TOOL_SERVO2_APPLY_HOST_YAW_GAIN(pkt->yaw_deg);
     g_arm_usb_debug.target_yaw_pos = ArmUsbYawToServo2Position(pkt->yaw_deg);
     g_arm_usb_debug.target_yaw_result = ARM_COMMAND_BUSY;
     /*
