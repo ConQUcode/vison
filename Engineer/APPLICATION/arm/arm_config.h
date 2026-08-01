@@ -152,8 +152,8 @@
 #define ARM_RETURN_SPEED_DEG_S               10.0f
 #define ARM_ESCAPE_TIMEOUT_MS              8000u
 #define ARM_RETURN_TIMEOUT_MS             15000u
-#define ARM_ARRIVAL_ERROR_DEG                 1.0f
-#define ARM_ARRIVAL_SPEED_DEG_S               2.0f
+#define ARM_ARRIVAL_ERROR_DEG                 2.0f
+#define ARM_ARRIVAL_SPEED_DEG_S               5.0f
 #define ARM_ARRIVAL_STABLE_MS               120u
 #define ARM_WRONG_DIRECTION_DELTA_DEG          0.5f
 #define ARM_WRONG_DIRECTION_TIME_MS           200u
@@ -172,22 +172,24 @@
 
 /* 四点循环仅保留为台架测试；正式上位机接口版默认关闭。 */
 
-/* 达妙三轴快速联调轨迹参数。 */
+/* 达妙三轴第二档快速轨迹：700mm/s，短行程同时依靠更高加速度提速。 */
 #define ARM_JOINT_COMMAND_SPEED_DEG_S           420.0f
-#define ARM_LINEAR_DEFAULT_SPEED_MM_S           450.0f
+#define ARM_LINEAR_DEFAULT_SPEED_MM_S           700.0f
 #define ARM_LINEAR_MAX_SPEED_MM_S               700.0f
-#define ARM_LINEAR_MAX_ACCEL_MM_S2             3600.0f
-#define ARM_LINEAR_Q1_MAX_SPEED_DEG_S            420.0f
+#define ARM_LINEAR_MAX_ACCEL_MM_S2             5000.0f
+#define ARM_LINEAR_Q1_MAX_SPEED_DEG_S            320.0f
 #define ARM_LINEAR_Q2_MAX_SPEED_DEG_S            380.0f
 #define ARM_LINEAR_Q3_MAX_SPEED_DEG_S            420.0f
-#define ARM_LINEAR_Q1_MAX_ACCEL_DEG_S2          1800.0f
-#define ARM_LINEAR_Q2_MAX_ACCEL_DEG_S2          1500.0f
-#define ARM_LINEAR_Q3_MAX_ACCEL_DEG_S2          1800.0f
+#define ARM_LINEAR_Q1_MAX_ACCEL_DEG_S2          2300.0f
+#define ARM_LINEAR_Q2_MAX_ACCEL_DEG_S2          2500.0f
+#define ARM_LINEAR_Q3_MAX_ACCEL_DEG_S2          3000.0f
 #define ARM_LINEAR_SAMPLE_SPACING_MM               1.0f
 #define ARM_LINEAR_MAX_SAMPLES                    384u
 #define ARM_LINEAR_FK_ERROR_MAX_MM                  0.5f
 #define ARM_LINEAR_HOLD_MS                        1500u
 #define ARM_LINEAR_IK_UPDATE_MS                      2u
+/* 参考轨迹结束后等待三轴实际到位；超时向Host报告运动超时。 */
+#define ARM_TRAJECTORY_SETTLE_TIMEOUT_MS           2000u
 #define ARM_REALTIME_COMMAND_TIMEOUT_MS            100u
 #define ARM_REALTIME_DEFAULT_ACCEL_MM_S2           80.0f
 #define ARM_TRACKING_ERROR_WARN_DEG                  5.0f
@@ -211,7 +213,7 @@
 #define ARM_TOOL_SERVO_POS_MIN                       0u
 #define ARM_TOOL_SERVO_POS_MAX                    1000u
 /* 各舵机机械装配中位：逻辑90deg分别对应以下控制板位置。 */
-#define ARM_TOOL_SERVO1_NEUTRAL_POS                520u
+#define ARM_TOOL_SERVO1_NEUTRAL_POS                515u
 #define ARM_TOOL_SERVO2_NEUTRAL_POS                500u
 #define ARM_TOOL_SERVO2_POS_MIN                      0u
 #define ARM_TOOL_SERVO2_POS_MAX                   1000u
@@ -272,11 +274,21 @@
 #define ARM_TOOL_SERVO_UPDATE_PERIOD_MS             30u
 #define ARM_TOOL_SERVO_COMMAND_DEADBAND_DEG          0.5f
 
-#define ARM_USB_MOVE_Z_MM                           30.0f
-#define ARM_USB_MOVE_SPEED_MM_S                    450.0f
-#define ARM_USB_MAGNET_ACTION_Z_MM                  16.0f
-#define ARM_USB_MAGNET_ACTION_DELAY_MS            1000u
-#define ARM_USB_MAGNET_DWELL_MS                   1000u
+/*
+ * USB末端高度随X方向线性标定（上位机坐标单位均为mm）：
+ *   X <= 240mm: 默认高度32mm，抓取/释放高度20mm
+ *   X >= 450mm: 默认高度35mm，抓取/释放高度23mm
+ *   中间区间按两个端点线性插值。
+ */
+#define ARM_USB_Z_MAP_X_MIN_MM                     240.0f
+#define ARM_USB_Z_MAP_X_MAX_MM                     450.0f
+#define ARM_USB_MOVE_Z_AT_X_MIN_MM                  36.0f
+#define ARM_USB_MOVE_Z_AT_X_MAX_MM                  41.0f
+#define ARM_USB_MAGNET_Z_AT_X_MIN_MM                20.0f
+#define ARM_USB_MAGNET_Z_AT_X_MAX_MM                23.0f
+#define ARM_USB_MOVE_SPEED_MM_S                    700.0f
+#define ARM_USB_MAGNET_ACTION_DELAY_MS             500u
+#define ARM_USB_MAGNET_DWELL_MS                    500u
 #define ARM_USB_MAGNET_Z_SPEED_MM_S                100.0f
 #define ARM_USB_HOME_X_MM                          205.0f
 #define ARM_USB_HOME_Y_MM                            0.0f

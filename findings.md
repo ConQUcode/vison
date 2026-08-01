@@ -1,5 +1,17 @@
 # Findings
 
+## 2026-08-01 - Main-arm speed and completion audit
+
+- Formal USB `TargetControl` motion currently commands `450 mm/s`, while the trajectory layer allows `700 mm/s`; the duration solver is also bounded by `3600 mm/s2` Cartesian acceleration and per-joint velocity/acceleration limits.
+- Prepared trajectories currently switch directly from RUNNING to HOLDING when the reference duration expires. Host command completion then sees `!ArmTrajectoryIsBusy() + HOLDING + progress=1` and can report COMPLETED before physical feedback has settled.
+- `ARM_MOTION_SETTLING` and arrival thresholds already exist in the codebase, but the prepared Cartesian trajectory path does not currently use them. Reusing that state is the narrowest change and keeps the USB protocol unchanged.
+- The approved second speed tier will target `700 mm/s` formal MOVE and `7200 mm/s2` Cartesian acceleration. HOME, magnet vertical motion, startup speed and fixed business delays remain separate and unchanged.
+- Implemented the second tier: formal/default linear speed is `700 mm/s`, Cartesian acceleration is `7200 mm/s2`, and q1/q2/q3 acceleration limits are `3000/2500/3000 deg/s2`; the existing `420/380/420 deg/s` joint speed caps remain unchanged.
+- Prepared and direct joint/Cartesian commands now enter `ARM_MOTION_SETTLING` at the final reference. Completion requires all three feedback angles within `1 deg`, all three logical joint speeds within `2 deg/s`, continuously for `120 ms`.
+- Settling is bounded to `2000 ms`. A timeout becomes `ARM_MOTION_ERROR_TIMEOUT`, the active host command finishes as `ARM_COMMAND_TIMEOUT`, and the USB TargetControl path reports `MotionStatus FAILED/TIMEOUT` before its recovery cancel releases the business state.
+- Added Watch fields `arrival_within_tolerance`, `arrival_stable_ms` and `settling_timeout_ms` to the existing `g_arm_control_debug`; existing joint error, speed, trajectory and tracking-error fields remain available.
+- ARM GCC syntax-only checks passed for `arm_trajectory.c`, `arm.c`, `arm_usb_bridge.c` and `Test.c`; scoped `git diff --check` passed with line-ending notices only. No Keil build, flash or hardware validation was run.
+
 ## 2026-08-01 - Same-cycle ID1/ID2 target generation
 
 - Previously `ArmToolTask()` ran at the start of `ArmTask()`. ID1's latest vertical target was converted into a pending frame there, but the current-cycle ID2 base/yaw target was not calculated until the common finish path, so the scheduler could dispatch ID1 before ID2 reached its slot.
@@ -213,6 +225,29 @@
 - The screenshot's roughly six motor turns at 180 deg/s is consistent with the former 15-second timeout. The default timeout is now disabled (`0`) so a motor stops only on its own confirmed stall or explicit abort.
 - Added independent peak absolute current tracking for M3508/M2006 to support threshold tuning from live Watch data.
 # Final Implementation Findings
+
+## 2026-08-01 Generated protocol STOP update
+
+- The latest generated protocol changes only two wire-visible definitions relative to the live firmware: `PROTOCOL_HASH` is now `0x8845D84A`, and `Status` adds `STATUS_STOP=3`. Packet IDs, field layouts, packed sizes, CRC8, transparent reliable sequence byte, ACK behavior and retry settings remain compatible.
+- The generated `protocol.c` is a baseline transport and lacks the live firmware's USB-copy ownership, priority ACK queue, richer diagnostics and queue recovery. The implementation therefore synchronized the wire definitions without replacing those proven firmware extensions.
+- STOP now owns two explicit states: cancel completion and HOME completion. The magnet is intentionally preserved through cancellation and HOME motion, and is switched off only after feedback-confirmed HOME completion.
+- A successful STOP clears the active task and returns reliable `CallbackStatus{original_task_id, STATUS_STOP}`. A repeated new-sequence STOP in the already safe state only reissues that callback; a duplicate reliable sequence remains handled by protocol ACK/de-duplication before business delivery.
+- STOP failure does not claim completion or prematurely drop a held object: HOME/cancel faults return `FAULT_RETRY`, and HOME failure leaves the magnet unchanged.
+
+## 2026-08-01 X-adaptive Z calibration
+
+- USB motion coordinates are in millimetres, so the requested X endpoints `24/45` are represented as `240/450 mm` in firmware.
+- Default Z is now `32 + clamp((X-240)/210, 0, 1) * 3 mm`; magnet descent Z is `20 + clamp((X-240)/210, 0, 1) * 3 mm`.
+- Thus X=345 mm produces default Z=33.5 mm and magnet Z=21.5 mm; X outside 240..450 mm uses the nearest endpoint height.
+- The mapping is centralized in `arm_usb_bridge.c`; normal moves use the target X, loaded pre-lift uses the current X, and Task 5/6 descent/return use the X frozen when the task is accepted. Fixed HOME Z is intentionally unchanged.
+- ARM GCC syntax-only checking passed for the changed bridge. Keil compilation and physical height verification remain manual.
+
+## 2026-08-01 Arrival-timeout follow-up
+
+- The upper-computer log showed repeatable first-pass radial undershoot of about 7.5-8.1 mm, followed by success when the identical point was resent. This was not a USB ACK or parser failure.
+- The feedback-settling timer correctly starts after the prepared trajectory reaches its final reference; it was not accidentally counting the trajectory runtime itself.
+- The former timeout path submitted `CANCEL_MOTION`, which replaced the original final target with the current lagging feedback pose. That froze the undershoot and made a second upper-computer command necessary.
+- The revised timeout path preserves the original final target, relaxes arrival to `2 deg / 5 deg/s / 120 ms`, and reduces Cartesian acceleration to `5000 mm/s2`. Real faults still retain cancel behavior.
 
 - Normal boot now performs only single-reference homing after both M3508 and M2006 remain online for 500 ms; M2006 homes first and M3508 homes second.
 - M3508 and M2006 scan independently in sequence. Only the active joint is enabled; GM6020 remains stopped throughout.

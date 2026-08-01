@@ -27,14 +27,26 @@ Project File Date:  07/31/2026
 <h2>Output:</h2>
 *** Using Compiler 'V5.06 update 7 (build 960)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
 Build target 'Engineer'
+compiling arm_kinematics.c...
+compiling arm_wrist.c...
+compiling arm_tool.c...
+compiling arm_trajectory.c...
+compiling Test.c...
+..\APPLICATION\Test.c(30): warning:  #177-D: variable "feetech_servo_sweep_pos"  was declared but never referenced
+  static const uint16_t feetech_servo_sweep_pos[] = {
+..\APPLICATION\Test.c: 1 warning, 0 errors
+compiling arm_usb_bridge.c...
+..\APPLICATION\arm\arm_usb_bridge.c(38): warning:  #550-D: variable "target_yaw_complete_tick"  was set but never used
+  static uint32_t target_yaw_complete_tick;
+..\APPLICATION\arm\arm_usb_bridge.c: 1 warning, 0 errors
 compiling arm.c...
 ..\APPLICATION\arm\arm.c(640): warning:  #177-D: function "ArmSetJointCommandRaw"  was declared but never referenced
   static uint8_t ArmSetJointCommandRaw(uint8_t axis,
 ..\APPLICATION\arm\arm.c: 1 warning, 0 errors
 linking...
-Program Size: Code=87576 RO-data=724 RW-data=1040 ZI-data=106088  
+Program Size: Code=89404 RO-data=724 RW-data=1044 ZI-data=106104  
 FromELF: creating hex file...
-"Engineer\Engineer.axf" - 0 Error(s), 1 Warning(s).
+"Engineer\Engineer.axf" - 0 Error(s), 3 Warning(s).
 
 <h2>Software Packages used:</h2>
 
@@ -57,7 +69,7 @@ Package Vendor: Keil
 
    * Component: ARM::CMSIS:CORE:5.5.0
       Include file:  CMSIS\Core\Include\tz_context.h
-Build Time Elapsed:  00:00:03
+Build Time Elapsed:  00:00:04
 </pre>
 </body>
 </html>

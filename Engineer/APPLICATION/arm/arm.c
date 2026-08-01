@@ -2791,7 +2791,8 @@ static void ArmUpdateHostStatus(void)
             ArmHostFinishCommand(g_arm_host_status.active_command_id,
                 g_arm_host_status.active_command_type,
                 ARM_COMMAND_STATE_FAULTED,
-                ARM_COMMAND_PREFLIGHT_FAILED);
+                g_arm_motion_debug.motion_state == ARM_MOTION_ERROR_TIMEOUT ?
+                    ARM_COMMAND_TIMEOUT : ARM_COMMAND_PREFLIGHT_FAILED);
         }
     }
 

@@ -11,7 +11,7 @@
 - CRC8 多项式 `0x31`，初值 `0x00`。
 - CRC 覆盖 `ID + Len + Payload`，不包含 `5A A5`。
 - 可靠 payload 末尾附加透明 `ack_seq:u8`。
-- `PROTOCOL_HASH = 0xA9063541`。
+- `PROTOCOL_HASH = 0x8845D84A`。
 
 ## 消息
 
@@ -55,12 +55,15 @@ typedef struct {
 } Packet_TargetControl;
 ```
 
-固件解释为电磁铁吸取点目标：
+固件解释为电磁铁吸取点目标。Z 不在线协议中发送，而是按目标 X
+使用固件标定的线性默认高度：
 
 ```text
 X = x_mm
 Y = y_mm
-Z = 20mm
+X <= 240mm: Z = 32mm
+X >= 450mm: Z = 35mm
+240mm < X < 450mm: Z在32mm到35mm之间线性插值
 yaw = yaw_deg
 ```
 
@@ -92,6 +95,7 @@ typedef struct {
 0 = END
 1 = START
 2 = FAULT_RETRY
+3 = STOP
 ```
 
 固件业务语义：
@@ -99,11 +103,19 @@ typedef struct {
 | TaskStatus | 下位机行为 | 完成回传 |
 |---|---|---|
 | `{0, START}` | HOME 到固件等待点 | `CallbackStatus{0, END}` |
-| `{5, START}` | 当前 XY 下降到 `Z=5mm`，开启电磁铁，等待 3s，回 `Z=20mm` | `CallbackStatus{5, END}` |
-| `{6, START}` | 当前 XY 下降到 `Z=5mm`，关闭电磁铁，等待 3s，回 `Z=20mm` | `CallbackStatus{6, END}` |
+| `{5, START}` | 当前 XY 下降到按X线性标定的抓取高度，开启电磁铁，等待配置时间，再回按X标定的默认高度 | `CallbackStatus{5, END}` |
+| `{6, START}` | 当前 XY 下降到按X线性标定的释放高度，关闭电磁铁，等待配置时间，再回按X标定的默认高度 | `CallbackStatus{6, END}` |
 | `{1..4, START}` | 只记录当前任务 ID，不自动运动 | 无 |
 | `{1..4, END}` | 任务结束提示，蜂鸣器响 3s | 无 |
 | `{*, FAULT_RETRY}` | 清除桥接层上一条失败标志，不自动重放动作 | 无 |
+| `{当前任务, STOP}` | 取消当前动作，保持电磁铁状态回 HOME，到位后关闭电磁铁并清空任务状态 | `CallbackStatus{当前任务, STOP}` |
+
+`STOP` 是幂等安全动作。可靠包使用相同 `ack_seq` 重传时只重新 ACK；若
+上位机使用新序号重复发送 STOP，已经处于安全 HOME 状态的下位机会保持
+电磁铁关闭并重新发送 `CallbackStatus{task_id, STOP}`，不会重复运动。
+
+STOP 回 HOME 失败时不会提前关闭电磁铁，也不会回 STOP 完成，而是回
+`CallbackStatus{task_id, FAULT_RETRY}`。
 
 ## MotionStatus
 

@@ -1,5 +1,40 @@
 # Progress
 
+## 2026-08-01 - Phase 28 completed
+
+- Compared the desktop auto-generated `protocol.h/.c/PROTOCOL_DOC.md` against the live firmware protocol. Packet IDs, payload fields, sizes, CRC, ACK sequence, heartbeat echo and retry timing are unchanged; the wire hash changed to `0x8845D84A` and `Status` gained `STOP=3`.
+- Preserved the firmware's existing USB copy queue, high-priority ACK path, reliable queue rotation, timeout recovery and debug extensions instead of overwriting them with the smaller generated transport implementation.
+- Implemented TaskStatus STOP as an idempotent business state machine: cancel any active motion, preserve the magnet while returning to fixed HOME, turn the magnet off only after HOME completes, clear task state and reliably enqueue `CallbackStatus{task_id, STOP}`.
+- STOP HOME failure retains the magnet state and returns `FAULT_RETRY`; repeated STOP after the safe state does not repeat motion and reissues the STOP callback.
+- Updated protocol documentation for the new hash, STOP semantics and the current X-adaptive Z behavior. ARM GCC syntax checks passed for `protocol.c` and `arm_usb_bridge.c`; scoped whitespace checking passed with line-ending notices only. No Keil build, flash or hardware test was run.
+
+## 2026-08-01 - Phase 27 completed
+
+- Replaced fixed USB `33 mm / 21 mm` target heights with one clamped linear X calibration: at X=240 mm the default/magnet heights are 32/20 mm, and at X=450 mm they are 35/23 mm.
+- Normal TargetControl, loaded-motion lift/final movement, Task 5/6 descent and Task 5/6 return now use the same centralized mapping functions. Compound magnet actions retain their accepted X for both descent and return.
+- HOME remains at its fixed configured XYZ and is not affected by the X-height calibration.
+- ARM GCC syntax checking passed for `arm_usb_bridge.c` with `-Wall -Wextra -Wshadow`. Scoped whitespace checking passed with line-ending notices only. No Keil build, flash or hardware test was run.
+
+## 2026-08-01 - Phase 26 completed
+
+- Reviewed `debug(1).md`: three long radial moves stopped about 7.5-8.1 mm short, timed out, then completed after the same target was resent. HOME showed the same first-attempt failure/retry-success pattern, while lateral Y moves and magnet tasks generally completed.
+- Relaxed actual-arrival thresholds to `2 deg` position error and `5 deg/s` logical speed while retaining the 120 ms continuous stability window and 2000 ms diagnostic timeout.
+- Kept formal MOVE speed at `700 mm/s` and reduced Cartesian acceleration from `7200` to `5000 mm/s2`.
+- Settling timeout now reports failure and immediately releases the USB business state without submitting cancel; the Damiao motors retain the original final target. Non-timeout faults still use the existing cancel/hold safety path.
+- ARM GCC syntax checks passed with `-Wall -Wextra -Wshadow` for `arm_usb_bridge.c`, `arm_trajectory.c` and `arm.c`. No Keil build, flash or hardware test was run.
+
+## 2026-08-01 - Phase 25 started
+
+- User approved implementing both speed tiers in one pass and adding actual-arrival confirmation before upper-computer completion reporting.
+- Rechecked the live trajectory, host lifecycle and USB bridge call paths. No source behavior has been changed yet in this phase.
+
+## 2026-08-01 - Phase 25 completed
+
+- Raised formal USB/default linear motion to `700 mm/s`, Cartesian acceleration to `7200 mm/s2`, and joint acceleration limits to `3000/2500/3000 deg/s2`; joint speed limits, HOME, magnet Z motion, boot motion and all servo settings were preserved.
+- Added feedback-confirmed settling for linear, staged and direct joint/Cartesian commands. The host remains BUSY/RUNNING until three-axis feedback is within `1 deg` and `2 deg/s` for `120 ms`.
+- Added a `2000 ms` settling timeout and propagated it through the arm command result into USB `FAILED/TIMEOUT`, including compound HOME/magnet failure mapping.
+- Added settling Watch diagnostics and reran ARM GCC syntax-only checking for the changed execution path plus `Test.c`; all passed. Scoped whitespace checking passed with only LF/CRLF notices. Keil, flash and physical testing were intentionally not run.
+
 ## 2026-08-01 - Phase 24 completed
 
 - Moved the single existing `ArmToolTask(now_ms)` call from the beginning of `ArmTask()` to the common finish path after ID1 and ID2 compensation targets are calculated.

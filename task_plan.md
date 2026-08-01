@@ -227,6 +227,38 @@ motors in position-speed mode.
 - [completed] Keep the Phase 23 20 ms cadence, USART6 settings, mappings, formulas, deadbands, repeat parameters and motion times unchanged.
 - [completed] Run ARM GCC syntax checking and scoped `git diff --check`; leave Keil build, flash and hardware validation to the user.
 
+### Phase 25 - Main-arm speed tier and feedback-confirmed completion
+
+- [completed] Raise formal USB MOVE speed/acceleration to the approved second tier while keeping HOME, magnet Z motion, startup and servo mappings unchanged.
+- [completed] Make prepared trajectories enter a feedback-settling state after the reference profile finishes instead of reporting completion immediately.
+- [completed] Require all three joints to remain within position and velocity thresholds for a continuous stability window before publishing HOLDING/COMPLETED to the host.
+- [completed] Add a bounded settling timeout that reports the existing motion timeout fault and releases the command lifecycle cleanly.
+- [completed] Expose concise settling/arrival diagnostics through the existing arm debug snapshots and verify the USB bridge only reports COMPLETED after feedback confirmation.
+- [completed] Run ARM GCC source checks and scoped `git diff --check`; do not run Keil or hardware tests unless explicitly requested.
+
+### Phase 26 - Relaxed arrival gate and non-freezing timeout recovery
+
+- [completed] Relax the feedback-confirmed arrival gate from `1 deg / 2 deg/s` to `2 deg / 5 deg/s` while retaining the 120 ms continuous stability requirement.
+- [completed] Keep the approved `700 mm/s` top speed but reduce Cartesian acceleration from `7200` to `5000 mm/s2` to reduce q2/q3 lag and end-of-path shake.
+- [completed] Distinguish settling timeout from real arm/tool faults in the USB bridge.
+- [completed] On settling timeout, report the existing timeout result but do not submit `CANCEL_MOTION` or overwrite the final target with the lagging feedback pose.
+- [completed] Preserve the existing cancel behavior for non-timeout faults and run ARM GCC source checks plus scoped whitespace validation without a Keil build.
+
+### Phase 27 - X-adaptive default and magnet Z mapping
+
+- [completed] Replace the fixed USB default and magnet-action Z heights with configurable endpoint values over X=240..450 mm.
+- [completed] Clamp X below/above the calibrated range and linearly interpolate both heights inside the range.
+- [completed] Apply the mapped default height to normal targets, loaded-motion lift/final stages and magnet return motion.
+- [completed] Apply the mapped magnet height to Task 5/6 descent while freezing the accepted action X for the complete compound action.
+- [completed] Keep fixed HOME coordinates unchanged and run ARM GCC syntax plus scoped whitespace checks without a Keil build.
+
+### Phase 28 - Generated protocol hash and STOP workflow
+
+- [completed] Synchronize the generated protocol hash and new `STATUS_STOP=3` value without removing the firmware's USB queue, retry recovery or debug extensions.
+- [completed] Add an idempotent TaskStatus STOP business flow: cancel the current action, preserve the magnet while returning HOME, then release the magnet and reliably return `CallbackStatus{task_id, STOP}`.
+- [completed] Keep all packet IDs, payload layouts, ACK/de-duplication, heartbeat echo and reliable queue behavior compatible with the new generated files.
+- [completed] Synchronize the project protocol document with the new hash/STOP semantics and verify source structure, syntax and whitespace without a Keil build.
+
 ## Environment Notes
 
 - PowerShell startup fails with `8009001d`; native `cmd.exe` is used.
@@ -240,3 +272,4 @@ motors in position-speed mode.
 - 2026-08-01: one combined Phase 20 cleanup patch did not apply after `usb.c` context changed during the same turn. No part of that patch was applied; the cleanup is split into small symbol-bound patches.
 - 2026-08-01: the first optional GCC syntax-check wrapper failed before compilation because the Windows Bash invocation rejected its array syntax. No build artifacts or source files were changed; validation continues with explicit commands.
 - 2026-08-01: the first Phase 22 validation wrapper was rejected by the command safety layer because it included temporary-directory deletion. No source or build artifact was changed; validation was rerun without deletion and passed.
+- 2026-08-01: the first combined Phase 28 STOP patch was rejected cleanly because the live `TargetControl` formatting did not match one patch anchor. No source change from that patch was applied; implementation continued with symbol-sized patches.

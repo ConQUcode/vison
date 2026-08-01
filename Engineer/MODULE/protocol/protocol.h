@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PROTOCOL_HASH UINT32_C(0xA9063541)
+#define PROTOCOL_HASH UINT32_C(0x8845D84A)
 #define FRAME_HEADER1 90u
 #define FRAME_HEADER2 165u
 #define PROTOCOL_ENABLE_HEARTBEAT 1u
@@ -30,6 +30,7 @@ typedef enum {
     STATUS_END = 0,
     STATUS_START = 1,
     STATUS_FAULT_RETRY = 2,
+    STATUS_STOP = 3,
 } Status;
 
 typedef enum {

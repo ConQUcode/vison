@@ -415,7 +415,10 @@ typedef struct {
     uint32_t trajectory_elapsed_ms;
     uint32_t trajectory_duration_ms;
     uint32_t settling_time_ms;
+    uint32_t arrival_stable_ms;
+    uint32_t settling_timeout_ms;
     uint32_t command_age_ms;
+    uint8_t arrival_within_tolerance;
     uint8_t realtime_active;
     uint8_t realtime_timed_out;
     uint32_t realtime_command_id;

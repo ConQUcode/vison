@@ -14,6 +14,8 @@ typedef enum {
     ARM_USB_MAGNET_OFF_DWELL,
     ARM_USB_MAGNET_OFF_RAISING,
     ARM_USB_HOME_RUNNING,
+    ARM_USB_STOP_CANCEL_PENDING,
+    ARM_USB_STOP_HOME_RUNNING,
     ARM_USB_ACTION_FAILED
 } Arm_Usb_Action_State_e;
 
@@ -24,7 +26,8 @@ typedef enum {
     ARM_USB_BUSINESS_MAGNET_ON,
     ARM_USB_BUSINESS_MAGNET_OFF,
     ARM_USB_BUSINESS_TASK_START_RECORD,
-    ARM_USB_BUSINESS_TASK_END_RECORD
+    ARM_USB_BUSINESS_TASK_END_RECORD,
+    ARM_USB_BUSINESS_STOP
 } Arm_Usb_Business_e;
 
 typedef struct {
@@ -32,6 +35,10 @@ typedef struct {
     uint8_t connection_ready;
     uint8_t active_task_id;
     uint8_t action_state;
+    uint8_t pending_task_end;
+    uint8_t last_action_failed;
+    uint8_t stop_task_id;
+    uint8_t stop_safe_latched;
     uint8_t target_move_phase;
     uint8_t target_yaw_pending;
     uint8_t target_yaw_waiting;

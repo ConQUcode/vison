@@ -63,6 +63,7 @@ typedef struct {
     uint32_t online_ik_interval_start_tick;
     uint32_t online_ik_interval_ms;
     uint32_t realtime_last_command_tick;
+    uint32_t arrival_stable_tick;
     float commanded_speed_mm_s;
     float commanded_accel_mm_s2;
     float path_length_mm;
@@ -175,6 +176,34 @@ static void ArmCartesianSetState(Arm_Motion_State_e state, uint32_t now_ms)
 {
     g_arm_motion_debug.motion_state = state;
     arm_cartesian_runtime.state_start_tick = now_ms;
+    if (state != ARM_MOTION_SETTLING) {
+        arm_cartesian_runtime.arrival_stable_tick = 0u;
+    }
+}
+
+static uint8_t ArmCartesianFeedbackWithinArrivalLimits(void)
+{
+    for (uint8_t joint = 0u; joint < 3u; ++joint) {
+        float error_deg;
+        float speed_deg_s = g_arm_state.motor_speed_dps[joint];
+
+        if (!isfinite(g_arm_motion_debug.target_q_deg[joint]) ||
+            !isfinite(g_arm_state.q_feedback_deg[joint]) ||
+            !isfinite(speed_deg_s)) {
+            return 0u;
+        }
+        error_deg = joint == ARM_JOINT_BASE_YAW ?
+            ArmCartesianWrapTo180(
+                g_arm_motion_debug.target_q_deg[joint] -
+                g_arm_state.q_feedback_deg[joint]) :
+            g_arm_motion_debug.target_q_deg[joint] -
+                g_arm_state.q_feedback_deg[joint];
+        if (fabsf(error_deg) > ARM_ARRIVAL_ERROR_DEG ||
+            fabsf(speed_deg_s) > ARM_ARRIVAL_SPEED_DEG_S) {
+            return 0u;
+        }
+    }
+    return 1u;
 }
 
 static void ArmCartesianResetControlStatistics(void)
@@ -301,6 +330,14 @@ static void ArmCartesianUpdateControlDebug(uint32_t now_ms,
     g_arm_control_debug.settling_time_ms =
         g_arm_motion_debug.motion_state == ARM_MOTION_SETTLING ?
         (uint32_t)(now_ms - arm_cartesian_runtime.state_start_tick) : 0u;
+    g_arm_control_debug.arrival_stable_ms =
+        g_arm_motion_debug.motion_state == ARM_MOTION_SETTLING &&
+        arm_cartesian_runtime.arrival_stable_tick != 0u ?
+        (uint32_t)(now_ms - arm_cartesian_runtime.arrival_stable_tick) : 0u;
+    g_arm_control_debug.settling_timeout_ms =
+        ARM_TRAJECTORY_SETTLE_TIMEOUT_MS;
+    g_arm_control_debug.arrival_within_tolerance =
+        ArmCartesianFeedbackWithinArrivalLimits();
     g_arm_control_debug.realtime_active =
         arm_cartesian_runtime.realtime_active;
     g_arm_control_debug.realtime_timed_out =
@@ -1152,6 +1189,9 @@ Arm_Motion_Result_e ArmTrajectorySetJointDirect(const float target_q_deg[3])
     }
     arm_cartesian_runtime.active_control_point =
         ARM_CONTROL_POINT_WRIST_CENTER;
+    arm_cartesian_runtime.sample_count = 1u;
+    memcpy(arm_cartesian_runtime.sample_q_deg[0], target_q_deg,
+           sizeof(float) * 3u);
     ArmForwardKinematics3DOF(target_q_deg[0], target_q_deg[1],
                              target_q_deg[2], &target_position);
     memcpy(g_arm_motion_debug.trajectory_q_deg, target_q_deg,
@@ -1164,7 +1204,10 @@ Arm_Motion_Result_e ArmTrajectorySetJointDirect(const float target_q_deg[3])
     g_arm_motion_debug.trajectory_progress = 1.0f;
     g_arm_motion_debug.trajectory_duration_ms = 0u;
     g_arm_motion_debug.trajectory_elapsed_ms = 0u;
-    ArmCartesianSetState(ARM_MOTION_HOLDING, HAL_GetTick());
+    g_arm_motion_debug.path_sample_count = 1u;
+    g_arm_motion_debug.fault_code = ARM_MOTION_FAULT_NONE;
+    arm_cartesian_runtime.arrival_stable_tick = 0u;
+    ArmCartesianSetState(ARM_MOTION_SETTLING, HAL_GetTick());
     return ARM_MOTION_RESULT_OK;
 }
 
@@ -1219,6 +1262,9 @@ Arm_Motion_Result_e ArmSetCartesianTarget(const Arm_Position_s *target,
         ARM_CONTROL_POINT_WRIST_CENTER;
     arm_cartesian_runtime.active_target_wrist = *target;
     arm_cartesian_runtime.active_target_tool_tip = *target;
+    arm_cartesian_runtime.sample_count = 1u;
+    memcpy(arm_cartesian_runtime.sample_q_deg[0], local_result.q_deg,
+           sizeof(local_result.q_deg));
 
     memcpy(g_arm_motion_debug.trajectory_q_deg, local_result.q_deg,
            sizeof(g_arm_motion_debug.trajectory_q_deg));
@@ -1233,7 +1279,8 @@ Arm_Motion_Result_e ArmSetCartesianTarget(const Arm_Position_s *target,
     g_arm_motion_debug.trajectory_elapsed_ms = 0u;
     g_arm_motion_debug.path_sample_count = 1u;
     g_arm_motion_debug.fault_code = ARM_MOTION_FAULT_NONE;
-    ArmCartesianSetState(ARM_MOTION_HOLDING, HAL_GetTick());
+    arm_cartesian_runtime.arrival_stable_tick = 0u;
+    ArmCartesianSetState(ARM_MOTION_SETTLING, HAL_GetTick());
     if (result != NULL) {
         *result = local_result;
     }
@@ -1256,7 +1303,8 @@ Arm_Motion_Result_e ArmMoveLinear(const Arm_Position_s *target,
     ik_result.status = ARM_IK_INVALID_ARGUMENT;
     if (g_arm_motion_debug.motion_state == ARM_MOTION_STAGING ||
         g_arm_motion_debug.motion_state == ARM_MOTION_RUNNING ||
-        g_arm_motion_debug.motion_state == ARM_MOTION_PREFLIGHT) {
+        g_arm_motion_debug.motion_state == ARM_MOTION_PREFLIGHT ||
+        g_arm_motion_debug.motion_state == ARM_MOTION_SETTLING) {
         return ARM_MOTION_RESULT_BUSY;
     }
     if (target == NULL || !isfinite(target->x_mm) ||
@@ -1424,7 +1472,8 @@ Arm_Motion_Result_e ArmMoveLinearToolTipVerticalDown(
     ik_result.status = ARM_IK_INVALID_ARGUMENT;
     if (g_arm_motion_debug.motion_state == ARM_MOTION_STAGING ||
         g_arm_motion_debug.motion_state == ARM_MOTION_RUNNING ||
-        g_arm_motion_debug.motion_state == ARM_MOTION_PREFLIGHT) {
+        g_arm_motion_debug.motion_state == ARM_MOTION_PREFLIGHT ||
+        g_arm_motion_debug.motion_state == ARM_MOTION_SETTLING) {
         return ARM_MOTION_RESULT_BUSY;
     }
     if (target_tip == NULL || !isfinite(target_tip->x_mm) ||
@@ -1799,7 +1848,51 @@ static void ArmCartesianRunPreparedTrajectory(uint32_t now_ms)
                arm_cartesian_runtime.sample_q_deg[last_index],
                sizeof(g_arm_motion_debug.trajectory_q_deg));
         g_arm_motion_debug.trajectory_progress = 1.0f;
-        ArmCartesianSetState(ARM_MOTION_HOLDING, now_ms);
+        /*
+         * 参考曲线结束不等于机构实际到位。保持最终关节目标并进入反馈
+         * 收敛阶段；只有三轴误差和速度连续稳定后才允许Host完成上报。
+         */
+        arm_cartesian_runtime.arrival_stable_tick = 0u;
+        ArmCartesianSetState(ARM_MOTION_SETTLING, now_ms);
+    }
+}
+
+static void ArmCartesianRunSettling(uint32_t now_ms)
+{
+    uint16_t last_index;
+
+    if (arm_cartesian_runtime.sample_count == 0u) {
+        g_arm_motion_debug.fault_code = ARM_MOTION_FAULT_TIMEOUT;
+        g_arm_motion_debug.command_accepted = 0u;
+        ArmCartesianSetState(ARM_MOTION_ERROR_TIMEOUT, now_ms);
+        return;
+    }
+
+    last_index = arm_cartesian_runtime.sample_count - 1u;
+    if (!ArmUpdateJointReference(
+            arm_cartesian_runtime.sample_q_deg[last_index])) {
+        arm_cartesian_runtime.arrival_stable_tick = 0u;
+    } else if (ArmCartesianFeedbackWithinArrivalLimits()) {
+        if (arm_cartesian_runtime.arrival_stable_tick == 0u) {
+            arm_cartesian_runtime.arrival_stable_tick = now_ms;
+        }
+        if ((uint32_t)(now_ms -
+                arm_cartesian_runtime.arrival_stable_tick) >=
+            ARM_ARRIVAL_STABLE_MS) {
+            g_arm_motion_debug.fault_code = ARM_MOTION_FAULT_NONE;
+            g_arm_motion_debug.command_accepted = 1u;
+            ArmCartesianSetState(ARM_MOTION_HOLDING, now_ms);
+            return;
+        }
+    } else {
+        arm_cartesian_runtime.arrival_stable_tick = 0u;
+    }
+
+    if ((uint32_t)(now_ms - arm_cartesian_runtime.state_start_tick) >=
+        ARM_TRAJECTORY_SETTLE_TIMEOUT_MS) {
+        g_arm_motion_debug.fault_code = ARM_MOTION_FAULT_TIMEOUT;
+        g_arm_motion_debug.command_accepted = 0u;
+        ArmCartesianSetState(ARM_MOTION_ERROR_TIMEOUT, now_ms);
     }
 }
 
@@ -2038,6 +2131,9 @@ void ArmTrajectoryTask(uint32_t now_ms)
             break;
 
         case ARM_MOTION_SETTLING:
+            ArmCartesianRunSettling(now_ms);
+            break;
+
         case ARM_MOTION_HOLDING:
             break;
 
