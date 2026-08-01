@@ -3433,7 +3433,7 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
 			{
 				taskYIELD();
 			}
-			else
+			else 
 			{
 				mtCOVERAGE_TEST_MARKER();
 			}

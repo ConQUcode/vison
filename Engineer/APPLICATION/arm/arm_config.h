@@ -189,7 +189,7 @@
 #define ARM_LINEAR_HOLD_MS                        1500u
 #define ARM_LINEAR_IK_UPDATE_MS                      2u
 /* 参考轨迹结束后等待三轴实际到位；超时向Host报告运动超时。 */
-#define ARM_TRAJECTORY_SETTLE_TIMEOUT_MS           2000u
+#define ARM_TRAJECTORY_SETTLE_TIMEOUT_MS           8000u
 #define ARM_REALTIME_COMMAND_TIMEOUT_MS            100u
 #define ARM_REALTIME_DEFAULT_ACCEL_MM_S2           80.0f
 #define ARM_TRACKING_ERROR_WARN_DEG                  5.0f
@@ -283,9 +283,10 @@
 #define ARM_USB_Z_MAP_X_MIN_MM                     240.0f
 #define ARM_USB_Z_MAP_X_MAX_MM                     450.0f
 #define ARM_USB_MOVE_Z_AT_X_MIN_MM                  36.0f
-#define ARM_USB_MOVE_Z_AT_X_MAX_MM                  41.0f
-#define ARM_USB_MAGNET_Z_AT_X_MIN_MM                20.0f
+#define ARM_USB_MOVE_Z_AT_X_MAX_MM                  43.0f
+#define ARM_USB_MAGNET_Z_AT_X_MIN_MM                21.0f
 #define ARM_USB_MAGNET_Z_AT_X_MAX_MM                23.0f
+#define ARM_USB_TARGET_TRAVEL_Z_MM                   45.0f
 #define ARM_USB_MOVE_SPEED_MM_S                    700.0f
 #define ARM_USB_MAGNET_ACTION_DELAY_MS             500u
 #define ARM_USB_MAGNET_DWELL_MS                    500u
@@ -294,8 +295,8 @@
 #define ARM_USB_HOME_Y_MM                            0.0f
 #define ARM_USB_HOME_Z_MM                           90.0f
 #define ARM_USB_HOME_SPEED_MM_S                    200.0f
-#define ARM_USB_YAW_MIN_DEG                        (-90.0f)
-#define ARM_USB_YAW_MAX_DEG                          90.0f
+#define ARM_USB_YAW_MIN_DEG                       (-110.0f)
+#define ARM_USB_YAW_MAX_DEG                         110.0f
 #define ARM_USB_YAW_NEUTRAL_DEG                      90.0f
 #define ARM_USB_YAW_MOVE_TIME_MS                    500u
 #define ARM_USB_YAW_SETTLE_MS                       100u
