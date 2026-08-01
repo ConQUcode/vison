@@ -56,6 +56,12 @@ typedef struct {
     uint32_t error_code;
     uint32_t tx_count[2];
     uint32_t tx_fail_count[2];
+    uint8_t tx_pending[2];
+    uint16_t tx_pending_pos[2];
+    uint16_t tx_pending_time_ms[2];
+    uint32_t tx_pending_overwrite_count[2];
+    uint32_t tx_single_frame_count;
+    uint32_t tx_dual_frame_count;
     uint32_t last_update_tick;
     Arm_Position_s wrist_center_mm;
     Arm_Position_s tool_tip_mm;
@@ -68,6 +74,8 @@ void ArmToolInit(void);
 void ArmToolTask(uint32_t now_ms);
 void ArmToolSetMagnet(uint8_t on);
 void ArmToolStopServo1Tracking(void);
+void ArmToolClearPendingCommands(void);
+uint8_t ArmToolTxIdle(void);
 Arm_Command_Result_e ArmToolSetServo1Angle(float angle_deg);
 Arm_Command_Result_e ArmToolSetServo2Angle(float angle_deg);
 Arm_Command_Result_e ArmToolSetServo2Position(uint16_t position,

@@ -1,5 +1,21 @@
 # Findings
 
+## 2026-08-01 - Latest-target servo coalescing
+
+- `arm_tool` now owns one pending slot per servo. When USART6 is busy, a newer target replaces that servo's unsent target, so the bus does not replay obsolete intermediate compensation angles.
+- When both slots are valid and use the same `time_ms`, the scheduler emits the existing controller-board two-servo frame through `HSLServoMove2()`; one changed servo or mismatched motion times use the existing single-servo frame.
+- Initialization waits for both the relevant pending slot and `g_hsl_servo_debug.busy` to clear. Boot tool stabilization additionally requires `ArmToolTxIdle()`, preventing READY sequencing from outrunning an asynchronous initialization or compensation frame.
+- Stopping ID1 tracking clears its unsent ID1 target. Fault/estop paths clear both pending targets and cancel ID2 repeat sends, preventing a stale command from being dispatched after motion has been stopped.
+- No USART6, mapping, compensation, update-period, repeat-count or motion-time macro was changed. ARM GCC syntax-only checking passed for `arm_tool.c`, `arm.c` and `hsl_servo.c`; scoped `git diff --check` passed with line-ending notices only. No Keil build, flash or hardware validation was run.
+
+## 2026-08-01 - Non-blocking USART6 servo move TX
+
+- Live CubeMX USART6 has the global USART interrupt but no USART6 TX DMA. At 9600 baud with 10/13-byte controller-board frames, `HAL_UART_Transmit_IT()` removes task blocking without requiring a CubeMX DMA change.
+- `HSLServoMove()` and `HSLServoMove2()` now copy complete frames into the driver-owned persistent buffer and return `OK`; while that transaction is active, another command still returns `BUSY`.
+- USART6 TX completion is delivered through the existing shared BSP callback dispatcher. The ISR only sets `tx_complete`; `HSLServoTask()` updates counters/status, waits the existing 2 ms board gap non-blockingly, then releases `busy`.
+- The old move path's blocking `HAL_UART_Transmit()`, TC polling loop and `HAL_Delay(2)` are gone. USART6 baud, half-duplex mode, frame bytes, servo position mapping and arm compensation parameters are unchanged.
+- ARM GCC syntax-only checking with `-Wall -Wextra -Wshadow` and scoped `git diff --check` passed. Keil link, flashing and hardware timing tests were not run.
+
 ## 2026-08-01 USB recovery failure analysis
 
 - A rejected Cartesian target is accepted into the arm mailbox first and later finishes as `ARM_COMMAND_STATE_REJECTED`; the USB bridge currently groups that state with `CANCELLED/FAULTED`, submits an unnecessary cancel command, and remains in `ARM_USB_ACTION_FAILED` until `host.busy` becomes zero.

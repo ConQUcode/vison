@@ -1,5 +1,20 @@
 # Progress
 
+## 2026-08-01 - Phase 22 completed
+
+- Added overwriteable latest-target slots for ID1/ID2 in `arm_tool`, including Watch-visible pending positions, overwrite counts and single/dual-frame counters.
+- Added automatic `HSLServoMove2()` dispatch when both targets share one motion time, with fair single-frame fallback for one target or mismatched times.
+- Routed ID2 repeat sends and direct position requests through the same scheduler, and kept the dynamic ID1/ID2 compensation parameters unchanged.
+- Added pending-command cleanup for stop/fault paths and a TX-idle boot gate so asynchronous tool frames cannot leak across a stop or be mistaken for completed initialization.
+- ARM GCC syntax-only checks passed for `arm_tool.c`, `arm.c` and `hsl_servo.c`. Scoped whitespace checking passed with only LF/CRLF notices. No Keil build, firmware flash or hardware test was run.
+
+## 2026-08-01 - Phase 21 completed
+
+- Converted the USART6 controller-board move path to interrupt-driven non-blocking transmission without changing CubeMX configuration.
+- Added shared BSP callback registration, a non-blocking 2 ms post-TX gap state, finite 50 ms TX timeout and compatible status handling for the existing two-servo frame API.
+- Fixed the generic transaction queue to retain its `expects_response` argument so the position-read path remains logically intact.
+- ARM GCC syntax-only check passed with no diagnostics; scoped `git diff --check` passed with only existing LF/CRLF notices. No Keil build or hardware test was run.
+
 ## 2026-08-01 - Phase 20 started
 
 - Compared the host-side `debug.md` report with the live protocol, USB queue and arm bridge code.

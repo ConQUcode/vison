@@ -494,6 +494,7 @@ static void ArmLatchFault(Arm_Fault_e fault)
     ArmBootBuzzerStop();
     arm_runtime.elbow_coupling_active = 0u;
     ArmToolStopServo1Tracking();
+    ArmToolClearPendingCommands();
     ArmDisableAll();
     arm_runtime.disable_sent = 1u;
     if (fault == ARM_FAULT_EMERGENCY_STOP ||
@@ -1356,7 +1357,8 @@ static void ArmProcessBootSequence(uint32_t now_ms)
             (void)ArmToolSetVerticalDownFromPitch(
                 g_arm_state.small_link_pitch_deg);
             if (ArmToolReadyForMotion() &&
-                ArmToolGetState()->servo1_slew_active == 0u) {
+                ArmToolGetState()->servo1_slew_active == 0u &&
+                ArmToolTxIdle()) {
                 ArmSetBootState(ARM_BOOT_STABILIZE, now_ms);
             } else if (ArmToolGetState()->init_state == ARM_TOOL_INIT_ERROR ||
                        g_arm_boot_debug.elapsed_ms >=
@@ -1550,6 +1552,7 @@ static void ArmProcessBootSequence(uint32_t now_ms)
         default:
             ArmBootBuzzerStop();
             ArmToolStopServo1Tracking();
+            ArmToolClearPendingCommands();
             ArmToolSetMagnet(0u);
             ArmTrajectoryCancel();
             g_arm_state.mode = ARM_MODE_FAULT;

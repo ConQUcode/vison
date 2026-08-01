@@ -195,6 +195,23 @@ motors in position-speed mode.
 - [completed] Add USB CDC TX timeout/re-enumeration recovery and reserve a dedicated high-priority queue for command ACK traffic.
 - [completed] Expose concise TX queue recovery diagnostics and run source/diff validation without a Keil build.
 
+### Phase 21 - Non-blocking USART6 servo move transmission
+
+- [completed] Keep the verified USART6 `9600`, half-duplex wiring and controller-board frame format unchanged.
+- [completed] Replace blocking servo move transmission, TC polling and the blocking 2 ms delay with USART6 interrupt transmission plus task-driven completion/gap states.
+- [completed] Register the existing servo callbacks through the shared USART BSP and preserve single-transaction `OK/BUSY` semantics.
+- [completed] Keep both single-servo and existing dual-servo frame APIs compatible without changing arm compensation, timing or angle mapping.
+- [completed] Run ARM GCC syntax checking and scoped `git diff --check`; leave Keil build, flash and hardware timing validation to the user.
+
+### Phase 22 - Latest-target coalescing and dual-servo frames
+
+- [completed] Add one overwriteable latest pending target slot for ID1 and ID2 instead of a historical FIFO.
+- [completed] Dispatch matching-time ID1/ID2 targets through `HSLServoMove2()` and keep single-servo fallback when only one target changes or times differ.
+- [completed] Preserve USART6 configuration, controller-board frames, position mapping, compensation formulas, update periods, repeat counts and motion-time parameters.
+- [completed] Keep initialization from advancing until cached targets are dispatched and the USART6 transaction is complete.
+- [completed] Clear unsent stale targets on tracking stop/fault and require a fully idle tool TX path before boot stabilization.
+- [completed] Run ARM GCC syntax checking and scoped `git diff --check`; leave Keil build, flash and hardware validation to the user.
+
 ## Environment Notes
 
 - PowerShell startup fails with `8009001d`; native `cmd.exe` is used.
@@ -207,3 +224,4 @@ motors in position-speed mode.
 - 2026-07-30: the first Phase 18 combined patch did not apply because a mojibake comment in `arm_config.h` made the context unstable. No source changes were made; subsequent patches use stable macro/function boundaries.
 - 2026-08-01: one combined Phase 20 cleanup patch did not apply after `usb.c` context changed during the same turn. No part of that patch was applied; the cleanup is split into small symbol-bound patches.
 - 2026-08-01: the first optional GCC syntax-check wrapper failed before compilation because the Windows Bash invocation rejected its array syntax. No build artifacts or source files were changed; validation continues with explicit commands.
+- 2026-08-01: the first Phase 22 validation wrapper was rejected by the command safety layer because it included temporary-directory deletion. No source or build artifact was changed; validation was rerun without deletion and passed.

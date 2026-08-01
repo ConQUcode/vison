@@ -14,6 +14,16 @@
 
 Arm_Tool_State_s g_arm_tool_debug;
 
+typedef struct {
+    uint8_t valid[2];
+    uint16_t position[2];
+    uint16_t time_ms[2];
+    uint32_t queued_tick[2];
+    uint8_t next_single_index;
+} Arm_Tool_Tx_Scheduler_s;
+
+static Arm_Tool_Tx_Scheduler_s arm_tool_tx_scheduler;
+
 static uint8_t ArmToolServoIndex(uint8_t servo_id)
 {
     return servo_id == ARM_TOOL_SERVO1_ID ? 0u : 1u;
@@ -46,6 +56,102 @@ static uint8_t ArmToolServoAngleFiniteAndInRange(uint8_t servo_id,
            angle_deg <= ARM_TOOL_SERVO_DEG_MAX;
 }
 
+static void ArmToolClearPending(uint8_t index)
+{
+    arm_tool_tx_scheduler.valid[index] = 0u;
+    g_arm_tool_debug.tx_pending[index] = 0u;
+}
+
+static void ArmToolRecordTxSuccess(uint8_t index)
+{
+    g_arm_tool_debug.tx_count[index]++;
+    g_arm_tool_debug.servo_online[index] = 1u;
+}
+
+static void ArmToolRecordTxFailure(uint8_t index)
+{
+    g_arm_tool_debug.tx_fail_count[index]++;
+    g_arm_tool_debug.servo_online[index] = 0u;
+    ArmToolClearPending(index);
+}
+
+static void ArmToolDispatchPending(uint32_t now_ms)
+{
+    HSLServo_Result_e result;
+    uint8_t index;
+
+    if (g_hsl_servo_debug.busy != 0u ||
+        (arm_tool_tx_scheduler.valid[0] == 0u &&
+         arm_tool_tx_scheduler.valid[1] == 0u)) {
+        return;
+    }
+
+    if (arm_tool_tx_scheduler.valid[0] != 0u &&
+        arm_tool_tx_scheduler.valid[1] != 0u &&
+        arm_tool_tx_scheduler.time_ms[0] ==
+            arm_tool_tx_scheduler.time_ms[1]) {
+        result = HSLServoMove2(
+            ARM_TOOL_SERVO1_ID, arm_tool_tx_scheduler.position[0],
+            ARM_TOOL_SERVO2_ID, arm_tool_tx_scheduler.position[1],
+            arm_tool_tx_scheduler.time_ms[0]);
+        if (result == HSL_SERVO_RESULT_BUSY) {
+            return;
+        }
+        if (result == HSL_SERVO_RESULT_OK) {
+            ArmToolRecordTxSuccess(0u);
+            ArmToolRecordTxSuccess(1u);
+            ArmToolClearPending(0u);
+            ArmToolClearPending(1u);
+            g_arm_tool_debug.tx_dual_frame_count++;
+            g_arm_tool_debug.tool_ready = 1u;
+            g_arm_tool_debug.error_code = ARM_TOOL_ERROR_NONE;
+        } else {
+            ArmToolRecordTxFailure(0u);
+            ArmToolRecordTxFailure(1u);
+            g_arm_tool_debug.tool_ready = 0u;
+            g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_TX;
+        }
+        return;
+    }
+
+    if (arm_tool_tx_scheduler.valid[0] != 0u &&
+        arm_tool_tx_scheduler.valid[1] != 0u) {
+        if (arm_tool_tx_scheduler.queued_tick[0] ==
+            arm_tool_tx_scheduler.queued_tick[1]) {
+            index = arm_tool_tx_scheduler.next_single_index;
+        } else {
+            index = (int32_t)(arm_tool_tx_scheduler.queued_tick[0] -
+                              arm_tool_tx_scheduler.queued_tick[1]) <= 0 ?
+                0u : 1u;
+        }
+    } else {
+        index = arm_tool_tx_scheduler.valid[0] != 0u ? 0u : 1u;
+    }
+
+    result = HSLServoMove(
+        index == 0u ? ARM_TOOL_SERVO1_ID : ARM_TOOL_SERVO2_ID,
+        arm_tool_tx_scheduler.position[index],
+        arm_tool_tx_scheduler.time_ms[index]);
+    if (result == HSL_SERVO_RESULT_BUSY) {
+        return;
+    }
+    if (result == HSL_SERVO_RESULT_OK) {
+        ArmToolRecordTxSuccess(index);
+        ArmToolClearPending(index);
+        arm_tool_tx_scheduler.next_single_index = index == 0u ? 1u : 0u;
+        g_arm_tool_debug.tx_single_frame_count++;
+        g_arm_tool_debug.tool_ready =
+            g_arm_tool_debug.servo_online[0] != 0u &&
+            g_arm_tool_debug.servo_online[1] != 0u;
+        g_arm_tool_debug.error_code = ARM_TOOL_ERROR_NONE;
+    } else {
+        ArmToolRecordTxFailure(index);
+        g_arm_tool_debug.tool_ready = 0u;
+        g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_TX;
+    }
+    (void)now_ms;
+}
+
 static Arm_Command_Result_e ArmToolSendServo(uint8_t servo_id,
                                              float angle_deg,
                                              uint16_t time_ms,
@@ -53,7 +159,6 @@ static Arm_Command_Result_e ArmToolSendServo(uint8_t servo_id,
 {
     uint8_t index = ArmToolServoIndex(servo_id);
     uint16_t pos;
-    HSLServo_Result_e result;
     uint32_t now_ms = HAL_GetTick();
 
 #if ARM_TOOL_ENABLE == 0u
@@ -90,27 +195,19 @@ static Arm_Command_Result_e ArmToolSendServo(uint8_t servo_id,
     }
 
     pos = ArmToolAngleDegToPos(servo_id, angle_deg);
-    result = HSLServoMove(servo_id, pos, time_ms);
-    if (result == HSL_SERVO_RESULT_BUSY) {
-        return ARM_COMMAND_BUSY;
+    if (arm_tool_tx_scheduler.valid[index] != 0u) {
+        g_arm_tool_debug.tx_pending_overwrite_count[index]++;
     }
-    if (result != HSL_SERVO_RESULT_OK) {
-        g_arm_tool_debug.tx_fail_count[index]++;
-        g_arm_tool_debug.servo_online[index] = 0u;
-        g_arm_tool_debug.tool_ready = 0u;
-        g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_TX;
-        return ARM_COMMAND_NOT_READY;
-    }
-
-    g_arm_tool_debug.tx_count[index]++;
-    g_arm_tool_debug.servo_online[index] = 1u;
+    arm_tool_tx_scheduler.valid[index] = 1u;
+    arm_tool_tx_scheduler.position[index] = pos;
+    arm_tool_tx_scheduler.time_ms[index] = time_ms;
+    arm_tool_tx_scheduler.queued_tick[index] = now_ms;
+    g_arm_tool_debug.tx_pending[index] = 1u;
+    g_arm_tool_debug.tx_pending_pos[index] = pos;
+    g_arm_tool_debug.tx_pending_time_ms[index] = time_ms;
     g_arm_tool_debug.servo_target_deg[index] = angle_deg;
     g_arm_tool_debug.servo_target_pos[index] = pos;
     g_arm_tool_debug.last_update_tick = now_ms;
-    g_arm_tool_debug.tool_ready =
-        g_arm_tool_debug.servo_online[0] != 0u &&
-        g_arm_tool_debug.servo_online[1] != 0u;
-    g_arm_tool_debug.error_code = ARM_TOOL_ERROR_NONE;
     return ARM_COMMAND_OK;
 #endif
 }
@@ -190,6 +287,7 @@ void ArmToolInit(void)
     uint8_t initialized;
 
     memset(&g_arm_tool_debug, 0, sizeof(g_arm_tool_debug));
+    memset(&arm_tool_tx_scheduler, 0, sizeof(arm_tool_tx_scheduler));
     initialized = HSLServoInit();
     HAL_GPIO_WritePin(ARM_MAGNET_GPIO_PORT, ARM_MAGNET_GPIO_PIN,
                       ARM_MAGNET_INACTIVE_LEVEL);
@@ -261,6 +359,7 @@ void ArmToolTask(uint32_t now_ms)
 
         case ARM_TOOL_INIT_SERVO1_WAIT:
             if (g_hsl_servo_debug.busy == 0u &&
+                g_arm_tool_debug.tx_pending[0] == 0u &&
                 (uint32_t)(now_ms - g_arm_tool_debug.last_update_tick) >=
                     ARM_TOOL_SERVO_UPDATE_PERIOD_MS) {
                 g_arm_tool_debug.init_state = ARM_TOOL_INIT_SERVO2_PENDING;
@@ -285,7 +384,8 @@ void ArmToolTask(uint32_t now_ms)
         }
 
         case ARM_TOOL_INIT_SERVO2_WAIT:
-            if (g_hsl_servo_debug.busy == 0u) {
+            if (g_hsl_servo_debug.busy == 0u &&
+                g_arm_tool_debug.tx_pending[1] == 0u) {
                 g_arm_tool_debug.init_repeat_count++;
                 g_arm_tool_debug.tool_ready =
                     g_arm_tool_debug.servo_online[0] != 0u &&
@@ -319,34 +419,28 @@ void ArmToolTask(uint32_t now_ms)
 
     if (g_arm_tool_debug.init_state == ARM_TOOL_INIT_DONE &&
         g_arm_tool_debug.servo2_repeat_remaining != 0u &&
-        g_hsl_servo_debug.busy == 0u &&
         (uint32_t)(now_ms - g_arm_tool_debug.servo2_repeat_tick) >=
             ARM_TOOL_SERVO2_REPEAT_PERIOD_MS) {
-        HSLServo_Result_e result;
-
-        result = HSLServoMove(
-            ARM_TOOL_SERVO2_ID,
-            g_arm_tool_debug.servo2_repeat_pos,
-            g_arm_tool_debug.servo2_repeat_time_ms);
-
         g_arm_tool_debug.servo2_repeat_tick = now_ms;
-        if (result == HSL_SERVO_RESULT_OK) {
-            g_arm_tool_debug.tx_count[1]++;
-            g_arm_tool_debug.servo_online[1] = 1u;
-            g_arm_tool_debug.servo2_repeat_remaining--;
-            g_arm_tool_debug.error_code = ARM_TOOL_ERROR_NONE;
-        } else if (result != HSL_SERVO_RESULT_BUSY) {
-            g_arm_tool_debug.tx_fail_count[1]++;
-            g_arm_tool_debug.servo_online[1] = 0u;
-            g_arm_tool_debug.tool_ready = 0u;
-            g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_TX;
-            g_arm_tool_debug.servo2_repeat_remaining = 0u;
+        if (arm_tool_tx_scheduler.valid[1] != 0u) {
+            g_arm_tool_debug.tx_pending_overwrite_count[1]++;
         }
+        arm_tool_tx_scheduler.valid[1] = 1u;
+        arm_tool_tx_scheduler.position[1] =
+            g_arm_tool_debug.servo2_repeat_pos;
+        arm_tool_tx_scheduler.time_ms[1] =
+            g_arm_tool_debug.servo2_repeat_time_ms;
+        arm_tool_tx_scheduler.queued_tick[1] = now_ms;
+        g_arm_tool_debug.tx_pending[1] = 1u;
+        g_arm_tool_debug.tx_pending_pos[1] =
+            g_arm_tool_debug.servo2_repeat_pos;
+        g_arm_tool_debug.tx_pending_time_ms[1] =
+            g_arm_tool_debug.servo2_repeat_time_ms;
+        g_arm_tool_debug.servo2_repeat_remaining--;
     }
 
     if (g_arm_tool_debug.init_state == ARM_TOOL_INIT_DONE &&
         g_arm_tool_debug.servo1_slew_active != 0u &&
-        g_hsl_servo_debug.busy == 0u &&
         (uint32_t)(now_ms - g_arm_tool_debug.servo1_slew_tick) >=
             ARM_TOOL_SERVO1_SLEW_PERIOD_MS) {
         float current_deg = g_arm_tool_debug.servo_target_deg[0];
@@ -387,6 +481,12 @@ void ArmToolTask(uint32_t now_ms)
         }
     }
 
+    /*
+     * 先收集本周期ID1竖直补偿、ID2底座/yaw补偿的最新目标，
+     * 再统一发送；两槽同时有效且运动时间一致时自动合成一帧。
+     */
+    ArmToolDispatchPending(now_ms);
+
 #else
     (void)now_ms;
 #endif
@@ -409,6 +509,28 @@ void ArmToolStopServo1Tracking(void)
     g_arm_tool_debug.servo1_compensation_target_deg =
         g_arm_tool_debug.servo_target_deg[0];
     g_arm_tool_debug.servo1_slew_active = 0u;
+    ArmToolClearPending(0u);
+#endif
+}
+
+void ArmToolClearPendingCommands(void)
+{
+#if ARM_TOOL_ENABLE != 0u
+    ArmToolClearPending(0u);
+    ArmToolClearPending(1u);
+    g_arm_tool_debug.servo1_slew_active = 0u;
+    g_arm_tool_debug.servo2_repeat_remaining = 0u;
+#endif
+}
+
+uint8_t ArmToolTxIdle(void)
+{
+#if ARM_TOOL_ENABLE != 0u
+    return g_hsl_servo_debug.busy == 0u &&
+           arm_tool_tx_scheduler.valid[0] == 0u &&
+           arm_tool_tx_scheduler.valid[1] == 0u;
+#else
+    return 1u;
 #endif
 }
 
@@ -432,9 +554,9 @@ Arm_Command_Result_e ArmToolSetServo2Angle(float angle_deg)
 Arm_Command_Result_e ArmToolSetServo2Position(uint16_t position,
                                               uint16_t time_ms)
 {
-    HSLServo_Result_e result;
     float max_yaw_deg;
     float half_range_pos;
+    uint32_t now_ms;
 
 #if ARM_TOOL_ENABLE == 0u
     (void)position;
@@ -445,8 +567,7 @@ Arm_Command_Result_e ArmToolSetServo2Position(uint16_t position,
         g_arm_tool_debug.error_code = ARM_TOOL_ERROR_INVALID_ARGUMENT;
         return ARM_COMMAND_NOT_READY;
     }
-    if (position < ARM_TOOL_SERVO2_POS_MIN ||
-        position > ARM_TOOL_SERVO2_POS_MAX ||
+    if (position > ARM_TOOL_SERVO2_POS_MAX ||
         time_ms > HSL_SERVO_MAX_TIME_MS) {
         g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_RANGE;
         return ARM_COMMAND_INVALID;
@@ -459,20 +580,17 @@ Arm_Command_Result_e ArmToolSetServo2Position(uint16_t position,
         g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_RANGE;
         return ARM_COMMAND_INVALID;
     }
-    result = HSLServoMove(ARM_TOOL_SERVO2_ID, position, time_ms);
-    if (result == HSL_SERVO_RESULT_BUSY) {
-        return ARM_COMMAND_BUSY;
+    now_ms = HAL_GetTick();
+    if (arm_tool_tx_scheduler.valid[1] != 0u) {
+        g_arm_tool_debug.tx_pending_overwrite_count[1]++;
     }
-    if (result != HSL_SERVO_RESULT_OK) {
-        g_arm_tool_debug.tx_fail_count[1]++;
-        g_arm_tool_debug.servo_online[1] = 0u;
-        g_arm_tool_debug.tool_ready = 0u;
-        g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_TX;
-        return ARM_COMMAND_NOT_READY;
-    }
-
-    g_arm_tool_debug.tx_count[1]++;
-    g_arm_tool_debug.servo_online[1] = 1u;
+    arm_tool_tx_scheduler.valid[1] = 1u;
+    arm_tool_tx_scheduler.position[1] = position;
+    arm_tool_tx_scheduler.time_ms[1] = time_ms;
+    arm_tool_tx_scheduler.queued_tick[1] = now_ms;
+    g_arm_tool_debug.tx_pending[1] = 1u;
+    g_arm_tool_debug.tx_pending_pos[1] = position;
+    g_arm_tool_debug.tx_pending_time_ms[1] = time_ms;
     g_arm_tool_debug.servo_target_deg[1] =
         ARM_USB_YAW_NEUTRAL_DEG +
         ((float)position - (float)ARM_TOOL_SERVO2_NEUTRAL_POS) *
@@ -480,17 +598,13 @@ Arm_Command_Result_e ArmToolSetServo2Position(uint16_t position,
         half_range_pos /
         ARM_TOOL_SERVO2_YAW_DIRECTION;
     g_arm_tool_debug.servo_target_pos[1] = position;
-    g_arm_tool_debug.last_update_tick = HAL_GetTick();
+    g_arm_tool_debug.last_update_tick = now_ms;
     g_arm_tool_debug.servo2_repeat_pos = position;
     g_arm_tool_debug.servo2_repeat_time_ms = time_ms;
     g_arm_tool_debug.servo2_repeat_tick = g_arm_tool_debug.last_update_tick;
     g_arm_tool_debug.servo2_repeat_remaining =
         ARM_TOOL_SERVO2_REPEAT_COUNT > 0u ?
         (uint8_t)(ARM_TOOL_SERVO2_REPEAT_COUNT - 1u) : 0u;
-    g_arm_tool_debug.tool_ready =
-        g_arm_tool_debug.servo_online[0] != 0u &&
-        g_arm_tool_debug.servo_online[1] != 0u;
-    g_arm_tool_debug.error_code = ARM_TOOL_ERROR_NONE;
     return ARM_COMMAND_OK;
 #endif
 }
