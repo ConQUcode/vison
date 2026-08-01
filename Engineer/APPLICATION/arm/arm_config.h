@@ -235,7 +235,8 @@
 /* ID2底座偏航补偿方向经实机确认需相对理论方向反转。 */
 #define ARM_TOOL_SERVO2_BASE_COMPENSATION_ENABLE     1u
 #define ARM_TOOL_SERVO2_BASE_COMPENSATION_SCALE     (-1.0f)
-#define ARM_TOOL_SERVO2_TRACK_UPDATE_PERIOD_MS      30u
+/* 与ID1的20ms补偿节拍对齐，提高双舵机合帧命中率（50Hz）。 */
+#define ARM_TOOL_SERVO2_TRACK_UPDATE_PERIOD_MS      20u
 #define ARM_TOOL_SERVO2_TRACK_DEADBAND_DEG           0.5f
 #define ARM_TOOL_SERVO2_TRACK_TIME_MS                0u
 /* ID1上电初始化目标；不改变90deg机械中位及其位置标定。 */

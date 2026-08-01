@@ -1636,7 +1636,6 @@ Section Cross References
     arm.o(i.ArmSyncAllCurrentTargets) refers to arm.o(i.ArmCommandPose) for ArmCommandPose
     arm.o(i.ArmSyncAllCurrentTargets) refers to arm.o(.bss) for arm_runtime
     arm.o(i.ArmTask) refers to stm32f4xx_hal.o(i.HAL_GetTick) for HAL_GetTick
-    arm.o(i.ArmTask) refers to arm_tool.o(i.ArmToolTask) for ArmToolTask
     arm.o(i.ArmTask) refers to arm.o(i.ArmUpdateFeedback) for ArmUpdateFeedback
     arm.o(i.ArmTask) refers to arm.o(i.ArmProcessCommandMailbox) for ArmProcessCommandMailbox
     arm.o(i.ArmTask) refers to arm.o(i.ArmProcessFaultReset) for ArmProcessFaultReset
@@ -1649,6 +1648,7 @@ Section Cross References
     arm.o(i.ArmTask) refers to arm.o(i.ArmProcessBootSequence) for ArmProcessBootSequence
     arm.o(i.ArmTask) refers to arm_tool.o(i.ArmToolSetVerticalDownFromPitch) for ArmToolSetVerticalDownFromPitch
     arm.o(i.ArmTask) refers to arm_tool.o(i.ArmToolTrackServo2WorldYaw) for ArmToolTrackServo2WorldYaw
+    arm.o(i.ArmTask) refers to arm_tool.o(i.ArmToolTask) for ArmToolTask
     arm.o(i.ArmTask) refers to arm_tool.o(i.ArmToolGetTipFromWrist) for ArmToolGetTipFromWrist
     arm.o(i.ArmTask) refers to arm_tool.o(i.ArmToolGetState) for ArmToolGetState
     arm.o(i.ArmTask) refers to arm.o(i.ArmUpdateTeachAndKinematicsDebug) for ArmUpdateTeachAndKinematicsDebug

@@ -1858,7 +1858,6 @@ void ArmTask(void)
 {
     uint32_t now_ms = HAL_GetTick();
 
-    ArmToolTask(now_ms);
     ArmUpdateFeedback(now_ms);
     ArmProcessCommandMailbox(now_ms);
 #if ARM_BOOT_MODE == ARM_BOOT_MODE_DM_ENABLE_ONLY
@@ -1926,6 +1925,12 @@ arm_task_finish:
         (void)ArmToolTrackServo2WorldYaw(
             g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW], now_ms);
     }
+    /*
+     * 末端舵机统一放在本周期主臂反馈、轨迹和补偿目标更新之后处理：
+     * ID1竖直补偿与ID2底座/yaw补偿先在同一周期生成，再由
+     * ArmToolTask统一推进USART6事务并决定双舵机合帧或单帧发送。
+     */
+    ArmToolTask(now_ms);
     (void)ArmToolGetTipFromWrist(&g_arm_state.wrist_center,
         g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW],
         0.0f, &g_arm_state.tool_tip);

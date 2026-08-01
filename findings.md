@@ -1,5 +1,20 @@
 # Findings
 
+## 2026-08-01 - Same-cycle ID1/ID2 target generation
+
+- Previously `ArmToolTask()` ran at the start of `ArmTask()`. ID1's latest vertical target was converted into a pending frame there, but the current-cycle ID2 base/yaw target was not calculated until the common finish path, so the scheduler could dispatch ID1 before ID2 reached its slot.
+- `ArmToolTask()` now runs once in the common finish path, immediately after current feedback, trajectory work and both compensation target calculations. It first advances the previous USART6 transaction, then converts ID1's current target and dispatches against the ID2 target produced in the same arm cycle.
+- All `goto arm_task_finish` paths still reach the tool service. Initialization and fault states therefore continue to advance once per arm cycle; no ISR business logic, extra queue or second tool-task call was introduced.
+- The change affects scheduling order only. The 20 ms cadence, latest-target overwrite behavior, frame bytes, UART settings, mappings, directions, compensation formulas, deadbands, repeats and motion times are unchanged.
+- ARM GCC syntax checking passed for `arm.c` and `arm_tool.c`; scoped `git diff --check` passed with line-ending notices only. No Keil build, flash or hardware test was run.
+
+## 2026-08-01 - ID1/ID2 50 Hz cadence alignment
+
+- ID1 compensation already generates a latest target every 20 ms, while ID2 base/yaw tracking was limited to 30 ms. The mismatched cadence reduced opportunities for the latest-target scheduler to see both slots together.
+- ID2 tracking is now also 20 ms. This raises its maximum tracking refresh from about 33 Hz to 50 Hz and aligns it with ID1 without changing either compensation calculation.
+- At 9600 baud, a 13-byte two-servo frame occupies about 13.54 ms on an 8N1 UART. Including the existing 2 ms board gap gives about 15.54 ms, so a 20 ms combined-frame period retains roughly 4.46 ms scheduling margin.
+- No deadband, mapping, direction, scale, repeat count, motion time, UART or CubeMX setting changed. ARM GCC syntax checking and scoped `git diff --check` passed; no Keil build or hardware test was run.
+
 ## 2026-08-01 - Latest-target servo coalescing
 
 - `arm_tool` now owns one pending slot per servo. When USART6 is busy, a newer target replaces that servo's unsent target, so the bus does not replay obsolete intermediate compensation angles.

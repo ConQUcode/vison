@@ -1,5 +1,19 @@
 # Progress
 
+## 2026-08-01 - Phase 24 completed
+
+- Moved the single existing `ArmToolTask(now_ms)` call from the beginning of `ArmTask()` to the common finish path after ID1 and ID2 compensation targets are calculated.
+- Normal motion now presents both current-cycle targets to the latest-target scheduler before it selects a dual-servo or single-servo frame.
+- Verified that early fault/temperature branches converge on the same finish label, so asynchronous USART6 servicing is not skipped.
+- Preserved all established servo configuration and tracking parameters. ARM GCC syntax checks and scoped whitespace checks passed; no Keil build, flash or hardware test was run.
+
+## 2026-08-01 - Phase 23 completed
+
+- Changed only `ARM_TOOL_SERVO2_TRACK_UPDATE_PERIOD_MS` from 30 ms to 20 ms, matching the existing ID1 compensation cadence.
+- The expected result is faster ID2 base/yaw response and more opportunities for ID1/ID2 to use one `HSLServoMove2()` frame.
+- Kept the verified asynchronous USART6 transport, latest-target overwrite scheduler, mappings, compensation formulas, deadbands and motion-time settings unchanged.
+- ARM GCC syntax-only checking passed and scoped whitespace checking passed with only the existing LF/CRLF notice. No Keil build, firmware flash or hardware test was run.
+
 ## 2026-08-01 - Phase 22 completed
 
 - Added overwriteable latest-target slots for ID1/ID2 in `arm_tool`, including Watch-visible pending positions, overwrite counts and single/dual-frame counters.

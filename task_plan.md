@@ -212,6 +212,21 @@ motors in position-speed mode.
 - [completed] Clear unsent stale targets on tracking stop/fault and require a fully idle tool TX path before boot stabilization.
 - [completed] Run ARM GCC syntax checking and scoped `git diff --check`; leave Keil build, flash and hardware validation to the user.
 
+### Phase 23 - Align ID1/ID2 tracking cadence
+
+- [completed] Keep ID1's verified 20 ms tracking cadence unchanged.
+- [completed] Reduce only ID2 base/yaw compensation update period from 30 ms to 20 ms so both target generators run at 50 Hz and reach the dual-frame scheduler together more often.
+- [completed] Preserve USART6 9600 baud, the 2 ms board gap, deadbands, mappings, compensation formulas, repeat sends and motion-time parameters.
+- [completed] Run ARM GCC syntax checking and scoped `git diff --check`; leave Keil build, flash and hardware validation to the user.
+
+### Phase 24 - Generate and dispatch both servo targets in one arm cycle
+
+- [completed] Move the existing `ArmToolTask()` service point from the beginning of `ArmTask()` to after the current-cycle main-arm feedback, trajectory and ID1/ID2 compensation calculations.
+- [completed] Let ID1 vertical compensation and ID2 base/yaw compensation reach the same latest-target scheduler before it decides between `HSLServoMove2()` and single-servo fallback.
+- [completed] Preserve one `ArmToolTask()` call per arm cycle and retain initialization, repeat-send, fault, timeout and asynchronous USART6 ownership semantics.
+- [completed] Keep the Phase 23 20 ms cadence, USART6 settings, mappings, formulas, deadbands, repeat parameters and motion times unchanged.
+- [completed] Run ARM GCC syntax checking and scoped `git diff --check`; leave Keil build, flash and hardware validation to the user.
+
 ## Environment Notes
 
 - PowerShell startup fails with `8009001d`; native `cmd.exe` is used.

@@ -3,7 +3,7 @@
 <title>Static Call Graph - [Engineer\Engineer.axf]</title></head>
 <body><HR>
 <H1>Static Call Graph for image Engineer\Engineer.axf</H1><HR>
-<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060960: Last Updated: Sat Aug 01 08:02:33 2026
+<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060960: Last Updated: Sat Aug 01 08:11:35 2026
 <BR><P>
 <H3>Maximum Stack Usage =        700 bytes + Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)</H3><H3>
 Call chain for Maximum Stack Depth:</H3>
@@ -590,13 +590,13 @@ Global Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 8<LI>Call Chain = __aeabi_memcpy4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[271]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;MX_FREERTOS_Init
-<LI><a href="#[a4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__rt_memcpy
-<LI><a href="#[13d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessCommandMailbox
 <LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
 <LI><a href="#[fb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetToolTipTargetVerticalDown
 <LI><a href="#[fc]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetCartesianTarget
 <LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
 <LI><a href="#[10f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmGetHostStatus
+<LI><a href="#[13d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessCommandMailbox
+<LI><a href="#[a4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__rt_memcpy
 </UL>
 
 <P><STRONG><a name="[33e]"></a>__aeabi_memcpy8</STRONG> (Thumb, 0 bytes, Stack size 8 bytes, rt_memcpy_w.o(.text), UNUSED)
@@ -638,9 +638,18 @@ Global Symbols
 <LI><a href="#[275]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;MX_TIM10_Init
 <LI><a href="#[273]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;MX_GPIO_Init
 <LI><a href="#[28c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;SystemClock_Config
+<LI><a href="#[183]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFailActive
+<LI><a href="#[d4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSolveOnlineIK
+<LI><a href="#[d9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunRealtime
+<LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
+<LI><a href="#[118]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryInit
+<LI><a href="#[117]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolInit
+<LI><a href="#[fb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetToolTipTargetVerticalDown
+<LI><a href="#[fc]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetCartesianTarget
+<LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
+<LI><a href="#[fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinear
+<LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
 <LI><a href="#[1db]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_UART_MspInit
-<LI><a href="#[14]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CDC_Init
-<LI><a href="#[219]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_MspInit
 <LI><a href="#[114]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorInit
 <LI><a href="#[250]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_UARTEx_RxEventCallback
 <LI><a href="#[261]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoFindStatus
@@ -653,17 +662,8 @@ Global Symbols
 <LI><a href="#[113]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInit
 <LI><a href="#[18f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;BuzzerInit
 <LI><a href="#[160]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoInit
-<LI><a href="#[183]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFailActive
-<LI><a href="#[d4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSolveOnlineIK
-<LI><a href="#[d9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunRealtime
-<LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
-<LI><a href="#[118]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryInit
-<LI><a href="#[117]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolInit
-<LI><a href="#[fb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetToolTipTargetVerticalDown
-<LI><a href="#[fc]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetCartesianTarget
-<LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
-<LI><a href="#[fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinear
-<LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
+<LI><a href="#[14]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CDC_Init
+<LI><a href="#[219]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_MspInit
 <LI><a href="#[175]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeOnTaskStatus
 <LI><a href="#[17a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSubmitTipMove
 <LI><a href="#[188]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSubmitServo2Reset
@@ -846,8 +846,7 @@ Global Symbols
 </UL>
 <BR>[Calls]<UL><LI><a href="#[bf]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmJointPoseWithinSoftLimits
 </UL>
-<BR>[Called By]<UL><LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
-<LI><a href="#[d4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSolveOnlineIK
+<BR>[Called By]<UL><LI><a href="#[d4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSolveOnlineIK
 <LI><a href="#[d9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunRealtime
 <LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
 <LI><a href="#[103]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySetJointDirect
@@ -857,6 +856,7 @@ Global Symbols
 <LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
 <LI><a href="#[fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinear
 <LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
+<LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
 </UL>
 
 <P><STRONG><a name="[c0]"></a>ArmBeginJointMove</STRONG> (Thumb, 68 bytes, Stack size 16 bytes, arm.o(i.ArmBeginJointMove))
@@ -891,17 +891,17 @@ Global Symbols
 <P><STRONG><a name="[10b]"></a>ArmForwardKinematics3DOF</STRONG> (Thumb, 212 bytes, Stack size 48 bytes, arm_kinematics.o(i.ArmForwardKinematics3DOF))
 <BR><BR>[Stack]<UL><LI>Max Depth = 84<LI>Call Chain = ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
-<BR>[Calls]<UL><LI><a href="#[10e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sinf
+<BR>[Calls]<UL><LI><a href="#[10c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmElbowMechanicalToMathDeg
+<LI><a href="#[10e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sinf
 <LI><a href="#[10d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_cosf
-<LI><a href="#[10c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmElbowMechanicalToMathDeg
 </UL>
-<BR>[Called By]<UL><LI><a href="#[156]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateTeachAndKinematicsDebug
-<LI><a href="#[153]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
-<LI><a href="#[103]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySetJointDirect
+<BR>[Called By]<UL><LI><a href="#[103]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySetJointDirect
 <LI><a href="#[104]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryMoveJoint
 <LI><a href="#[fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinear
 <LI><a href="#[115]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmKinematicsSelfTest
 <LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
+<LI><a href="#[156]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateTeachAndKinematicsDebug
+<LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
 </UL>
 
 <P><STRONG><a name="[10f]"></a>ArmGetHostStatus</STRONG> (Thumb, 38 bytes, Stack size 16 bytes, arm.o(i.ArmGetHostStatus))
@@ -920,13 +920,13 @@ Global Symbols
 <LI>Call Chain = ArmInit &rArr; ArmLatchFault &rArr; ArmDisableAll &rArr; DMMotorDisable &rArr; DMMotorSendModeCommand &rArr; DMMotorTransmit &rArr; CANTransmit &rArr; DWT_GetTimeline_ms &rArr; DWT_SysTimeUpdate &rArr; __aeabi_uldivmod
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[114]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorInit
-<LI><a href="#[f3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmLatchFault
 <LI><a href="#[116]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmWristInit
 <LI><a href="#[118]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryInit
 <LI><a href="#[117]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolInit
 <LI><a href="#[115]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmKinematicsSelfTest
+<LI><a href="#[114]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorInit
+<LI><a href="#[f3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmLatchFault
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[2d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;all_init_Task
 </UL>
@@ -934,14 +934,7 @@ Global Symbols
 <P><STRONG><a name="[de]"></a>ArmInverseKinematics3DOF</STRONG> (Thumb, 978 bytes, Stack size 112 bytes, arm_kinematics.o(i.ArmInverseKinematics3DOF))
 <BR><BR>[Stack]<UL><LI>Max Depth = 196<LI>Call Chain = ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
-<BR>[Calls]<UL><LI><a href="#[c6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_fmaxf
-<LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
-<LI><a href="#[10e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sinf
-<LI><a href="#[10d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_cosf
-<LI><a href="#[f6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_atan2f
-<LI><a href="#[11c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_acosf
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[119]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
+<BR>[Calls]<UL><LI><a href="#[119]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 <LI><a href="#[11a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmKinematicsWrapTo180
 <LI><a href="#[11b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmKinematicsClamp
 <LI><a href="#[11e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmKinematicsCandidateScore
@@ -949,15 +942,22 @@ Global Symbols
 <LI><a href="#[bf]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmJointPoseWithinSoftLimits
 <LI><a href="#[10b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmForwardKinematics3DOF
 <LI><a href="#[be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAutoPoseIsSafe
+<LI><a href="#[c6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_fmaxf
+<LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
+<LI><a href="#[10e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sinf
+<LI><a href="#[10d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_cosf
+<LI><a href="#[f6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_atan2f
+<LI><a href="#[11c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_acosf
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
-<BR>[Called By]<UL><LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
-<LI><a href="#[d4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSolveOnlineIK
+<BR>[Called By]<UL><LI><a href="#[d4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSolveOnlineIK
 <LI><a href="#[d9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunRealtime
 <LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
 <LI><a href="#[fb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetToolTipTargetVerticalDown
 <LI><a href="#[fc]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetCartesianTarget
 <LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
 <LI><a href="#[fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinear
+<LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
 </UL>
 
 <P><STRONG><a name="[bf]"></a>ArmJointPoseWithinSoftLimits</STRONG> (Thumb, 174 bytes, Stack size 8 bytes, arm_kinematics.o(i.ArmJointPoseWithinSoftLimits))
@@ -965,9 +965,7 @@ Global Symbols
 </UL>
 <BR>[Calls]<UL><LI><a href="#[119]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 </UL>
-<BR>[Called By]<UL><LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
-<LI><a href="#[102]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteJointCommand
-<LI><a href="#[d4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSolveOnlineIK
+<BR>[Called By]<UL><LI><a href="#[d4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSolveOnlineIK
 <LI><a href="#[d9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunRealtime
 <LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
 <LI><a href="#[103]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySetJointDirect
@@ -980,17 +978,19 @@ Global Symbols
 <LI><a href="#[be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAutoPoseIsSafe
 <LI><a href="#[d5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateJointReference
 <LI><a href="#[c0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmBeginJointMove
+<LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
+<LI><a href="#[102]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteJointCommand
 </UL>
 
 <P><STRONG><a name="[115]"></a>ArmKinematicsSelfTest</STRONG> (Thumb, 180 bytes, Stack size 40 bytes, arm_kinematics.o(i.ArmKinematicsSelfTest))
 <BR><BR>[Stack]<UL><LI>Max Depth = 124<LI>Call Chain = ArmKinematicsSelfTest &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
-<BR>[Calls]<UL><LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
-<LI><a href="#[119]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
+<BR>[Calls]<UL><LI><a href="#[119]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 <LI><a href="#[10b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmForwardKinematics3DOF
+<LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
 </UL>
-<BR>[Called By]<UL><LI><a href="#[113]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInit
-<LI><a href="#[118]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryInit
+<BR>[Called By]<UL><LI><a href="#[118]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryInit
+<LI><a href="#[113]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInit
 </UL>
 
 <P><STRONG><a name="[129]"></a>ArmMotorRadToJointDeg</STRONG> (Thumb, 76 bytes, Stack size 16 bytes, arm.o(i.ArmMotorRadToJointDeg))
@@ -1000,28 +1000,26 @@ Global Symbols
 <LI><a href="#[12b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDegWithShoulder
 <LI><a href="#[12a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDegBase
 </UL>
-<BR>[Called By]<UL><LI><a href="#[153]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
+<BR>[Called By]<UL><LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
 </UL>
 
 <P><STRONG><a name="[12c]"></a>ArmMotorVelocityToJointDegS</STRONG> (Thumb, 168 bytes, Stack size 16 bytes, arm.o(i.ArmMotorVelocityToJointDegS))
 <BR><BR>[Stack]<UL><LI>Max Depth = 16 + In Cycle
 <LI>Call Chain = ArmMotorVelocityToJointDegS &rArr;  ArmMotorVelocityToJointDegS (Cycle)
 </UL>
-<BR>[Calls]<UL><LI><a href="#[ba]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
+<BR>[Calls]<UL><LI><a href="#[12c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorVelocityToJointDegS
+<LI><a href="#[ba]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 <LI><a href="#[120]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAxisIsValid
-<LI><a href="#[12c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorVelocityToJointDegS
 </UL>
-<BR>[Called By]<UL><LI><a href="#[153]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
+<BR>[Called By]<UL><LI><a href="#[12c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorVelocityToJointDegS
+<LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
 <LI><a href="#[130]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmPoseArrived
-<LI><a href="#[12c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorVelocityToJointDegS
 </UL>
 
 <P><STRONG><a name="[fe]"></a>ArmMoveLinear</STRONG> (Thumb, 688 bytes, Stack size 112 bytes, arm_trajectory.o(i.ArmMoveLinear))
 <BR><BR>[Stack]<UL><LI>Max Depth = 372<LI>Call Chain = ArmMoveLinear &rArr; ArmSetCartesianTarget &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[12e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_ceilf
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 <LI><a href="#[e0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 <LI><a href="#[e3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianStartPreparedTrajectory
 <LI><a href="#[e2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRecordRejected
@@ -1035,6 +1033,8 @@ Global Symbols
 <LI><a href="#[10b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmForwardKinematics3DOF
 <LI><a href="#[be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAutoPoseIsSafe
 <LI><a href="#[c0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmBeginJointMove
+<LI><a href="#[12e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_ceilf
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[f4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteCartesianCommand
 </UL>
@@ -1043,8 +1043,6 @@ Global Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 492<LI>Call Chain = ArmMoveLinearToolTipVerticalDown &rArr; ArmSetToolTipTargetVerticalDown &rArr; ArmSetCartesianTarget &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[12e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_ceilf
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 <LI><a href="#[e0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 <LI><a href="#[df]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianToolVerticalAllowedForQ
 <LI><a href="#[e3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianStartPreparedTrajectory
@@ -1060,6 +1058,8 @@ Global Symbols
 <LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
 <LI><a href="#[be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAutoPoseIsSafe
 <LI><a href="#[c0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmBeginJointMove
+<LI><a href="#[12e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_ceilf
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
 <LI><a href="#[f4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteCartesianCommand
@@ -1073,8 +1073,6 @@ Global Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 260<LI>Call Chain = ArmSetCartesianTarget &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[a5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy4
 <LI><a href="#[e0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 <LI><a href="#[d8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSetState
 <LI><a href="#[e2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRecordRejected
@@ -1083,10 +1081,12 @@ Global Symbols
 <LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
 <LI><a href="#[be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAutoPoseIsSafe
 <LI><a href="#[d5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateJointReference
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
+<LI><a href="#[a5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy4
 </UL>
-<BR>[Called By]<UL><LI><a href="#[f4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteCartesianCommand
-<LI><a href="#[fb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetToolTipTargetVerticalDown
+<BR>[Called By]<UL><LI><a href="#[fb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetToolTipTargetVerticalDown
 <LI><a href="#[fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinear
+<LI><a href="#[f4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteCartesianCommand
 </UL>
 
 <P><STRONG><a name="[149]"></a>ArmSetJointTargetDeg</STRONG> (Thumb, 58 bytes, Stack size 32 bytes, arm.o(i.ArmSetJointTargetDeg))
@@ -1101,9 +1101,7 @@ Global Symbols
 <P><STRONG><a name="[fb]"></a>ArmSetToolTipTargetVerticalDown</STRONG> (Thumb, 328 bytes, Stack size 80 bytes, arm_trajectory.o(i.ArmSetToolTipTargetVerticalDown))
 <BR><BR>[Stack]<UL><LI>Max Depth = 340<LI>Call Chain = ArmSetToolTipTargetVerticalDown &rArr; ArmSetCartesianTarget &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
-<BR>[Calls]<UL><LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[a5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy4
-<LI><a href="#[e0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
+<BR>[Calls]<UL><LI><a href="#[e0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 <LI><a href="#[df]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianToolVerticalAllowedForQ
 <LI><a href="#[d6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSmallLinkPitchDeg
 <LI><a href="#[e2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRecordRejected
@@ -1113,9 +1111,11 @@ Global Symbols
 <LI><a href="#[bf]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmJointPoseWithinSoftLimits
 <LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
 <LI><a href="#[be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAutoPoseIsSafe
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
+<LI><a href="#[a5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy4
 </UL>
-<BR>[Called By]<UL><LI><a href="#[f4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteCartesianCommand
-<LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
+<BR>[Called By]<UL><LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
+<LI><a href="#[f4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteCartesianCommand
 </UL>
 
 <P><STRONG><a name="[140]"></a>ArmStopRealtimeTracking</STRONG> (Thumb, 8 bytes, Stack size 8 bytes, arm.o(i.ArmStopRealtimeTracking))
@@ -1127,17 +1127,17 @@ Global Symbols
 </UL>
 
 <P><STRONG><a name="[14b]"></a>ArmSubmitCommand</STRONG> (Thumb, 402 bytes, Stack size 16 bytes, arm.o(i.ArmSubmitCommand))
-<BR><BR>[Stack]<UL><LI>Max Depth = 24<LI>Call Chain = ArmSubmitCommand &rArr; __aeabi_memcpy4
+<BR><BR>[Stack]<UL><LI>Max Depth = 24<LI>Call Chain = ArmSubmitCommand &rArr; ArmToolReadyForMotion
 </UL>
-<BR>[Calls]<UL><LI><a href="#[a5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy4
+<BR>[Calls]<UL><LI><a href="#[14f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryRealtimeActive
+<LI><a href="#[f9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryIsBusy
 <LI><a href="#[f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolReadyForMotion
 <LI><a href="#[14e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolCommandAllowedBeforeReady
 <LI><a href="#[f7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTemperatureAtOrAbove
 <LI><a href="#[14d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmPriorityRequestPending
 <LI><a href="#[14c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCommandTypeIsValid
 <LI><a href="#[eb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCommandIsDuplicate
-<LI><a href="#[14f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryRealtimeActive
-<LI><a href="#[f9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryIsBusy
+<LI><a href="#[a5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[183]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFailActive
 <LI><a href="#[175]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeOnTaskStatus
@@ -1150,23 +1150,23 @@ Global Symbols
 <LI>Call Chain = ArmTask &rArr; ArmProcessCommandMailbox &rArr; ArmExecuteCartesianCommand &rArr; ArmMoveLinearToolTipVerticalDown &rArr; ArmSetToolTipTargetVerticalDown &rArr; ArmSetCartesianTarget &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
+<LI><a href="#[c2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryCancel
+<LI><a href="#[154]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTrackServo2WorldYaw
+<LI><a href="#[155]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTask
+<LI><a href="#[d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetVerticalDownFromPitch
+<LI><a href="#[108]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetMagnet
+<LI><a href="#[12f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetTipFromWrist
+<LI><a href="#[13a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetState
 <LI><a href="#[156]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateTeachAndKinematicsDebug
 <LI><a href="#[157]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateHostStatus
-<LI><a href="#[153]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
+<LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
 <LI><a href="#[f7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTemperatureAtOrAbove
 <LI><a href="#[142]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessFaultReset
 <LI><a href="#[13d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessCommandMailbox
 <LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
 <LI><a href="#[f3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmLatchFault
-<LI><a href="#[154]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAnyTxFault
+<LI><a href="#[153]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAnyTxFault
 <LI><a href="#[bd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAnyPreviouslySeenMotorOffline
-<LI><a href="#[c2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryCancel
-<LI><a href="#[155]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTrackServo2WorldYaw
-<LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTask
-<LI><a href="#[d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetVerticalDownFromPitch
-<LI><a href="#[108]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetMagnet
-<LI><a href="#[12f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetTipFromWrist
-<LI><a href="#[13a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetState
 </UL>
 <BR>[Called By]<UL><LI><a href="#[1ac]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;all_cmd_Task
 </UL>
@@ -1177,7 +1177,7 @@ Global Symbols
 <BR>[Calls]<UL><LI><a href="#[159]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 </UL>
 <BR>[Called By]<UL><LI><a href="#[162]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSendServo
-<LI><a href="#[155]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTrackServo2WorldYaw
+<LI><a href="#[154]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTrackServo2WorldYaw
 <LI><a href="#[117]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolInit
 </UL>
 
@@ -1208,30 +1208,30 @@ Global Symbols
 <P><STRONG><a name="[12f]"></a>ArmToolGetTipFromWrist</STRONG> (Thumb, 292 bytes, Stack size 48 bytes, arm_tool.o(i.ArmToolGetTipFromWrist))
 <BR><BR>[Stack]<UL><LI>Max Depth = 84<LI>Call Chain = ArmToolGetTipFromWrist &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
-<BR>[Calls]<UL><LI><a href="#[10e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sinf
+<BR>[Calls]<UL><LI><a href="#[159]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
+<LI><a href="#[10e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sinf
 <LI><a href="#[10d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_cosf
-<LI><a href="#[159]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 </UL>
-<BR>[Called By]<UL><LI><a href="#[157]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateHostStatus
-<LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
-<LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
+<BR>[Called By]<UL><LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
 <LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
+<LI><a href="#[157]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateHostStatus
+<LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
 </UL>
 
 <P><STRONG><a name="[dc]"></a>ArmToolGetWristFromTipVerticalDown</STRONG> (Thumb, 260 bytes, Stack size 24 bytes, arm_tool.o(i.ArmToolGetWristFromTipVerticalDown))
 <BR><BR>[Stack]<UL><LI>Max Depth = 48<LI>Call Chain = ArmToolGetWristFromTipVerticalDown &rArr; __hardfp_sqrtf &rArr; __set_errno
 </UL>
-<BR>[Calls]<UL><LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
-<LI><a href="#[159]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
+<BR>[Calls]<UL><LI><a href="#[159]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
+<LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
 </UL>
-<BR>[Called By]<UL><LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
-<LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
-<LI><a href="#[e3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianStartPreparedTrajectory
+<BR>[Called By]<UL><LI><a href="#[e3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianStartPreparedTrajectory
 <LI><a href="#[d4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSolveOnlineIK
 <LI><a href="#[d9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunRealtime
 <LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
 <LI><a href="#[fb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetToolTipTargetVerticalDown
 <LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
+<LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
+<LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
 </UL>
 
 <P><STRONG><a name="[117]"></a>ArmToolInit</STRONG> (Thumb, 220 bytes, Stack size 8 bytes, arm_tool.o(i.ArmToolInit))
@@ -1239,9 +1239,9 @@ Global Symbols
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
 <LI><a href="#[161]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GPIO_WritePin
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[160]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoInit
 <LI><a href="#[158]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolAngleDegToPos
+<LI><a href="#[160]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoInit
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[113]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInit
 </UL>
@@ -1252,10 +1252,10 @@ Global Symbols
 <BR>[Calls]<UL><LI><a href="#[165]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;fabsf
 <LI><a href="#[159]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 </UL>
-<BR>[Called By]<UL><LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
-<LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
-<LI><a href="#[df]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianToolVerticalAllowedForQ
+<BR>[Called By]<UL><LI><a href="#[df]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianToolVerticalAllowedForQ
 <LI><a href="#[d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetVerticalDownFromPitch
+<LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
+<LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
 </UL>
 
 <P><STRONG><a name="[e6]"></a>ArmToolServo1AngleValid</STRONG> (Thumb, 26 bytes, Stack size 16 bytes, arm_tool.o(i.ArmToolServo1AngleValid))
@@ -1263,9 +1263,9 @@ Global Symbols
 </UL>
 <BR>[Calls]<UL><LI><a href="#[164]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServoAngleFiniteAndInRange
 </UL>
-<BR>[Called By]<UL><LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
-<LI><a href="#[df]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianToolVerticalAllowedForQ
+<BR>[Called By]<UL><LI><a href="#[df]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianToolVerticalAllowedForQ
 <LI><a href="#[d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetVerticalDownFromPitch
+<LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
 </UL>
 
 <P><STRONG><a name="[fa]"></a>ArmToolServo2WorldYawValidForQ1</STRONG> (Thumb, 74 bytes, Stack size 24 bytes, arm_tool.o(i.ArmToolServo2WorldYawValidForQ1))
@@ -1286,12 +1286,12 @@ Global Symbols
 <BR>[Calls]<UL><LI><a href="#[161]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GPIO_WritePin
 </UL>
 <BR>[Called By]<UL><LI><a href="#[17d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeTask
+<LI><a href="#[174]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbRejectActive
+<LI><a href="#[183]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFailActive
 <LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
 <LI><a href="#[f3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmLatchFault
 <LI><a href="#[107]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteToolCommand
 <LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
-<LI><a href="#[174]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbRejectActive
-<LI><a href="#[183]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFailActive
 </UL>
 
 <P><STRONG><a name="[109]"></a>ArmToolSetServo1Angle</STRONG> (Thumb, 42 bytes, Stack size 16 bytes, arm_tool.o(i.ArmToolSetServo1Angle))
@@ -1329,13 +1329,13 @@ Global Symbols
 <LI><a href="#[e6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo1AngleValid
 <LI><a href="#[e5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo1AngleForVerticalDown
 </UL>
-<BR>[Called By]<UL><LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
+<BR>[Called By]<UL><LI><a href="#[d9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunRealtime
+<LI><a href="#[d3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunPreparedTrajectory
+<LI><a href="#[fb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetToolTipTargetVerticalDown
+<LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
 <LI><a href="#[131]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessAutoInit
 <LI><a href="#[107]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteToolCommand
 <LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
-<LI><a href="#[d9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunRealtime
-<LI><a href="#[d3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunPreparedTrajectory
-<LI><a href="#[fb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetToolTipTargetVerticalDown
 </UL>
 
 <P><STRONG><a name="[127]"></a>ArmToolStopServo1Tracking</STRONG> (Thumb, 26 bytes, Stack size 8 bytes, arm_tool.o(i.ArmToolStopServo1Tracking))
@@ -1347,18 +1347,18 @@ Global Symbols
 <LI><a href="#[f3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmLatchFault
 </UL>
 
-<P><STRONG><a name="[152]"></a>ArmToolTask</STRONG> (Thumb, 568 bytes, Stack size 32 bytes, arm_tool.o(i.ArmToolTask))
+<P><STRONG><a name="[155]"></a>ArmToolTask</STRONG> (Thumb, 568 bytes, Stack size 32 bytes, arm_tool.o(i.ArmToolTask))
 <BR><BR>[Stack]<UL><LI>Max Depth = 172<LI>Call Chain = ArmToolTask &rArr; HSLServoTask &rArr; HSLServoStartReceive &rArr; HAL_UART_Receive_DMA &rArr; UART_Start_Receive_DMA &rArr; HAL_DMA_Start_IT &rArr; DMA_SetConfig
 </UL>
-<BR>[Calls]<UL><LI><a href="#[166]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoTask
-<LI><a href="#[165]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;fabsf
+<BR>[Calls]<UL><LI><a href="#[165]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;fabsf
 <LI><a href="#[162]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSendServo
 <LI><a href="#[15b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolDispatchPending
+<LI><a href="#[166]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoTask
 </UL>
 <BR>[Called By]<UL><LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
 </UL>
 
-<P><STRONG><a name="[155]"></a>ArmToolTrackServo2WorldYaw</STRONG> (Thumb, 260 bytes, Stack size 32 bytes, arm_tool.o(i.ArmToolTrackServo2WorldYaw))
+<P><STRONG><a name="[154]"></a>ArmToolTrackServo2WorldYaw</STRONG> (Thumb, 260 bytes, Stack size 32 bytes, arm_tool.o(i.ArmToolTrackServo2WorldYaw))
 <BR><BR>[Stack]<UL><LI>Max Depth = 120<LI>Call Chain = ArmToolTrackServo2WorldYaw &rArr; ArmToolSendServo &rArr; ArmToolAngleDegToPos
 </UL>
 <BR>[Calls]<UL><LI><a href="#[158]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolAngleDegToPos
@@ -1382,32 +1382,32 @@ Global Symbols
 <LI><a href="#[12d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianMotorsReady
 <LI><a href="#[d5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateJointReference
 </UL>
-<BR>[Called By]<UL><LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
+<BR>[Called By]<UL><LI><a href="#[14a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryStopRealtime
+<LI><a href="#[c1]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCancelMotion
+<LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
 <LI><a href="#[131]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessAutoInit
 <LI><a href="#[f4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteCartesianCommand
 <LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
-<LI><a href="#[14a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryStopRealtime
-<LI><a href="#[c1]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCancelMotion
 </UL>
 
 <P><STRONG><a name="[118]"></a>ArmTrajectoryInit</STRONG> (Thumb, 64 bytes, Stack size 8 bytes, arm_trajectory.o(i.ArmTrajectoryInit))
 <BR><BR>[Stack]<UL><LI>Max Depth = 132<LI>Call Chain = ArmTrajectoryInit &rArr; ArmKinematicsSelfTest &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 <LI><a href="#[115]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmKinematicsSelfTest
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[113]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInit
 </UL>
 
 <P><STRONG><a name="[f9]"></a>ArmTrajectoryIsBusy</STRONG> (Thumb, 46 bytes, Stack size 0 bytes, arm_trajectory.o(i.ArmTrajectoryIsBusy))
-<BR><BR>[Called By]<UL><LI><a href="#[157]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateHostStatus
+<BR><BR>[Called By]<UL><LI><a href="#[103]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySetJointDirect
+<LI><a href="#[104]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryMoveJoint
+<LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
+<LI><a href="#[157]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateHostStatus
 <LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
 <LI><a href="#[102]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteJointCommand
 <LI><a href="#[f4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteCartesianCommand
-<LI><a href="#[103]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySetJointDirect
-<LI><a href="#[104]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryMoveJoint
-<LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
 </UL>
 
 <P><STRONG><a name="[104]"></a>ArmTrajectoryMoveJoint</STRONG> (Thumb, 206 bytes, Stack size 32 bytes, arm_trajectory.o(i.ArmTrajectoryMoveJoint))
@@ -1427,8 +1427,8 @@ Global Symbols
 </UL>
 
 <P><STRONG><a name="[14f]"></a>ArmTrajectoryRealtimeActive</STRONG> (Thumb, 6 bytes, Stack size 0 bytes, arm_trajectory.o(i.ArmTrajectoryRealtimeActive))
-<BR><BR>[Called By]<UL><LI><a href="#[157]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateHostStatus
-<LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
+<BR><BR>[Called By]<UL><LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
+<LI><a href="#[157]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateHostStatus
 </UL>
 
 <P><STRONG><a name="[103]"></a>ArmTrajectorySetJointDirect</STRONG> (Thumb, 200 bytes, Stack size 24 bytes, arm_trajectory.o(i.ArmTrajectorySetJointDirect))
@@ -1458,8 +1458,6 @@ Global Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 284<LI>Call Chain = ArmTrajectorySubmitRealtimeTarget &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[a5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy4
 <LI><a href="#[e0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 <LI><a href="#[df]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianToolVerticalAllowedForQ
 <LI><a href="#[d8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSetState
@@ -1473,6 +1471,8 @@ Global Symbols
 <LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
 <LI><a href="#[be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAutoPoseIsSafe
 <LI><a href="#[c0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmBeginJointMove
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
+<LI><a href="#[a5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[105]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteRealtimeTarget
 </UL>
@@ -1497,8 +1497,8 @@ Global Symbols
 <P><STRONG><a name="[d5]"></a>ArmUpdateJointReference</STRONG> (Thumb, 80 bytes, Stack size 16 bytes, arm.o(i.ArmUpdateJointReference))
 <BR><BR>[Stack]<UL><LI>Max Depth = 168<LI>Call Chain = ArmUpdateJointReference &rArr; ArmCommandPose &rArr; ArmSetJointCommandForPose &rArr; ArmJointDegToMotorRadForPose &rArr; ArmJointDegToMotorRadWithShoulder &rArr; ArmJointDegToMotorRadBase
 </UL>
-<BR>[Calls]<UL><LI><a href="#[ed]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCommandPose
-<LI><a href="#[bf]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmJointPoseWithinSoftLimits
+<BR>[Calls]<UL><LI><a href="#[bf]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmJointPoseWithinSoftLimits
+<LI><a href="#[ed]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCommandPose
 </UL>
 <BR>[Called By]<UL><LI><a href="#[d9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunRealtime
 <LI><a href="#[d3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunPreparedTrajectory
@@ -1539,7 +1539,6 @@ Global Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 520<LI>Call Chain = ArmUsbBridgeOnTaskStatus &rArr; ArmUsbRejectActive &rArr; ArmUsbSendMotionStatus &rArr; ArmGetHostStatus &rArr; __aeabi_memcpy4
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 <LI><a href="#[176]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSendCallbackStatus
 <LI><a href="#[174]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbRejectActive
 <LI><a href="#[177]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbNextInternalCommandId
@@ -1548,6 +1547,7 @@ Global Symbols
 <LI><a href="#[178]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbClearActiveTracking
 <LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
 <LI><a href="#[10f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmGetHostStatus
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 <LI><a href="#[17a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSubmitTipMove
 <LI><a href="#[16f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbStartBusiness
 <LI><a href="#[16a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSetState
@@ -1567,11 +1567,7 @@ Global Symbols
 <P><STRONG><a name="[17d]"></a>ArmUsbBridgeTask</STRONG> (Thumb, 1386 bytes, Stack size 208 bytes, arm_usb_bridge.o(i.ArmUsbBridgeTask))
 <BR><BR>[Stack]<UL><LI>Max Depth = 512<LI>Call Chain = ArmUsbBridgeTask &rArr; ArmUsbFailActive &rArr; ArmUsbSendMotionStatus &rArr; ArmGetHostStatus &rArr; __aeabi_memcpy4
 </UL>
-<BR>[Calls]<UL><LI><a href="#[180]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;protocol_link_is_online
-<LI><a href="#[17e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;protocol_get_debug
-<LI><a href="#[17f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;protocol_connection_ready
-<LI><a href="#[189]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;BuzzerStart
-<LI><a href="#[174]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbRejectActive
+<BR>[Calls]<UL><LI><a href="#[174]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbRejectActive
 <LI><a href="#[181]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFillCurrentFromHost
 <LI><a href="#[182]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFaultFromHost
 <LI><a href="#[173]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFaultFromCommandResult
@@ -1582,6 +1578,10 @@ Global Symbols
 <LI><a href="#[184]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbCommandCompleted
 <LI><a href="#[108]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetMagnet
 <LI><a href="#[10f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmGetHostStatus
+<LI><a href="#[180]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;protocol_link_is_online
+<LI><a href="#[17e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;protocol_get_debug
+<LI><a href="#[17f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;protocol_connection_ready
+<LI><a href="#[189]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;BuzzerStart
 <LI><a href="#[17a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSubmitTipMove
 <LI><a href="#[172]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSubmitTargetMoveFinal
 <LI><a href="#[188]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSubmitServo2Reset
@@ -1601,8 +1601,8 @@ Global Symbols
 <P><STRONG><a name="[18f]"></a>BuzzerInit</STRONG> (Thumb, 28 bytes, Stack size 8 bytes, buzzer.o(i.BuzzerInit))
 <BR><BR>[Stack]<UL><LI>Max Depth = 32<LI>Call Chain = BuzzerInit &rArr; HAL_TIM_PWM_Stop &rArr; TIM_CCxChannelCmd
 </UL>
-<BR>[Calls]<UL><LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[190]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_TIM_PWM_Stop
+<BR>[Calls]<UL><LI><a href="#[190]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_TIM_PWM_Stop
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[2d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;all_init_Task
 </UL>
@@ -1666,10 +1666,10 @@ Global Symbols
 <P><STRONG><a name="[19b]"></a>CANRegister</STRONG> (Thumb, 156 bytes, Stack size 16 bytes, bsp_can.o(i.CANRegister))
 <BR><BR>[Stack]<UL><LI>Max Depth = 84<LI>Call Chain = CANRegister &rArr; CANAddFilter &rArr; HAL_CAN_ConfigFilter
 </UL>
-<BR>[Calls]<UL><LI><a href="#[19d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr
-<LI><a href="#[a0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;malloc
-<LI><a href="#[19c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;CANServiceInit
+<BR>[Calls]<UL><LI><a href="#[19c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;CANServiceInit
 <LI><a href="#[195]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;CANAddFilter
+<LI><a href="#[19d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr
+<LI><a href="#[a0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;malloc
 </UL>
 <BR>[Called By]<UL><LI><a href="#[114]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorInit
 </UL>
@@ -1808,12 +1808,12 @@ Global Symbols
 <P><STRONG><a name="[114]"></a>DMMotorInit</STRONG> (Thumb, 180 bytes, Stack size 40 bytes, dmmotor.o(i.DMMotorInit))
 <BR><BR>[Stack]<UL><LI>Max Depth = 124<LI>Call Chain = DMMotorInit &rArr; CANRegister &rArr; CANAddFilter &rArr; HAL_CAN_ConfigFilter
 </UL>
-<BR>[Calls]<UL><LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[a3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;free
-<LI><a href="#[a0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;malloc
-<LI><a href="#[1b7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorConfigIsValid
+<BR>[Calls]<UL><LI><a href="#[1b7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorConfigIsValid
 <LI><a href="#[1b8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;CANSetDLC
 <LI><a href="#[19b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;CANRegister
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
+<LI><a href="#[a3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;free
+<LI><a href="#[a0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;malloc
 </UL>
 <BR>[Called By]<UL><LI><a href="#[113]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInit
 </UL>
@@ -1824,13 +1824,13 @@ Global Symbols
 <BR>[Calls]<UL><LI><a href="#[1b9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorFeedbackValid
 </UL>
 <BR>[Called By]<UL><LI><a href="#[1b2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorControl
-<LI><a href="#[153]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
+<LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
 <LI><a href="#[bd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAnyPreviouslySeenMotorOffline
 <LI><a href="#[b8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllFeedbackValid
 </UL>
 
 <P><STRONG><a name="[167]"></a>DMMotorModeConfirmed</STRONG> (Thumb, 32 bytes, Stack size 0 bytes, dmmotor.o(i.DMMotorModeConfirmed))
-<BR><BR>[Called By]<UL><LI><a href="#[153]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
+<BR><BR>[Called By]<UL><LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
 </UL>
 
 <P><STRONG><a name="[147]"></a>DMMotorResetSoftwareFault</STRONG> (Thumb, 36 bytes, Stack size 0 bytes, dmmotor.o(i.DMMotorResetSoftwareFault))
@@ -1872,8 +1872,8 @@ Global Symbols
 <P><STRONG><a name="[1bc]"></a>DWT_SysTimeUpdate</STRONG> (Thumb, 168 bytes, Stack size 16 bytes, bsp_dwt.o(i.DWT_SysTimeUpdate))
 <BR><BR>[Stack]<UL><LI>Max Depth = 64<LI>Call Chain = DWT_SysTimeUpdate &rArr; __aeabi_uldivmod
 </UL>
-<BR>[Calls]<UL><LI><a href="#[1be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_uldivmod
-<LI><a href="#[1bb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DWT_CNT_Update
+<BR>[Calls]<UL><LI><a href="#[1bb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DWT_CNT_Update
+<LI><a href="#[1be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_uldivmod
 </UL>
 <BR>[Called By]<UL><LI><a href="#[1a1]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DWT_GetTimeline_ms
 </UL>
@@ -2142,6 +2142,18 @@ Global Symbols
 <LI><a href="#[2d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;all_init_Task
 <LI><a href="#[22f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_RCC_OscConfig
 <LI><a href="#[22c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_RCC_ClockConfig
+<LI><a href="#[183]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFailActive
+<LI><a href="#[162]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSendServo
+<LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
+<LI><a href="#[103]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySetJointDirect
+<LI><a href="#[104]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryMoveJoint
+<LI><a href="#[118]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryInit
+<LI><a href="#[c2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryCancel
+<LI><a href="#[d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetVerticalDownFromPitch
+<LI><a href="#[117]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolInit
+<LI><a href="#[fc]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetCartesianTarget
+<LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
+<LI><a href="#[fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinear
 <LI><a href="#[1d3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_DMA_Abort
 <LI><a href="#[1d9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_Delay
 <LI><a href="#[19e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_CAN_Start
@@ -2157,18 +2169,6 @@ Global Symbols
 <LI><a href="#[113]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInit
 <LI><a href="#[2cb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;UserKeyDebugTask
 <LI><a href="#[189]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;BuzzerStart
-<LI><a href="#[183]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFailActive
-<LI><a href="#[162]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSendServo
-<LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
-<LI><a href="#[103]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySetJointDirect
-<LI><a href="#[104]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryMoveJoint
-<LI><a href="#[118]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryInit
-<LI><a href="#[c2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryCancel
-<LI><a href="#[d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetVerticalDownFromPitch
-<LI><a href="#[117]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolInit
-<LI><a href="#[fc]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetCartesianTarget
-<LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
-<LI><a href="#[fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinear
 <LI><a href="#[175]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeOnTaskStatus
 <LI><a href="#[16b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeOnTargetControl
 </UL>
@@ -2365,16 +2365,7 @@ Global Symbols
 <P><STRONG><a name="[200]"></a>HAL_PCD_IRQHandler</STRONG> (Thumb, 1738 bytes, Stack size 48 bytes, stm32f4xx_hal_pcd.o(i.HAL_PCD_IRQHandler))
 <BR><BR>[Stack]<UL><LI>Max Depth = 276<LI>Call Chain = HAL_PCD_IRQHandler &rArr; PCD_EP_OutSetupPacket_int &rArr; HAL_PCD_SetupStageCallback &rArr; USBD_LL_SetupStage &rArr; USBD_StdDevReq &rArr; USBD_GetDescriptor &rArr; USBD_CtlSendData &rArr; USBD_LL_Transmit &rArr; HAL_PCD_EP_Transmit &rArr; USB_EPStartXfer &rArr; USB_WritePacket
 </UL>
-<BR>[Calls]<UL><LI><a href="#[20f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_SuspendCallback
-<LI><a href="#[215]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_SOFCallback
-<LI><a href="#[20e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_ResumeCallback
-<LI><a href="#[214]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_ResetCallback
-<LI><a href="#[208]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_ISOOUTIncompleteCallback
-<LI><a href="#[20b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_ISOINIncompleteCallback
-<LI><a href="#[1ed]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_DisconnectCallback
-<LI><a href="#[1e9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_DataInStageCallback
-<LI><a href="#[1e7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_ConnectCallback
-<LI><a href="#[213]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_SetTurnaroundTime
+<BR>[Calls]<UL><LI><a href="#[213]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_SetTurnaroundTime
 <LI><a href="#[203]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_ReadPacket
 <LI><a href="#[202]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_ReadInterrupts
 <LI><a href="#[205]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_ReadDevOutEPInterrupt
@@ -2392,6 +2383,15 @@ Global Symbols
 <LI><a href="#[20c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;PCD_WriteEmptyTxFifo
 <LI><a href="#[206]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;PCD_EP_OutXfrComplete_int
 <LI><a href="#[207]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;PCD_EP_OutSetupPacket_int
+<LI><a href="#[20f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_SuspendCallback
+<LI><a href="#[215]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_SOFCallback
+<LI><a href="#[20e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_ResumeCallback
+<LI><a href="#[214]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_ResetCallback
+<LI><a href="#[208]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_ISOOUTIncompleteCallback
+<LI><a href="#[20b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_ISOINIncompleteCallback
+<LI><a href="#[1ed]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_DisconnectCallback
+<LI><a href="#[1e9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_DataInStageCallback
+<LI><a href="#[1e7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_ConnectCallback
 </UL>
 <BR>[Called By]<UL><LI><a href="#[6b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;OTG_FS_IRQHandler
 </UL>
@@ -2415,12 +2415,12 @@ Global Symbols
 <P><STRONG><a name="[218]"></a>HAL_PCD_Init</STRONG> (Thumb, 350 bytes, Stack size 24 bytes, stm32f4xx_hal_pcd.o(i.HAL_PCD_Init))
 <BR><BR>[Stack]<UL><LI>Max Depth = 104<LI>Call Chain = HAL_PCD_Init &rArr; HAL_PCD_MspInit &rArr; HAL_NVIC_SetPriority &rArr; __NVIC_SetPriority
 </UL>
-<BR>[Calls]<UL><LI><a href="#[219]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_MspInit
-<LI><a href="#[21c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_SetCurrentMode
+<BR>[Calls]<UL><LI><a href="#[21c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_SetCurrentMode
 <LI><a href="#[21a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_DisableGlobalInt
 <LI><a href="#[21d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_DevInit
 <LI><a href="#[21e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_DevDisconnect
 <LI><a href="#[21b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_CoreInit
+<LI><a href="#[219]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_MspInit
 </UL>
 <BR>[Called By]<UL><LI><a href="#[2a7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_LL_Init
 </UL>
@@ -2499,8 +2499,8 @@ Global Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 120<LI>Call Chain = HAL_RCC_ClockConfig &rArr; HAL_InitTick &rArr; HAL_NVIC_SetPriority &rArr; __NVIC_SetPriority
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[22d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_RCC_GetSysClockFreq
 <LI><a href="#[1df]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_InitTick
+<LI><a href="#[22d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_RCC_GetSysClockFreq
 </UL>
 <BR>[Called By]<UL><LI><a href="#[28c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;SystemClock_Config
 </UL>
@@ -2510,9 +2510,9 @@ Global Symbols
 </UL>
 
 <P><STRONG><a name="[212]"></a>HAL_RCC_GetHCLKFreq</STRONG> (Thumb, 6 bytes, Stack size 0 bytes, stm32f4xx_hal_rcc.o(i.HAL_RCC_GetHCLKFreq))
-<BR><BR>[Called By]<UL><LI><a href="#[22e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_RCC_GetPCLK2Freq
-<LI><a href="#[1e2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_RCC_GetPCLK1Freq
+<BR><BR>[Called By]<UL><LI><a href="#[1e2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_RCC_GetPCLK1Freq
 <LI><a href="#[200]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_IRQHandler
+<LI><a href="#[22e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_RCC_GetPCLK2Freq
 </UL>
 
 <P><STRONG><a name="[1e2]"></a>HAL_RCC_GetPCLK1Freq</STRONG> (Thumb, 22 bytes, Stack size 4 bytes, stm32f4xx_hal_rcc.o(i.HAL_RCC_GetPCLK1Freq))
@@ -2744,9 +2744,9 @@ Global Symbols
 <P><STRONG><a name="[250]"></a>HAL_UARTEx_RxEventCallback</STRONG> (Thumb, 168 bytes, Stack size 24 bytes, bsp_usart.o(i.HAL_UARTEx_RxEventCallback))
 <BR><BR>[Stack]<UL><LI>Max Depth = 124<LI>Call Chain = HAL_UARTEx_RxEventCallback &rArr; HAL_UARTEx_ReceiveToIdle_DMA &rArr; UART_Start_Receive_DMA &rArr; HAL_DMA_Start_IT &rArr; DMA_SetConfig
 </UL>
-<BR>[Calls]<UL><LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[251]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USARTFindAsyncCallbacks
+<BR>[Calls]<UL><LI><a href="#[251]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USARTFindAsyncCallbacks
 <LI><a href="#[24e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_UARTEx_ReceiveToIdle_DMA
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[256]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_UART_IRQHandler
 <LI><a href="#[257]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;UART_Receive_IT
@@ -2874,8 +2874,8 @@ Global Symbols
 <P><STRONG><a name="[160]"></a>HSLServoInit</STRONG> (Thumb, 90 bytes, Stack size 24 bytes, hsl_servo.o(i.HSLServoInit))
 <BR><BR>[Stack]<UL><LI>Max Depth = 40<LI>Call Chain = HSLServoInit &rArr; USARTRegisterAsyncCallbacks
 </UL>
-<BR>[Calls]<UL><LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[263]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USARTRegisterAsyncCallbacks
+<BR>[Calls]<UL><LI><a href="#[263]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USARTRegisterAsyncCallbacks
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[117]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolInit
 </UL>
@@ -2910,7 +2910,7 @@ Global Symbols
 <LI><a href="#[268]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoUpdateDebugFrames
 <LI><a href="#[269]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoStartReceive
 </UL>
-<BR>[Called By]<UL><LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTask
+<BR>[Called By]<UL><LI><a href="#[155]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTask
 </UL>
 
 <P><STRONG><a name="[20]"></a>HardFault_Handler</STRONG> (Thumb, 4 bytes, Stack size 0 bytes, stm32f4xx_it.o(i.HardFault_Handler))
@@ -3216,8 +3216,8 @@ Global Symbols
 <P><STRONG><a name="[1a5]"></a>USBD_CDC_SetTxBuffer</STRONG> (Thumb, 36 bytes, Stack size 12 bytes, usbd_cdc.o(i.USBD_CDC_SetTxBuffer))
 <BR><BR>[Stack]<UL><LI>Max Depth = 12<LI>Call Chain = USBD_CDC_SetTxBuffer
 </UL>
-<BR>[Called By]<UL><LI><a href="#[f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;CDC_Init_FS
-<LI><a href="#[1aa]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;CDC_Transmit_FS
+<BR>[Called By]<UL><LI><a href="#[1aa]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;CDC_Transmit_FS
+<LI><a href="#[f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;CDC_Init_FS
 </UL>
 
 <P><STRONG><a name="[1ab]"></a>USBD_CDC_TransmitPacket</STRONG> (Thumb, 84 bytes, Stack size 16 bytes, usbd_cdc.o(i.USBD_CDC_TransmitPacket))
@@ -3412,8 +3412,8 @@ Global Symbols
 <P><STRONG><a name="[2a8]"></a>USBD_LL_ClearStallEP</STRONG> (Thumb, 38 bytes, Stack size 24 bytes, usbd_conf.o(i.USBD_LL_ClearStallEP))
 <BR><BR>[Stack]<UL><LI>Max Depth = 52<LI>Call Chain = USBD_LL_ClearStallEP &rArr; HAL_PCD_EP_ClrStall &rArr; USB_EPClearStall
 </UL>
-<BR>[Calls]<UL><LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
-<LI><a href="#[1f3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_EP_ClrStall
+<BR>[Calls]<UL><LI><a href="#[1f3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_EP_ClrStall
+<LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
 </UL>
 <BR>[Called By]<UL><LI><a href="#[2b4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_StdEPReq
 </UL>
@@ -3421,8 +3421,8 @@ Global Symbols
 <P><STRONG><a name="[292]"></a>USBD_LL_CloseEP</STRONG> (Thumb, 38 bytes, Stack size 24 bytes, usbd_conf.o(i.USBD_LL_CloseEP))
 <BR><BR>[Stack]<UL><LI>Max Depth = 56<LI>Call Chain = USBD_LL_CloseEP &rArr; HAL_PCD_EP_Close &rArr; USB_DeactivateEndpoint
 </UL>
-<BR>[Calls]<UL><LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
-<LI><a href="#[1f1]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_EP_Close
+<BR>[Calls]<UL><LI><a href="#[1f1]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_EP_Close
+<LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
 </UL>
 <BR>[Called By]<UL><LI><a href="#[15]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CDC_DeInit
 </UL>
@@ -3501,8 +3501,8 @@ Global Symbols
 <P><STRONG><a name="[296]"></a>USBD_LL_OpenEP</STRONG> (Thumb, 48 bytes, Stack size 32 bytes, usbd_conf.o(i.USBD_LL_OpenEP))
 <BR><BR>[Stack]<UL><LI>Max Depth = 80<LI>Call Chain = USBD_LL_OpenEP &rArr; HAL_PCD_EP_Open &rArr; USB_ActivateEndpoint
 </UL>
-<BR>[Calls]<UL><LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
-<LI><a href="#[1f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_EP_Open
+<BR>[Calls]<UL><LI><a href="#[1f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_EP_Open
+<LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
 </UL>
 <BR>[Called By]<UL><LI><a href="#[14]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CDC_Init
 <LI><a href="#[221]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_LL_Reset
@@ -3511,8 +3511,8 @@ Global Symbols
 <P><STRONG><a name="[297]"></a>USBD_LL_PrepareReceive</STRONG> (Thumb, 48 bytes, Stack size 32 bytes, usbd_conf.o(i.USBD_LL_PrepareReceive))
 <BR><BR>[Stack]<UL><LI>Max Depth = 116<LI>Call Chain = USBD_LL_PrepareReceive &rArr; HAL_PCD_EP_Receive &rArr; USB_EPStartXfer &rArr; USB_WritePacket
 </UL>
-<BR>[Calls]<UL><LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
-<LI><a href="#[1fa]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_EP_Receive
+<BR>[Calls]<UL><LI><a href="#[1fa]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_EP_Receive
+<LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
 </UL>
 <BR>[Called By]<UL><LI><a href="#[14]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CDC_Init
 <LI><a href="#[299]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CtlPrepareRx
@@ -3547,8 +3547,8 @@ Global Symbols
 <P><STRONG><a name="[2b0]"></a>USBD_LL_SetUSBAddress</STRONG> (Thumb, 38 bytes, Stack size 24 bytes, usbd_conf.o(i.USBD_LL_SetUSBAddress))
 <BR><BR>[Stack]<UL><LI>Max Depth = 48<LI>Call Chain = USBD_LL_SetUSBAddress &rArr; HAL_PCD_SetAddress &rArr; USB_SetDevAddress
 </UL>
-<BR>[Calls]<UL><LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
-<LI><a href="#[224]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_SetAddress
+<BR>[Calls]<UL><LI><a href="#[224]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_SetAddress
+<LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
 </UL>
 <BR>[Called By]<UL><LI><a href="#[2b7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_SetAddress
 </UL>
@@ -3568,8 +3568,8 @@ Global Symbols
 <P><STRONG><a name="[29f]"></a>USBD_LL_StallEP</STRONG> (Thumb, 38 bytes, Stack size 24 bytes, usbd_conf.o(i.USBD_LL_StallEP))
 <BR><BR>[Stack]<UL><LI>Max Depth = 56<LI>Call Chain = USBD_LL_StallEP &rArr; HAL_PCD_EP_SetStall &rArr; USB_EP0_OutStart
 </UL>
-<BR>[Calls]<UL><LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
-<LI><a href="#[1fc]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_EP_SetStall
+<BR>[Calls]<UL><LI><a href="#[1fc]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_EP_SetStall
+<LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
 </UL>
 <BR>[Called By]<UL><LI><a href="#[29a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CtlError
 <LI><a href="#[2b4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_StdEPReq
@@ -3580,8 +3580,8 @@ Global Symbols
 <P><STRONG><a name="[2b5]"></a>USBD_LL_Start</STRONG> (Thumb, 30 bytes, Stack size 16 bytes, usbd_conf.o(i.USBD_LL_Start))
 <BR><BR>[Stack]<UL><LI>Max Depth = 32<LI>Call Chain = USBD_LL_Start &rArr; HAL_PCD_Start
 </UL>
-<BR>[Calls]<UL><LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
-<LI><a href="#[228]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_Start
+<BR>[Calls]<UL><LI><a href="#[228]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_Start
+<LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
 </UL>
 <BR>[Called By]<UL><LI><a href="#[280]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Start
 </UL>
@@ -3593,8 +3593,8 @@ Global Symbols
 <P><STRONG><a name="[290]"></a>USBD_LL_Transmit</STRONG> (Thumb, 48 bytes, Stack size 32 bytes, usbd_conf.o(i.USBD_LL_Transmit))
 <BR><BR>[Stack]<UL><LI>Max Depth = 116<LI>Call Chain = USBD_LL_Transmit &rArr; HAL_PCD_EP_Transmit &rArr; USB_EPStartXfer &rArr; USB_WritePacket
 </UL>
-<BR>[Calls]<UL><LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
-<LI><a href="#[1ff]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_EP_Transmit
+<BR>[Calls]<UL><LI><a href="#[1ff]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_EP_Transmit
+<LI><a href="#[2a9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_Get_USB_Status
 </UL>
 <BR>[Called By]<UL><LI><a href="#[18]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CDC_DataIn
 <LI><a href="#[298]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CtlSendData
@@ -3967,9 +3967,9 @@ Global Symbols
 <LI><a href="#[2d2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__mathlib_flt_infnan2
 <LI><a href="#[2d0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_fpclassifyf
 </UL>
-<BR>[Called By]<UL><LI><a href="#[105]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteRealtimeTarget
+<BR>[Called By]<UL><LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
+<LI><a href="#[105]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteRealtimeTarget
 <LI><a href="#[f4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteCartesianCommand
-<LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
 </UL>
 
 <P><STRONG><a name="[12e]"></a>__hardfp_ceilf</STRONG> (Thumb, 98 bytes, Stack size 0 bytes, ceilf.o(i.__hardfp_ceilf))
@@ -4031,8 +4031,7 @@ Global Symbols
 </UL>
 <BR>[Calls]<UL><LI><a href="#[b0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__set_errno
 </UL>
-<BR>[Called By]<UL><LI><a href="#[156]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateTeachAndKinematicsDebug
-<LI><a href="#[ce]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianVectorLength
+<BR>[Called By]<UL><LI><a href="#[ce]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianVectorLength
 <LI><a href="#[e7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianUpdateControlDebug
 <LI><a href="#[d9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunRealtime
 <LI><a href="#[cf]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianPositionDistance
@@ -4040,6 +4039,7 @@ Global Symbols
 <LI><a href="#[dc]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetWristFromTipVerticalDown
 <LI><a href="#[115]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmKinematicsSelfTest
 <LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
+<LI><a href="#[156]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateTeachAndKinematicsDebug
 </UL>
 
 <P><STRONG><a name="[2ce]"></a>__mathlib_flt_infnan</STRONG> (Thumb, 6 bytes, Stack size 0 bytes, funder.o(i.__mathlib_flt_infnan))
@@ -4090,12 +4090,12 @@ Global Symbols
 <LI>Call Chain = all_init_Task &rArr; ArmInit &rArr; ArmLatchFault &rArr; ArmDisableAll &rArr; DMMotorDisable &rArr; DMMotorSendModeCommand &rArr; DMMotorTransmit &rArr; CANTransmit &rArr; DWT_GetTimeline_ms &rArr; DWT_SysTimeUpdate &rArr; __aeabi_uldivmod
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 <LI><a href="#[2d8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;protocol_init
 <LI><a href="#[2c0]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_Init
 <LI><a href="#[169]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeInit
 <LI><a href="#[113]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInit
 <LI><a href="#[18f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;BuzzerInit
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[99]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;main
 </UL>
@@ -4219,8 +4219,8 @@ Global Symbols
 <P><STRONG><a name="[17c]"></a>protocol_send_callback_status</STRONG> (Thumb, 126 bytes, Stack size 8 bytes, protocol.o(i.protocol_send_callback_status))
 <BR><BR>[Stack]<UL><LI>Max Depth = 8<LI>Call Chain = protocol_send_callback_status
 </UL>
-<BR>[Called By]<UL><LI><a href="#[17b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeRequestTaskStartFromKey
-<LI><a href="#[176]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSendCallbackStatus
+<BR>[Called By]<UL><LI><a href="#[176]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSendCallbackStatus
+<LI><a href="#[17b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeRequestTaskStartFromKey
 </UL>
 
 <P><STRONG><a name="[18c]"></a>protocol_send_motion_status</STRONG> (Thumb, 130 bytes, Stack size 16 bytes, protocol.o(i.protocol_send_motion_status))
@@ -4552,8 +4552,8 @@ Local Symbols
 <P><STRONG><a name="[207]"></a>PCD_EP_OutSetupPacket_int</STRONG> (Thumb, 94 bytes, Stack size 32 bytes, stm32f4xx_hal_pcd.o(i.PCD_EP_OutSetupPacket_int))
 <BR><BR>[Stack]<UL><LI>Max Depth = 228<LI>Call Chain = PCD_EP_OutSetupPacket_int &rArr; HAL_PCD_SetupStageCallback &rArr; USBD_LL_SetupStage &rArr; USBD_StdDevReq &rArr; USBD_GetDescriptor &rArr; USBD_CtlSendData &rArr; USBD_LL_Transmit &rArr; HAL_PCD_EP_Transmit &rArr; USB_EPStartXfer &rArr; USB_WritePacket
 </UL>
-<BR>[Calls]<UL><LI><a href="#[226]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_SetupStageCallback
-<LI><a href="#[1fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_EP0_OutStart
+<BR>[Calls]<UL><LI><a href="#[1fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_EP0_OutStart
+<LI><a href="#[226]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_SetupStageCallback
 </UL>
 <BR>[Called By]<UL><LI><a href="#[200]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_IRQHandler
 </UL>
@@ -4561,8 +4561,8 @@ Local Symbols
 <P><STRONG><a name="[206]"></a>PCD_EP_OutXfrComplete_int</STRONG> (Thumb, 314 bytes, Stack size 32 bytes, stm32f4xx_hal_pcd.o(i.PCD_EP_OutXfrComplete_int))
 <BR><BR>[Stack]<UL><LI>Max Depth = 212<LI>Call Chain = PCD_EP_OutXfrComplete_int &rArr; HAL_PCD_DataOutStageCallback &rArr; USBD_LL_DataOutStage &rArr; USBD_CtlContinueRx &rArr; USBD_LL_PrepareReceive &rArr; HAL_PCD_EP_Receive &rArr; USB_EPStartXfer &rArr; USB_WritePacket
 </UL>
-<BR>[Calls]<UL><LI><a href="#[1eb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_DataOutStageCallback
-<LI><a href="#[1fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_EP0_OutStart
+<BR>[Calls]<UL><LI><a href="#[1fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_EP0_OutStart
+<LI><a href="#[1eb]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_DataOutStageCallback
 </UL>
 <BR>[Called By]<UL><LI><a href="#[200]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_PCD_IRQHandler
 </UL>
@@ -4688,8 +4688,8 @@ Local Symbols
 <P><STRONG><a name="[1dc]"></a>UART_SetConfig</STRONG> (Thumb, 546 bytes, Stack size 40 bytes, stm32f4xx_hal_uart.o(i.UART_SetConfig))
 <BR><BR>[Stack]<UL><LI>Max Depth = 88<LI>Call Chain = UART_SetConfig &rArr; __aeabi_uldivmod
 </UL>
-<BR>[Calls]<UL><LI><a href="#[22e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_RCC_GetPCLK2Freq
-<LI><a href="#[1e2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_RCC_GetPCLK1Freq
+<BR>[Calls]<UL><LI><a href="#[1e2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_RCC_GetPCLK1Freq
+<LI><a href="#[22e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_RCC_GetPCLK2Freq
 <LI><a href="#[1be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_uldivmod
 </UL>
 <BR>[Called By]<UL><LI><a href="#[25b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_UART_Init
@@ -4711,9 +4711,9 @@ Local Symbols
 <P><STRONG><a name="[197]"></a>CANFIFOxCallback</STRONG> (Thumb, 142 bytes, Stack size 24 bytes, bsp_can.o(i.CANFIFOxCallback))
 <BR><BR>[Stack]<UL><LI>Max Depth = 40<LI>Call Chain = CANFIFOxCallback &rArr; HAL_CAN_GetRxMessage
 </UL>
-<BR>[Calls]<UL><LI><a href="#[199]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy
-<LI><a href="#[198]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_CAN_GetRxMessage
+<BR>[Calls]<UL><LI><a href="#[198]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_CAN_GetRxMessage
 <LI><a href="#[19a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_CAN_GetRxFifoFillLevel
+<LI><a href="#[199]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy
 </UL>
 <BR>[Called By]<UL><LI><a href="#[1ca]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_CAN_RxFifo1MsgPendingCallback
 <LI><a href="#[1c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_CAN_RxFifo0MsgPendingCallback
@@ -4810,8 +4810,8 @@ Local Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 136 + Unknown Stack Size
 <LI>Call Chain = DMMotorSendModeCommand &rArr; DMMotorTransmit &rArr; CANTransmit &rArr; DWT_GetTimeline_ms &rArr; DWT_SysTimeUpdate &rArr; __aeabi_uldivmod
 </UL>
-<BR>[Calls]<UL><LI><a href="#[a6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memset
-<LI><a href="#[1b3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorTransmit
+<BR>[Calls]<UL><LI><a href="#[1b3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorTransmit
+<LI><a href="#[a6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memset
 </UL>
 <BR>[Called By]<UL><LI><a href="#[145]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorEnterModeAndHoldOpenLoop
 <LI><a href="#[144]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorEnterMode
@@ -4844,8 +4844,8 @@ Local Symbols
 <P><STRONG><a name="[2c6]"></a>USB_TransmitCopyToQueue</STRONG> (Thumb, 232 bytes, Stack size 24 bytes, usb.o(i.USB_TransmitCopyToQueue))
 <BR><BR>[Stack]<UL><LI>Max Depth = 24<LI>Call Chain = USB_TransmitCopyToQueue
 </UL>
-<BR>[Calls]<UL><LI><a href="#[199]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy
-<LI><a href="#[2bd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__get_PRIMASK
+<BR>[Calls]<UL><LI><a href="#[2bd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__get_PRIMASK
+<LI><a href="#[199]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy
 </UL>
 <BR>[Called By]<UL><LI><a href="#[2c7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_TransmitCopyHighPriority
 <LI><a href="#[2c5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_TransmitCopy
@@ -4910,9 +4910,9 @@ Local Symbols
 <P><STRONG><a name="[2da]"></a>send_frame</STRONG> (Thumb, 232 bytes, Stack size 48 bytes, protocol.o(i.send_frame))
 <BR><BR>[Stack]<UL><LI>Max Depth = 104<LI>Call Chain = send_frame &rArr; serial_write &rArr; USB_TransmitCopyHighPriority &rArr; USB_TransmitCopyToQueue
 </UL>
-<BR>[Calls]<UL><LI><a href="#[199]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy
-<LI><a href="#[2e9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;protocol_crc8
+<BR>[Calls]<UL><LI><a href="#[2e9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;protocol_crc8
 <LI><a href="#[303]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;serial_write
+<LI><a href="#[199]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy
 </UL>
 <BR>[Called By]<UL><LI><a href="#[2ee]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;send_motion_status_head
 <LI><a href="#[2ec]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;send_callback_head
@@ -4974,11 +4974,11 @@ Local Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 52<LI>Call Chain = HSLServoQueueBoardMove &rArr; HSLServoFindStatus &rArr; __aeabi_memclr4
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[19d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr
 <LI><a href="#[266]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoIdValid
 <LI><a href="#[261]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoFindStatus
 <LI><a href="#[267]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__get_PRIMASK
 <LI><a href="#[268]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoUpdateDebugFrames
+<LI><a href="#[19d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr
 </UL>
 <BR>[Called By]<UL><LI><a href="#[15f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoMove
 </UL>
@@ -4987,11 +4987,11 @@ Local Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 60<LI>Call Chain = HSLServoQueueBoardMove2 &rArr; HSLServoFindStatus &rArr; __aeabi_memclr4
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[19d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr
 <LI><a href="#[266]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoIdValid
 <LI><a href="#[261]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoFindStatus
 <LI><a href="#[267]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__get_PRIMASK
 <LI><a href="#[268]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoUpdateDebugFrames
+<LI><a href="#[19d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr
 </UL>
 <BR>[Called By]<UL><LI><a href="#[15c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoMove2
 </UL>
@@ -5002,8 +5002,8 @@ Local Symbols
 <P><STRONG><a name="[269]"></a>HSLServoStartReceive</STRONG> (Thumb, 118 bytes, Stack size 24 bytes, hsl_servo.o(i.HSLServoStartReceive))
 <BR><BR>[Stack]<UL><LI>Max Depth = 116<LI>Call Chain = HSLServoStartReceive &rArr; HAL_UART_Receive_DMA &rArr; UART_Start_Receive_DMA &rArr; HAL_DMA_Start_IT &rArr; DMA_SetConfig
 </UL>
-<BR>[Calls]<UL><LI><a href="#[19d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr
-<LI><a href="#[25c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_UART_Receive_DMA
+<BR>[Calls]<UL><LI><a href="#[25c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_UART_Receive_DMA
+<LI><a href="#[19d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr
 </UL>
 <BR>[Called By]<UL><LI><a href="#[166]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoTask
 </UL>
@@ -5081,7 +5081,7 @@ Local Symbols
 </UL>
 
 <P><STRONG><a name="[133]"></a>ArmAllTargetsSynced</STRONG> (Thumb, 46 bytes, Stack size 0 bytes, arm.o(i.ArmAllTargetsSynced))
-<BR><BR>[Called By]<UL><LI><a href="#[153]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
+<BR><BR>[Called By]<UL><LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
 <LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
 <LI><a href="#[131]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessAutoInit
 </UL>
@@ -5102,14 +5102,14 @@ Local Symbols
 <BR>[Called By]<UL><LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
 </UL>
 
-<P><STRONG><a name="[154]"></a>ArmAnyTxFault</STRONG> (Thumb, 44 bytes, Stack size 0 bytes, arm.o(i.ArmAnyTxFault))
+<P><STRONG><a name="[153]"></a>ArmAnyTxFault</STRONG> (Thumb, 44 bytes, Stack size 0 bytes, arm.o(i.ArmAnyTxFault))
 <BR><BR>[Called By]<UL><LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
 </UL>
 
 <P><STRONG><a name="[120]"></a>ArmAxisIsValid</STRONG> (Thumb, 14 bytes, Stack size 0 bytes, arm.o(i.ArmAxisIsValid))
-<BR><BR>[Called By]<UL><LI><a href="#[12a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDegBase
+<BR><BR>[Called By]<UL><LI><a href="#[12c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorVelocityToJointDegS
+<LI><a href="#[12a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDegBase
 <LI><a href="#[11f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmJointDegToMotorRadBase
-<LI><a href="#[12c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorVelocityToJointDegS
 </UL>
 
 <P><STRONG><a name="[13c]"></a>ArmBootBuzzerStart</STRONG> (Thumb, 4 bytes, Stack size 0 bytes, arm.o(i.ArmBootBuzzerStart))
@@ -5126,7 +5126,7 @@ Local Symbols
 </UL>
 <BR>[Calls]<UL><LI><a href="#[ba]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 </UL>
-<BR>[Called By]<UL><LI><a href="#[153]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
+<BR>[Called By]<UL><LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateFeedback
 <LI><a href="#[ee]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetJointCommandForPose
 <LI><a href="#[142]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessFaultReset
 <LI><a href="#[ed]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCommandPose
@@ -5151,9 +5151,9 @@ Local Symbols
 <LI><a href="#[ee]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetJointCommandForPose
 <LI><a href="#[ea]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCheckLimit
 </UL>
-<BR>[Called By]<UL><LI><a href="#[132]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSyncAllCurrentTargets
+<BR>[Called By]<UL><LI><a href="#[d5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateJointReference
+<LI><a href="#[132]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSyncAllCurrentTargets
 <LI><a href="#[131]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessAutoInit
-<LI><a href="#[d5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateJointReference
 </UL>
 
 <P><STRONG><a name="[14c]"></a>ArmCommandTypeIsValid</STRONG> (Thumb, 18 bytes, Stack size 0 bytes, arm.o(i.ArmCommandTypeIsValid))
@@ -5183,12 +5183,6 @@ Local Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 564<LI>Call Chain = ArmExecuteCartesianCommand &rArr; ArmMoveLinearToolTipVerticalDown &rArr; ArmSetToolTipTargetVerticalDown &rArr; ArmSetCartesianTarget &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[f6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_atan2f
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[ba]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
-<LI><a href="#[f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolReadyForMotion
-<LI><a href="#[f7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTemperatureAtOrAbove
-<LI><a href="#[101]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmHostStartYawWait
 <LI><a href="#[f9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryIsBusy
 <LI><a href="#[c2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryCancel
 <LI><a href="#[ff]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetServo2WorldYawTarget
@@ -5198,6 +5192,12 @@ Local Symbols
 <LI><a href="#[fc]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetCartesianTarget
 <LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
 <LI><a href="#[fe]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinear
+<LI><a href="#[ba]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
+<LI><a href="#[f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolReadyForMotion
+<LI><a href="#[f7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTemperatureAtOrAbove
+<LI><a href="#[101]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmHostStartYawWait
+<LI><a href="#[f6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_atan2f
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[13d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessCommandMailbox
 </UL>
@@ -5205,14 +5205,14 @@ Local Symbols
 <P><STRONG><a name="[102]"></a>ArmExecuteJointCommand</STRONG> (Thumb, 180 bytes, Stack size 24 bytes, arm.o(i.ArmExecuteJointCommand))
 <BR><BR>[Stack]<UL><LI>Max Depth = 248<LI>Call Chain = ArmExecuteJointCommand &rArr; ArmTrajectorySetJointDirect &rArr; ArmSetJointTargetDeg &rArr; ArmUpdateJointReference &rArr; ArmCommandPose &rArr; ArmSetJointCommandForPose &rArr; ArmJointDegToMotorRadForPose &rArr; ArmJointDegToMotorRadWithShoulder &rArr; ArmJointDegToMotorRadBase
 </UL>
-<BR>[Calls]<UL><LI><a href="#[f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolReadyForMotion
-<LI><a href="#[f7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTemperatureAtOrAbove
-<LI><a href="#[103]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySetJointDirect
+<BR>[Calls]<UL><LI><a href="#[103]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySetJointDirect
 <LI><a href="#[104]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryMoveJoint
 <LI><a href="#[f9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryIsBusy
 <LI><a href="#[fa]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo2WorldYawValidForQ1
 <LI><a href="#[f5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetServo2WorldYawTarget
 <LI><a href="#[bf]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmJointPoseWithinSoftLimits
+<LI><a href="#[f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolReadyForMotion
+<LI><a href="#[f7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTemperatureAtOrAbove
 </UL>
 <BR>[Called By]<UL><LI><a href="#[13d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessCommandMailbox
 </UL>
@@ -5220,12 +5220,12 @@ Local Symbols
 <P><STRONG><a name="[105]"></a>ArmExecuteRealtimeTarget</STRONG> (Thumb, 130 bytes, Stack size 16 bytes, arm.o(i.ArmExecuteRealtimeTarget))
 <BR><BR>[Stack]<UL><LI>Max Depth = 300<LI>Call Chain = ArmExecuteRealtimeTarget &rArr; ArmTrajectorySubmitRealtimeTarget &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
-<BR>[Calls]<UL><LI><a href="#[f6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_atan2f
-<LI><a href="#[f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolReadyForMotion
-<LI><a href="#[f7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTemperatureAtOrAbove
-<LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
+<BR>[Calls]<UL><LI><a href="#[106]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectorySubmitRealtimeTarget
 <LI><a href="#[fa]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo2WorldYawValidForQ1
 <LI><a href="#[f5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetServo2WorldYawTarget
+<LI><a href="#[f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolReadyForMotion
+<LI><a href="#[f7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTemperatureAtOrAbove
+<LI><a href="#[f6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_atan2f
 </UL>
 <BR>[Called By]<UL><LI><a href="#[13d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessCommandMailbox
 </UL>
@@ -5233,12 +5233,12 @@ Local Symbols
 <P><STRONG><a name="[107]"></a>ArmExecuteToolCommand</STRONG> (Thumb, 206 bytes, Stack size 24 bytes, arm.o(i.ArmExecuteToolCommand))
 <BR><BR>[Stack]<UL><LI>Max Depth = 128<LI>Call Chain = ArmExecuteToolCommand &rArr; ArmToolSetServo2Angle &rArr; ArmToolSendServo &rArr; ArmToolAngleDegToPos
 </UL>
-<BR>[Calls]<UL><LI><a href="#[f7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTemperatureAtOrAbove
-<LI><a href="#[d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetVerticalDownFromPitch
+<BR>[Calls]<UL><LI><a href="#[d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetVerticalDownFromPitch
 <LI><a href="#[ff]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetServo2WorldYawTarget
 <LI><a href="#[10a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetServo2Angle
 <LI><a href="#[109]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetServo1Angle
 <LI><a href="#[108]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetMagnet
+<LI><a href="#[f7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTemperatureAtOrAbove
 </UL>
 <BR>[Called By]<UL><LI><a href="#[13d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessCommandMailbox
 </UL>
@@ -5320,16 +5320,16 @@ Local Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 176 + Unknown Stack Size
 <LI>Call Chain = ArmLatchFault &rArr; ArmDisableAll &rArr; DMMotorDisable &rArr; DMMotorSendModeCommand &rArr; DMMotorTransmit &rArr; CANTransmit &rArr; DWT_GetTimeline_ms &rArr; DWT_SysTimeUpdate &rArr; __aeabi_uldivmod
 </UL>
-<BR>[Calls]<UL><LI><a href="#[ef]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmDisableAll
-<LI><a href="#[126]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmBootBuzzerStop
-<LI><a href="#[127]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolStopServo1Tracking
+<BR>[Calls]<UL><LI><a href="#[127]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolStopServo1Tracking
 <LI><a href="#[108]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetMagnet
 <LI><a href="#[128]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolClearPendingCommands
 <LI><a href="#[125]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAbortMotion
+<LI><a href="#[ef]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmDisableAll
+<LI><a href="#[126]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmBootBuzzerStop
 </UL>
-<BR>[Called By]<UL><LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
+<BR>[Called By]<UL><LI><a href="#[f2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmEmergencyStop
+<LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
 <LI><a href="#[113]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInit
-<LI><a href="#[f2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmEmergencyStop
 </UL>
 
 <P><STRONG><a name="[12a]"></a>ArmMotorRadToJointDegBase</STRONG> (Thumb, 80 bytes, Stack size 24 bytes, arm.o(i.ArmMotorRadToJointDegBase))
@@ -5338,8 +5338,8 @@ Local Symbols
 <BR>[Calls]<UL><LI><a href="#[ba]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 <LI><a href="#[120]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAxisIsValid
 </UL>
-<BR>[Called By]<UL><LI><a href="#[12b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDegWithShoulder
-<LI><a href="#[129]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDeg
+<BR>[Called By]<UL><LI><a href="#[129]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDeg
+<LI><a href="#[12b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDegWithShoulder
 </UL>
 
 <P><STRONG><a name="[12b]"></a>ArmMotorRadToJointDegWithShoulder</STRONG> (Thumb, 92 bytes, Stack size 24 bytes, arm.o(i.ArmMotorRadToJointDegWithShoulder))
@@ -5355,9 +5355,9 @@ Local Symbols
 <P><STRONG><a name="[130]"></a>ArmPoseArrived</STRONG> (Thumb, 232 bytes, Stack size 24 bytes, arm.o(i.ArmPoseArrived))
 <BR><BR>[Stack]<UL><LI>Max Depth = 40<LI>Call Chain = ArmPoseArrived &rArr; ArmMotorVelocityToJointDegS &rArr;  ArmMotorVelocityToJointDegS (Cycle)
 </UL>
-<BR>[Calls]<UL><LI><a href="#[ba]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
+<BR>[Calls]<UL><LI><a href="#[12c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorVelocityToJointDegS
+<LI><a href="#[ba]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 <LI><a href="#[121]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAbs
-<LI><a href="#[12c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorVelocityToJointDegS
 </UL>
 <BR>[Called By]<UL><LI><a href="#[131]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessAutoInit
 </UL>
@@ -5370,6 +5370,8 @@ Local Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 300<LI>Call Chain = ArmProcessAutoInit &rArr; ArmResolveHomePose &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
+<LI><a href="#[c2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryCancel
+<LI><a href="#[d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetVerticalDownFromPitch
 <LI><a href="#[ba]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 <LI><a href="#[132]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSyncAllCurrentTargets
 <LI><a href="#[135]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmResolveHomePose
@@ -5378,8 +5380,6 @@ Local Symbols
 <LI><a href="#[133]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllTargetsSynced
 <LI><a href="#[134]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllMotorsEnabled
 <LI><a href="#[b8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllFeedbackValid
-<LI><a href="#[c2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryCancel
-<LI><a href="#[d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetVerticalDownFromPitch
 </UL>
 <BR>[Called By]<UL><LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
 </UL>
@@ -5388,16 +5388,7 @@ Local Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 508 + Unknown Stack Size
 <LI>Call Chain = ArmProcessBootSequence &rArr; ArmMoveLinearToolTipVerticalDown &rArr; ArmSetToolTipTargetVerticalDown &rArr; ArmSetCartesianTarget &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
-<BR>[Calls]<UL><LI><a href="#[f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolReadyForMotion
-<LI><a href="#[138]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetBootState
-<LI><a href="#[137]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessEnableOnly
-<LI><a href="#[131]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessAutoInit
-<LI><a href="#[126]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmBootBuzzerStop
-<LI><a href="#[13c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmBootBuzzerStart
-<LI><a href="#[133]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllTargetsSynced
-<LI><a href="#[134]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllMotorsEnabled
-<LI><a href="#[b8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllFeedbackValid
-<LI><a href="#[139]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryTask
+<BR>[Calls]<UL><LI><a href="#[139]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryTask
 <LI><a href="#[f9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryIsBusy
 <LI><a href="#[c2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryCancel
 <LI><a href="#[13b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTxIdle
@@ -5410,6 +5401,15 @@ Local Symbols
 <LI><a href="#[13a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetState
 <LI><a href="#[128]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolClearPendingCommands
 <LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
+<LI><a href="#[f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolReadyForMotion
+<LI><a href="#[138]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetBootState
+<LI><a href="#[137]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessEnableOnly
+<LI><a href="#[131]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessAutoInit
+<LI><a href="#[126]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmBootBuzzerStop
+<LI><a href="#[13c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmBootBuzzerStart
+<LI><a href="#[133]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllTargetsSynced
+<LI><a href="#[134]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllMotorsEnabled
+<LI><a href="#[b8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllFeedbackValid
 </UL>
 <BR>[Called By]<UL><LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
 </UL>
@@ -5418,7 +5418,10 @@ Local Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 676 + Unknown Stack Size
 <LI>Call Chain = ArmProcessCommandMailbox &rArr; ArmExecuteCartesianCommand &rArr; ArmMoveLinearToolTipVerticalDown &rArr; ArmSetToolTipTargetVerticalDown &rArr; ArmSetCartesianTarget &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
-<BR>[Calls]<UL><LI><a href="#[a5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy4
+<BR>[Calls]<UL><LI><a href="#[140]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmStopRealtimeTracking
+<LI><a href="#[141]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmRequestFaultReset
+<LI><a href="#[f2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmEmergencyStop
+<LI><a href="#[c1]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCancelMotion
 <LI><a href="#[142]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessFaultReset
 <LI><a href="#[13e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmHostStartCommand
 <LI><a href="#[112]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmHostInterruptPending
@@ -5428,10 +5431,7 @@ Local Symbols
 <LI><a href="#[105]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteRealtimeTarget
 <LI><a href="#[102]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteJointCommand
 <LI><a href="#[f4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteCartesianCommand
-<LI><a href="#[140]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmStopRealtimeTracking
-<LI><a href="#[141]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmRequestFaultReset
-<LI><a href="#[f2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmEmergencyStop
-<LI><a href="#[c1]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCancelMotion
+<LI><a href="#[a5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memcpy4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
 </UL>
@@ -5469,14 +5469,14 @@ Local Symbols
 <P><STRONG><a name="[135]"></a>ArmResolveHomePose</STRONG> (Thumb, 208 bytes, Stack size 72 bytes, arm.o(i.ArmResolveHomePose))
 <BR><BR>[Stack]<UL><LI>Max Depth = 268<LI>Call Chain = ArmResolveHomePose &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
-<BR>[Calls]<UL><LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[fa]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo2WorldYawValidForQ1
+<BR>[Calls]<UL><LI><a href="#[fa]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo2WorldYawValidForQ1
 <LI><a href="#[e6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo1AngleValid
 <LI><a href="#[e5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo1AngleForVerticalDown
 <LI><a href="#[dc]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetWristFromTipVerticalDown
 <LI><a href="#[bf]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmJointPoseWithinSoftLimits
 <LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
 <LI><a href="#[be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAutoPoseIsSafe
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[131]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessAutoInit
 </UL>
@@ -5515,13 +5515,13 @@ Local Symbols
 </UL>
 
 <P><STRONG><a name="[f7]"></a>ArmTemperatureAtOrAbove</STRONG> (Thumb, 60 bytes, Stack size 0 bytes, arm.o(i.ArmTemperatureAtOrAbove))
-<BR><BR>[Called By]<UL><LI><a href="#[142]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessFaultReset
+<BR><BR>[Called By]<UL><LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
+<LI><a href="#[142]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessFaultReset
 <LI><a href="#[107]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteToolCommand
 <LI><a href="#[105]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteRealtimeTarget
 <LI><a href="#[102]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteJointCommand
 <LI><a href="#[f4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteCartesianCommand
 <LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
-<LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
 </UL>
 
 <P><STRONG><a name="[14e]"></a>ArmToolCommandAllowedBeforeReady</STRONG> (Thumb, 34 bytes, Stack size 0 bytes, arm.o(i.ArmToolCommandAllowedBeforeReady))
@@ -5533,24 +5533,24 @@ Local Symbols
 </UL>
 <BR>[Calls]<UL><LI><a href="#[13a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetState
 </UL>
-<BR>[Called By]<UL><LI><a href="#[157]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateHostStatus
+<BR>[Called By]<UL><LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
+<LI><a href="#[157]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateHostStatus
 <LI><a href="#[136]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessBootSequence
 <LI><a href="#[105]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteRealtimeTarget
 <LI><a href="#[102]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteJointCommand
 <LI><a href="#[f4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmExecuteCartesianCommand
-<LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
 </UL>
 
-<P><STRONG><a name="[153]"></a>ArmUpdateFeedback</STRONG> (Thumb, 802 bytes, Stack size 40 bytes, arm.o(i.ArmUpdateFeedback))
+<P><STRONG><a name="[152]"></a>ArmUpdateFeedback</STRONG> (Thumb, 802 bytes, Stack size 40 bytes, arm.o(i.ArmUpdateFeedback))
 <BR><BR>[Stack]<UL><LI>Max Depth = 124<LI>Call Chain = ArmUpdateFeedback &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
-<BR>[Calls]<UL><LI><a href="#[167]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorModeConfirmed
+<BR>[Calls]<UL><LI><a href="#[10b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmForwardKinematics3DOF
+<LI><a href="#[12c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorVelocityToJointDegS
+<LI><a href="#[129]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDeg
+<LI><a href="#[167]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorModeConfirmed
 <LI><a href="#[b9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DMMotorIsOnline
 <LI><a href="#[ea]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCheckLimit
 <LI><a href="#[133]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllTargetsSynced
-<LI><a href="#[10b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmForwardKinematics3DOF
-<LI><a href="#[12c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorVelocityToJointDegS
-<LI><a href="#[129]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDeg
 </UL>
 <BR>[Called By]<UL><LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
 </UL>
@@ -5559,14 +5559,14 @@ Local Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 132<LI>Call Chain = ArmUpdateHostStatus &rArr; ArmToolGetTipFromWrist &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolReadyForMotion
-<LI><a href="#[168]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmHostYawActive
-<LI><a href="#[13f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmHostFinishCommand
 <LI><a href="#[14f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryRealtimeActive
 <LI><a href="#[f9]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryIsBusy
 <LI><a href="#[12f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetTipFromWrist
 <LI><a href="#[13a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetState
 <LI><a href="#[f5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetServo2WorldYawTarget
+<LI><a href="#[f8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolReadyForMotion
+<LI><a href="#[168]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmHostYawActive
+<LI><a href="#[13f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmHostFinishCommand
 </UL>
 <BR>[Called By]<UL><LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
 </UL>
@@ -5575,17 +5575,19 @@ Local Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 108<LI>Call Chain = ArmUpdateTeachAndKinematicsDebug &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[b8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllFeedbackValid
 <LI><a href="#[13a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolGetState
 <LI><a href="#[10b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmForwardKinematics3DOF
+<LI><a href="#[b8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllFeedbackValid
+<LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[151]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTask
 </UL>
 
 <P><STRONG><a name="[ba]"></a>__ARM_isfinitef</STRONG> (Thumb, 18 bytes, Stack size 0 bytes, arm.o(i.__ARM_isfinitef))
-<BR><BR>[Called By]<UL><LI><a href="#[ee]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetJointCommandForPose
+<BR><BR>[Called By]<UL><LI><a href="#[12c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorVelocityToJointDegS
+<LI><a href="#[129]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDeg
+<LI><a href="#[ee]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSetJointCommandForPose
 <LI><a href="#[131]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmProcessAutoInit
 <LI><a href="#[130]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmPoseArrived
 <LI><a href="#[12b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDegWithShoulder
@@ -5598,8 +5600,6 @@ Local Symbols
 <LI><a href="#[ed]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCommandPose
 <LI><a href="#[ea]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCheckLimit
 <LI><a href="#[b8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAllFeedbackValid
-<LI><a href="#[12c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorVelocityToJointDegS
-<LI><a href="#[129]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMotorRadToJointDeg
 </UL>
 
 <P><STRONG><a name="[11d]"></a>ArmElbowMathToMechanicalDeg</STRONG> (Thumb, 14 bytes, Stack size 0 bytes, arm_kinematics.o(i.ArmElbowMathToMechanicalDeg))
@@ -5644,9 +5644,9 @@ Local Symbols
 <P><STRONG><a name="[c3]"></a>ArmCartesianBuildJointSampleProgress</STRONG> (Thumb, 412 bytes, Stack size 56 bytes, arm_trajectory.o(i.ArmCartesianBuildJointSampleProgress))
 <BR><BR>[Stack]<UL><LI>Max Depth = 88<LI>Call Chain = ArmCartesianBuildJointSampleProgress &rArr; __hardfp_fmaxf &rArr; __ARM_fcmp4
 </UL>
-<BR>[Calls]<UL><LI><a href="#[c6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_fmaxf
-<LI><a href="#[c5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;fabsf
+<BR>[Calls]<UL><LI><a href="#[c5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;fabsf
 <LI><a href="#[c4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianWrapTo180
+<LI><a href="#[c6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_fmaxf
 </UL>
 <BR>[Called By]<UL><LI><a href="#[c7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianDurationMs
 </UL>
@@ -5662,11 +5662,11 @@ Local Symbols
 <P><STRONG><a name="[c7]"></a>ArmCartesianDurationMs</STRONG> (Thumb, 884 bytes, Stack size 104 bytes, arm_trajectory.o(i.ArmCartesianDurationMs))
 <BR><BR>[Stack]<UL><LI>Max Depth = 192<LI>Call Chain = ArmCartesianDurationMs &rArr; ArmCartesianBuildJointSampleProgress &rArr; __hardfp_fmaxf &rArr; __ARM_fcmp4
 </UL>
-<BR>[Calls]<UL><LI><a href="#[c6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_fmaxf
-<LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
-<LI><a href="#[c5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;fabsf
+<BR>[Calls]<UL><LI><a href="#[c5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;fabsf
 <LI><a href="#[c4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianWrapTo180
 <LI><a href="#[c3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianBuildJointSampleProgress
+<LI><a href="#[c6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_fmaxf
+<LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
 </UL>
 <BR>[Called By]<UL><LI><a href="#[104]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryMoveJoint
 <LI><a href="#[fd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmMoveLinearToolTipVerticalDown
@@ -5795,10 +5795,7 @@ Local Symbols
 <P><STRONG><a name="[d9]"></a>ArmCartesianRunRealtime</STRONG> (Thumb, 1044 bytes, Stack size 152 bytes, arm_trajectory.o(i.ArmCartesianRunRealtime))
 <BR><BR>[Stack]<UL><LI>Max Depth = 348<LI>Call Chain = ArmCartesianRunRealtime &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
-<BR>[Calls]<UL><LI><a href="#[da]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_fminf
-<LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[ce]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianVectorLength
+<BR>[Calls]<UL><LI><a href="#[ce]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianVectorLength
 <LI><a href="#[df]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianToolVerticalAllowedForQ
 <LI><a href="#[d6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSmallLinkPitchDeg
 <LI><a href="#[db]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianSetVectorLength
@@ -5811,6 +5808,9 @@ Local Symbols
 <LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
 <LI><a href="#[be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAutoPoseIsSafe
 <LI><a href="#[d5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateJointReference
+<LI><a href="#[da]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_fminf
+<LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[139]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryTask
 </UL>
@@ -5847,8 +5847,7 @@ Local Symbols
 <P><STRONG><a name="[d4]"></a>ArmCartesianSolveOnlineIK</STRONG> (Thumb, 302 bytes, Stack size 72 bytes, arm_trajectory.o(i.ArmCartesianSolveOnlineIK))
 <BR><BR>[Stack]<UL><LI>Max Depth = 268<LI>Call Chain = ArmCartesianSolveOnlineIK &rArr; ArmInverseKinematics3DOF &rArr; ArmForwardKinematics3DOF &rArr; __hardfp_sinf &rArr; __mathlib_rredf2
 </UL>
-<BR>[Calls]<UL><LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[df]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianToolVerticalAllowedForQ
+<BR>[Calls]<UL><LI><a href="#[df]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianToolVerticalAllowedForQ
 <LI><a href="#[e2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRecordRejected
 <LI><a href="#[e1]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianPositionAtProgress
 <LI><a href="#[cc]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianJointStepContinuous
@@ -5856,6 +5855,7 @@ Local Symbols
 <LI><a href="#[bf]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmJointPoseWithinSoftLimits
 <LI><a href="#[de]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmInverseKinematics3DOF
 <LI><a href="#[be]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmAutoPoseIsSafe
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[d3]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianRunPreparedTrajectory
 </UL>
@@ -5888,14 +5888,14 @@ Local Symbols
 </UL>
 
 <P><STRONG><a name="[e7]"></a>ArmCartesianUpdateControlDebug</STRONG> (Thumb, 968 bytes, Stack size 48 bytes, arm_trajectory.o(i.ArmCartesianUpdateControlDebug))
-<BR><BR>[Stack]<UL><LI>Max Depth = 72<LI>Call Chain = ArmCartesianUpdateControlDebug &rArr; __hardfp_sqrtf &rArr; __set_errno
+<BR><BR>[Stack]<UL><LI>Max Depth = 72<LI>Call Chain = ArmCartesianUpdateControlDebug &rArr; ArmCartesianQuinticVelocity
 </UL>
-<BR>[Calls]<UL><LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
-<LI><a href="#[c5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;fabsf
+<BR>[Calls]<UL><LI><a href="#[c5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;fabsf
 <LI><a href="#[c4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianWrapTo180
 <LI><a href="#[d2]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianQuinticVelocity
 <LI><a href="#[d1]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmCartesianQuinticAcceleration
 <LI><a href="#[e8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUpdateControllerDebugSnapshot
+<LI><a href="#[c8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__hardfp_sqrtf
 </UL>
 <BR>[Called By]<UL><LI><a href="#[139]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmTrajectoryTask
 </UL>
@@ -5955,13 +5955,13 @@ Local Symbols
 <P><STRONG><a name="[15b]"></a>ArmToolDispatchPending</STRONG> (Thumb, 340 bytes, Stack size 24 bytes, arm_tool.o(i.ArmToolDispatchPending))
 <BR><BR>[Stack]<UL><LI>Max Depth = 116<LI>Call Chain = ArmToolDispatchPending &rArr; HSLServoMove2 &rArr; HSLServoQueueBoardMove2 &rArr; HSLServoFindStatus &rArr; __aeabi_memclr4
 </UL>
-<BR>[Calls]<UL><LI><a href="#[15c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoMove2
-<LI><a href="#[15f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoMove
-<LI><a href="#[15d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolRecordTxSuccess
+<BR>[Calls]<UL><LI><a href="#[15d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolRecordTxSuccess
 <LI><a href="#[15e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolRecordTxFailure
 <LI><a href="#[15a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolClearPending
+<LI><a href="#[15c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoMove2
+<LI><a href="#[15f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HSLServoMove
 </UL>
-<BR>[Called By]<UL><LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTask
+<BR>[Called By]<UL><LI><a href="#[155]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTask
 </UL>
 
 <P><STRONG><a name="[15e]"></a>ArmToolRecordTxFailure</STRONG> (Thumb, 34 bytes, Stack size 8 bytes, arm_tool.o(i.ArmToolRecordTxFailure))
@@ -5985,8 +5985,8 @@ Local Symbols
 <LI><a href="#[163]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServoIndex
 <LI><a href="#[164]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServoAngleFiniteAndInRange
 </UL>
-<BR>[Called By]<UL><LI><a href="#[155]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTrackServo2WorldYaw
-<LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTask
+<BR>[Called By]<UL><LI><a href="#[154]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTrackServo2WorldYaw
+<LI><a href="#[155]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTask
 <LI><a href="#[10a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetServo2Angle
 <LI><a href="#[109]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetServo1Angle
 </UL>
@@ -5997,7 +5997,7 @@ Local Symbols
 <BR>[Calls]<UL><LI><a href="#[159]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__ARM_isfinitef
 </UL>
 <BR>[Called By]<UL><LI><a href="#[162]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSendServo
-<LI><a href="#[155]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTrackServo2WorldYaw
+<LI><a href="#[154]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTrackServo2WorldYaw
 <LI><a href="#[10a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetServo2Angle
 <LI><a href="#[fa]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo2WorldYawValidForQ1
 <LI><a href="#[e6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo1AngleValid
@@ -6010,7 +6010,7 @@ Local Symbols
 <P><STRONG><a name="[159]"></a>__ARM_isfinitef</STRONG> (Thumb, 18 bytes, Stack size 0 bytes, arm_tool.o(i.__ARM_isfinitef))
 <BR><BR>[Called By]<UL><LI><a href="#[158]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolAngleDegToPos
 <LI><a href="#[164]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServoAngleFiniteAndInRange
-<LI><a href="#[155]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTrackServo2WorldYaw
+<LI><a href="#[154]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTrackServo2WorldYaw
 <LI><a href="#[ff]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetServo2WorldYawTarget
 <LI><a href="#[fa]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo2WorldYawValidForQ1
 <LI><a href="#[e5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo1AngleForVerticalDown
@@ -6020,8 +6020,8 @@ Local Symbols
 
 <P><STRONG><a name="[165]"></a>fabsf</STRONG> (Thumb, 10 bytes, Stack size 0 bytes, arm_tool.o(i.fabsf))
 <BR><BR>[Called By]<UL><LI><a href="#[162]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSendServo
-<LI><a href="#[155]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTrackServo2WorldYaw
-<LI><a href="#[152]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTask
+<LI><a href="#[154]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTrackServo2WorldYaw
+<LI><a href="#[155]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolTask
 <LI><a href="#[d7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetVerticalDownFromPitch
 <LI><a href="#[e5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolServo1AngleForVerticalDown
 </UL>
@@ -6068,13 +6068,13 @@ Local Symbols
 <BR><BR>[Stack]<UL><LI>Max Depth = 304<LI>Call Chain = ArmUsbFailActive &rArr; ArmUsbSendMotionStatus &rArr; ArmGetHostStatus &rArr; __aeabi_memcpy4
 </UL>
 <BR>[Calls]<UL><LI><a href="#[100]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GetTick
-<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 <LI><a href="#[176]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSendCallbackStatus
 <LI><a href="#[177]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbNextInternalCommandId
 <LI><a href="#[178]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbClearActiveTracking
 <LI><a href="#[18a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBusinessCallbackId
 <LI><a href="#[108]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmToolSetMagnet
 <LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 <LI><a href="#[16a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSetState
 <LI><a href="#[16c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSendMotionStatus
 </UL>
@@ -6146,9 +6146,9 @@ Local Symbols
 <P><STRONG><a name="[16c]"></a>ArmUsbSendMotionStatus</STRONG> (Thumb, 102 bytes, Stack size 216 bytes, arm_usb_bridge.o(i.ArmUsbSendMotionStatus))
 <BR><BR>[Stack]<UL><LI>Max Depth = 240<LI>Call Chain = ArmUsbSendMotionStatus &rArr; ArmGetHostStatus &rArr; __aeabi_memcpy4
 </UL>
-<BR>[Calls]<UL><LI><a href="#[18c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;protocol_send_motion_status
-<LI><a href="#[181]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFillCurrentFromHost
+<BR>[Calls]<UL><LI><a href="#[181]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFillCurrentFromHost
 <LI><a href="#[10f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmGetHostStatus
+<LI><a href="#[18c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;protocol_send_motion_status
 </UL>
 <BR>[Called By]<UL><LI><a href="#[174]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbRejectActive
 <LI><a href="#[183]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFailActive
@@ -6179,10 +6179,10 @@ Local Symbols
 
 <P><STRONG><a name="[16a]"></a>ArmUsbSetState</STRONG> (Thumb, 48 bytes, Stack size 0 bytes, arm_usb_bridge.o(i.ArmUsbSetState))
 <BR><BR>[Called By]<UL><LI><a href="#[17d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeTask
-<LI><a href="#[169]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeInit
 <LI><a href="#[174]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbRejectActive
 <LI><a href="#[183]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbFailActive
 <LI><a href="#[185]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbCompleteActive
+<LI><a href="#[169]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeInit
 <LI><a href="#[175]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeOnTaskStatus
 <LI><a href="#[16b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeOnTargetControl
 <LI><a href="#[16f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbStartBusiness
@@ -6200,17 +6200,17 @@ Local Symbols
 </UL>
 
 <P><STRONG><a name="[188]"></a>ArmUsbSubmitServo2Reset</STRONG> (Thumb, 84 bytes, Stack size 56 bytes, arm_usb_bridge.o(i.ArmUsbSubmitServo2Reset))
-<BR><BR>[Stack]<UL><LI>Max Depth = 80<LI>Call Chain = ArmUsbSubmitServo2Reset &rArr; ArmSubmitCommand &rArr; __aeabi_memcpy4
+<BR><BR>[Stack]<UL><LI>Max Depth = 80<LI>Call Chain = ArmUsbSubmitServo2Reset &rArr; ArmSubmitCommand &rArr; ArmToolReadyForMotion
 </UL>
-<BR>[Calls]<UL><LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[177]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbNextInternalCommandId
+<BR>[Calls]<UL><LI><a href="#[177]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbNextInternalCommandId
 <LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[17d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeTask
 </UL>
 
 <P><STRONG><a name="[172]"></a>ArmUsbSubmitTargetMoveFinal</STRONG> (Thumb, 36 bytes, Stack size 8 bytes, arm_usb_bridge.o(i.ArmUsbSubmitTargetMoveFinal))
-<BR><BR>[Stack]<UL><LI>Max Depth = 112<LI>Call Chain = ArmUsbSubmitTargetMoveFinal &rArr; ArmUsbSubmitTipMove &rArr; ArmSubmitCommand &rArr; __aeabi_memcpy4
+<BR><BR>[Stack]<UL><LI>Max Depth = 112<LI>Call Chain = ArmUsbSubmitTargetMoveFinal &rArr; ArmUsbSubmitTipMove &rArr; ArmSubmitCommand &rArr; ArmToolReadyForMotion
 </UL>
 <BR>[Calls]<UL><LI><a href="#[17a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSubmitTipMove
 </UL>
@@ -6219,7 +6219,7 @@ Local Symbols
 </UL>
 
 <P><STRONG><a name="[171]"></a>ArmUsbSubmitTargetMoveLift</STRONG> (Thumb, 46 bytes, Stack size 8 bytes, arm_usb_bridge.o(i.ArmUsbSubmitTargetMoveLift))
-<BR><BR>[Stack]<UL><LI>Max Depth = 112<LI>Call Chain = ArmUsbSubmitTargetMoveLift &rArr; ArmUsbSubmitTipMove &rArr; ArmSubmitCommand &rArr; __aeabi_memcpy4
+<BR><BR>[Stack]<UL><LI>Max Depth = 112<LI>Call Chain = ArmUsbSubmitTargetMoveLift &rArr; ArmUsbSubmitTipMove &rArr; ArmSubmitCommand &rArr; ArmToolReadyForMotion
 </UL>
 <BR>[Calls]<UL><LI><a href="#[17a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbSubmitTipMove
 </UL>
@@ -6227,11 +6227,11 @@ Local Symbols
 </UL>
 
 <P><STRONG><a name="[17a]"></a>ArmUsbSubmitTipMove</STRONG> (Thumb, 154 bytes, Stack size 80 bytes, arm_usb_bridge.o(i.ArmUsbSubmitTipMove))
-<BR><BR>[Stack]<UL><LI>Max Depth = 104<LI>Call Chain = ArmUsbSubmitTipMove &rArr; ArmSubmitCommand &rArr; __aeabi_memcpy4
+<BR><BR>[Stack]<UL><LI>Max Depth = 104<LI>Call Chain = ArmUsbSubmitTipMove &rArr; ArmSubmitCommand &rArr; ArmToolReadyForMotion
 </UL>
-<BR>[Calls]<UL><LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
-<LI><a href="#[177]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbNextInternalCommandId
+<BR>[Calls]<UL><LI><a href="#[177]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbNextInternalCommandId
 <LI><a href="#[14b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmSubmitCommand
+<LI><a href="#[dd]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;__aeabi_memclr4
 </UL>
 <BR>[Called By]<UL><LI><a href="#[17d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeTask
 <LI><a href="#[175]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ArmUsbBridgeOnTaskStatus
@@ -6372,18 +6372,18 @@ Local Symbols
 <P><STRONG><a name="[f]"></a>CDC_Init_FS</STRONG> (Thumb, 28 bytes, Stack size 8 bytes, usbd_cdc_if.o(i.CDC_Init_FS))
 <BR><BR>[Stack]<UL><LI>Max Depth = 24<LI>Call Chain = CDC_Init_FS &rArr; USB_ConnectionResetHandler
 </UL>
-<BR>[Calls]<UL><LI><a href="#[1a5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CDC_SetTxBuffer
+<BR>[Calls]<UL><LI><a href="#[1a4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_ConnectionResetHandler
+<LI><a href="#[1a5]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CDC_SetTxBuffer
 <LI><a href="#[1a6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CDC_SetRxBuffer
-<LI><a href="#[1a4]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_ConnectionResetHandler
 </UL>
 <BR>[Address Reference Count : 1]<UL><LI> usbd_cdc_if.o(.data)
 </UL>
 <P><STRONG><a name="[12]"></a>CDC_Receive_FS</STRONG> (Thumb, 32 bytes, Stack size 16 bytes, usbd_cdc_if.o(i.CDC_Receive_FS))
 <BR><BR>[Stack]<UL><LI>Max Depth = 148<LI>Call Chain = CDC_Receive_FS &rArr; USBD_CDC_ReceivePacket &rArr; USBD_LL_PrepareReceive &rArr; HAL_PCD_EP_Receive &rArr; USB_EPStartXfer &rArr; USB_WritePacket
 </UL>
-<BR>[Calls]<UL><LI><a href="#[1a6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CDC_SetRxBuffer
+<BR>[Calls]<UL><LI><a href="#[1a7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_RxHandler
+<LI><a href="#[1a6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CDC_SetRxBuffer
 <LI><a href="#[1a8]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USBD_CDC_ReceivePacket
-<LI><a href="#[1a7]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;USB_RxHandler
 </UL>
 <BR>[Address Reference Count : 1]<UL><LI> usbd_cdc_if.o(.data)
 </UL>
