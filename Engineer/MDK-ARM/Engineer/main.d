@@ -63,8 +63,6 @@ engineer\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdlib.h
 engineer\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
 engineer\main.o: ../Core/Inc/gpio.h
 engineer\main.o: ../APPLICATION/chassis/chassis.h
-engineer\main.o: ../APPLICATION/cmd/robot_cmd.h
-engineer\main.o: ../APPLICATION/robot_def.h
 engineer\main.o: ../MODULE/imu/ins_task.h
 engineer\main.o: ../MODULE/imu/BMI088driver.h
 engineer\main.o: ../MODULE/algorithm/QuaternionEKF.h
@@ -73,10 +71,7 @@ engineer\main.o: ../Middlewares/ST/ARM/DSP/Inc/arm_math.h
 engineer\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\math.h
 engineer\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\float.h
 engineer\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\limits.h
-engineer\main.o: ../MODULE/remote/remote.h
-engineer\main.o: ../APPLICATION/nac.h
-engineer\main.o: ../BSP/USART/bsp_usart.h
 engineer\main.o: ../APPLICATION/Test.h
-engineer\main.o: ../APPLICATION/arm/arm.h
-engineer\main.o: ../APPLICATION/arm/arm_host.h
-engineer\main.o: ../MODULE/feite_motor/hsl_servo.h
+engineer\main.o: ../APPLICATION/cmd/robot_cmd.h
+engineer\main.o: ../APPLICATION/robot_def.h
+engineer\main.o: ../MODULE/remote/remote.h

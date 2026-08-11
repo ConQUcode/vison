@@ -1,8 +1,23 @@
 # Progress
 
+## 2026-08-10 - Phase 31 started
+
+- User approved execution of the Huaner feedback-closure plan after manually changing CubeMX to asynchronous 115200 baud.
+- Verified the generated RX/TX DMA handles, stream IRQ handlers and USART6 GPIO configuration.
+- Scoped the first runnable image to feedback-only polling of IDs 1 and 2. Arm and chassis motion remain disabled; no automatic servo movement will be introduced.
+- Replaced the active mixed protocol with controller-board `0x03` move and `0x15` multi-position request/reply framing. Added RX-to-idle plus TX DMA ownership, strict dual-ID parsing, measured velocity, freshness, arrival and timeout supervision.
+- Added a feedback-only test mode. It initializes and polls IDs 1/2 at 50 Hz, disables chassis/arm motor service, and requires both `motion_unlocked=1` and a new sticky `request_seq` before moving a servo.
+- The first GCC syntax wrapper failed before compilation because `cmd.exe` interpreted the quoted executable path literally. Retrying the same compiler through its space-free absolute path succeeded with `-Wall -Wextra -Wshadow` and no diagnostics.
+
 ## 2026-08-01 - Phase 28 completed
 
 - Compared the desktop auto-generated `protocol.h/.c/PROTOCOL_DOC.md` against the live firmware protocol. Packet IDs, payload fields, sizes, CRC, ACK sequence, heartbeat echo and retry timing are unchanged; the wire hash changed to `0x8845D84A` and `Status` gained `STOP=3`.
+
+## 2026-08-02 - Phase 29 started
+
+- User approved the complete ID1-pitch/ID2-gripper and CAN2 two-M3508 differential chassis implementation plan.
+- Confirmed the source baseline is clean apart from user-owned VS Code browse database files. The three-Damiao arm, 62/260/260 mm geometry and shoulder-elbow belt coupling remain in scope as preserved behavior.
+- Selected native Windows command/build tooling because PowerShell startup fails on this host. No source file has been changed yet.
 - Preserved the firmware's existing USB copy queue, high-priority ACK path, reliable queue rotation, timeout recovery and debug extensions instead of overwriting them with the smaller generated transport implementation.
 - Implemented TaskStatus STOP as an idempotent business state machine: cancel any active motion, preserve the magnet while returning to fixed HOME, turn the magnet off only after HOME completes, clear task state and reliably enqueue `CallbackStatus{task_id, STOP}`.
 - STOP HOME failure retains the magnet state and returns `FAULT_RETRY`; repeated STOP after the safe state does not repeat motion and reissues the STOP callback.
@@ -186,3 +201,156 @@
 - 2026-07-30: Corrected the ID1 end-tool vertical compensation direction by restoring `ARM_TOOL_SERVO1_DIRECTION=+1.0f`. Main-arm motor directions, belt coupling and kinematics were left unchanged; no Keil build or hardware test was run.
 - 2026-07-31: Started Phase 19 USB host protocol integration. Confirmed live code still has the old `CmdVel` protocol, USB CDC RX ring buffer is present but `USB_ProcessTask()` is commented out, `arm_host.h` lacks ID2 yaw fields, and `ARM_BOOT_TOOL_TEST_ENABLE` is still enabled. Existing user changes are `.vscode/BROWSE.VC.DB` and `Engineer/APPLICATION/arm/arm_config.h`.
 - 2026-07-31: Completed Phase 19 source implementation. Replaced the protocol module, added USB copy TX queue and CDC TX completion handling, added `arm_usb_bridge` compound action state machine, added ID2 yaw fields to arm host commands, enabled `USB_ProcessTask/protocol_tick/ArmUsbBridgeTask/BuzzerTask`, added a reusable non-blocking TIM4 buzzer module, and disabled the power-on tool test. `git diff --check` passed with CRLF conversion notices only. No Keil build, flash, USB capture, or hardware validation was run.
+## 2026-08-02 - Differential chassis 1 m test implemented
+
+- User narrowed the active goal to chassis-only bring-up; the incomplete arm-tool refactor was fully restored before continuing.
+- Replaced the inactive legacy swerve application with CAN2 M3508 ID1/ID2 differential-drive test control.
+- Added encoder distance odometry, continuous IMU yaw heading hold, staged auto-start, acceleration limiting, distance deceleration, and latched motor/IMU/timeout safety stops.
+- Disabled ArmInit, ArmTask, DMMotorControl, and the arm USB bridge task in the active test schedule.
+- Restored 1 kHz INS_Task execution and initialized INS before the scheduler.
+- Keil ARMCC 5.06 directly recompiled every changed C file, then the generated Engineer.lnp/scatter configuration was linked with armlink: 0 errors, 0 warnings; Code=67044, RO=2984, RW=1340, ZI=98124.
+
+## 2026-08-11 - Huaner closed-loop feedback bench image completed
+
+- Replaced the mixed direct-servo feedback parser with controller-board `0x15` dual-ID request/reply handling and a strict on-boot protocol self-test.
+- Added RX-to-idle DMA, TX DMA, one-owner transaction state, response/TX timeouts, UART recovery, 20 ms polling and per-servo target/feedback/velocity/arrival/offline diagnostics.
+- Fixed the shared TX-buffer race by reserving the transaction before copying any caller frame into the DMA-owned buffer.
+- Added the feedback-only Watch harness. Arm and chassis motor control remain disabled; `motion_unlocked` defaults to zero and no automatic move is issued.
+- Integrated feedback health into `arm_tool` diagnostics for later use without calling the mechanical-arm runtime in this image.
+- ARM GCC strict syntax checks, direct ARMCC compilation and scoped `git diff --check` passed for the changed path.
+- Final Keil link generated `Engineer.axf`, `Engineer.hex` and `Engineer.map`: Code 66480, RO 2992, RW 896, ZI 99076, 0 errors and 10 legacy catch warnings.
+- Hardware reply capture, actual servo position range, flash and physical motion validation remain pending.
+
+## 2026-08-11 - ESP32 controller-board reference alignment in progress
+
+- Confirmed the user-updated CubeMX output already uses USART6 asynchronous 9600 8N1 with separate TX/RX and DMA.
+- Kept the existing controller-board `0x03`/`0x15` packet implementation and strict DMA feedback parser rather than replacing it with the less defensive ESP32 parser.
+- Added UART configuration validation and Watch-visible baud/expected reply length fields.
+- Changed controller-board feedback polling from 20 ms to 50 ms to leave timing margin at 9600 baud while preserving the ID1 0/90 degree five-second sweep.
+- The first UV4 invocation failed before compilation because it could not create temporary files; its zero-error footer is invalid because the same log says `Target not created`. A project-local TEMP/TMP retry is required.
+- Rebuilt with project-local TEMP/TMP. Final `Engineer.axf/.hex/.map` were generated with 0 errors; 10 existing warnings come only from `catch.c/catch.h`. Map output retains the UART configuration guard, controller-board polling and ID1 sweep sender.
+- Scoped `git diff --check` passed with line-ending notices only. Hardware reply capture, board alarm diagnosis, flashing and physical movement remain external.
+
+## 2026-08-11 - Concise ID1 servo Watch telemetry completed
+
+- Reduced `g_huaner_servo1_debug` from the large protocol/state snapshot to five fields: `initialized`, `online`, `feedback_valid`, `target_angle_deg` and `current_angle_deg`.
+- Moved sweep state, next target, five-second timing, move count and last driver result into private `Test.c` runtime state; ID1 motion and feedback polling behavior are unchanged.
+- Did not add current, voltage or temperature fields because the verified controller-board `0x15` position reply does not carry those measurements.
+- Keil ARMCC build passed with 0 errors and 0 warnings; Code=42100, RO=628, RW=444 and ZI=97604 bytes. Scoped `git diff --check` passed.
+
+## 2026-08-11 - Controller-board voltage telemetry completed
+
+- Added controller command `0x0F` request `55 55 02 0F` and strict reply parsing for `55 55 04 0F VL VH`, interpreted as little-endian millivolts in the 3000-15000 mV range.
+- Added a separate board-voltage transaction, 500 ms polling and 1500 ms freshness supervision to the existing USART6 DMA owner. Position polling remains first priority and voltage failures do not alter servo online state.
+- Added protocol self-tests for the voltage request, valid 7400 mV reply, wrong command, invalid length, truncation and out-of-range voltage.
+- Added only `board_voltage_valid` and `board_voltage_v` to `g_huaner_servo1_debug`; the Watch structure remains compact at 16 bytes.
+- Keil produced AXF/HEX/MAP with 0 errors and 10 unchanged legacy catch warnings; Code=42992, RO=636, RW=444 and ZI=97636 bytes. Scoped whitespace checks passed.
+
+## 2026-08-11 - Phase 35 started
+
+- Reopened the live runtime, tool, trajectory, USB bridge and protocol sources instead of relying on the earlier broad refactor plan.
+- Confirmed the controller-board transport can support the new feature without CubeMX or frame-format changes.
+- Locked ID1 `125/500/875`, ID2 `800/850/950/1000`, ID2-only close/boot stall detection and 10-position relief semantics.
+- Preserved all unrelated chassis, CubeMX, IDE database and generated build changes.
+
+## 2026-08-11 - Phase 35 completed
+
+- Replaced ID1 empirical vertical compensation with absolute-pitch control, `125..875` rejection limits and the 30 mm gripper-center coordinate model.
+- Added complete path preflight and 20 ms ID1 tracking for joint, direct Cartesian, linear Cartesian and realtime trajectories; unsupported tool yaw is rejected.
+- Replaced ID2 world-yaw/magnet behavior with feedback-confirmed `BOOT/READY/OPEN/CLOSE`, close/boot stall classification and one-time 10-position relief.
+- Migrated startup READY gating, Task 5, Task 6, STOP, host snapshots and the reliable USB bridge to the new pitch/gripper semantics.
+- Updated protocol IDs `0x04..0x07`, raised the payload limit to 32 bytes, set `PROTOCOL_HASH=0x1E7AC5B2` and updated `PROTOCOL_DOC.md`.
+- Restored the production arm schedule and left the old five-second ID1 sweep compile-time disabled. Chassis, IMU, Damiao parameters and USART6 CubeMX settings were not changed by this phase.
+- Keil ARMCC 5.06u7 full rebuild passed with `0 errors / 0 warnings`: Code 90556, RO-data 764, RW-data 1008 and ZI-data 106588 bytes. AXF, HEX and MAP were regenerated on 2026-08-11.
+- Source/MAP audit confirms the new pitch/gripper symbols are linked and old vertical-compensation, world-yaw and magnet business symbols are gone. Final hardware flashing and mechanical validation remain pending.
+- Final scoped `git diff --check` passed with line-ending conversion notices only. The temporary `Engineer/MDK-ARM/phase35_build.log` was removed after its result was recorded; formal AXF/HEX/MAP outputs remain in place.
+
+## 2026-08-11 - Phase 36 started
+
+- Routed the STM32F407/FreeRTOS/Keil task to application-schedule inspection plus Keil rebuild/map verification; no UART or CAN wire-format change is required.
+- Confirmed the chassis 1 m controller, IMU/encoder odometry and Watch snapshot still exist and only the active `Test.c` runtime selection must be restored.
+- Locked the final image to chassis-only mode while retaining the completed arm/tool implementation and public APIs in source.
+- Confirmed the intended scheduler ownership: `INS_Init()` before the scheduler, `INS_Task()` plus `ChassisNotifyImuUpdate()` at 1 kHz, and `ChassisTask()` plus `DJIMotorControl()` in the 1 kHz combined-control task.
+- Confirmed `RobotCMDInit()` is only the DWT clock initialization required by INS and is safe to retain in the chassis-only image.
+- Added Chinese semantic comments to the arm tool API, host command/status fields, tool protocol packets, chassis Watch snapshot and chassis public functions without reordering ABI-visible data.
+- Added mutually exclusive `CHASSIS_ONE_METER_TEST_ONLY`, `HUANER_SERVO_ID1_SWEEP_TEST_ONLY` and derived production-arm mode selection; the chassis test is now the default.
+- Restored one-time INS/chassis initialization and periodic 1 kHz INS notification plus chassis/DJI control. The active branch contains no arm, Damiao or USART6-tool initialization/service call.
+- Scoped `git diff --check` passes with LF-to-CRLF notices only; Keil rebuild and MAP verification are next.
+- The first Phase 36 rebuild passed, then final USB/protocol isolation required a second full rebuild. The final Keil ARMCC 5.06u7 image passes with `0 errors / 0 warnings`: Code 64976, RO-data 2984, RW-data 1360 and ZI-data 98568 bytes.
+- MAP confirms the chassis/INS/DJI runtime is linked and the arm, Damiao and USART6-tool initialization/control entry points are removed from the final image.
+- Flash, SRAM1 and SRAM2 regions all fit. Final scoped whitespace validation passed; flashing and physical 1 m testing were not performed.
+- Reopened final verification after confirming `USB_ProcessTask()` directly dispatches protocol callbacks. Gated USB RX/TX parsing and `protocol_tick()` to production-arm mode so the chassis image cannot indirectly submit arm commands.
+- Final MAP and region audit confirms the USB parser/arm callbacks are removed, chassis/INS/DJI control is retained, and all flash/SRAM regions fit.
+
+## 2026-08-11 - Phase 37 IMU direction correction
+
+- Hardware observation indicates the straight-line IMU correction direction is reversed. Changed the single centralized `CHASSIS_IMU_YAW_SIGN` from `+1.0f` to `-1.0f` so both continuous yaw and gyro-Z feedback use the corrected logical sign.
+- Left/right command signs, encoder feedback signs, differential-drive equations and heading PID gains remain unchanged.
+- Final Keil rebuild passed with `0 errors / 0 warnings`; Code 64976, RO-data 2984, RW-data 1360 and ZI-data 98568 bytes. MAP confirms the chassis runtime remains active and arm/Damiao periodic control remains removed.
+
+## 2026-08-11 - Phase 38 arm test mode selected
+
+- Disabled the chassis 1 m test selector and kept the isolated ID1 sweep selector disabled, which activates the existing production arm/USB/tool branch.
+- No arm, gripper, chassis, IMU or protocol control parameter was changed; this phase only switches the active application runtime.
+- Keil full rebuild passed with `0 errors / 0 warnings`: Code 90556, RO-data 764, RW-data 1008 and ZI-data 106588 bytes.
+- MAP confirms the production arm, Damiao, Huaner tool and USB protocol paths are linked, while INS and application-layer chassis control are removed from the final image.
+
+## 2026-08-11 - Phase 39 started
+
+- Confirmed the current production-arm selector initializes and services both Huaner servos, all three Damiao motors and the USB arm bridge.
+- Confirmed the requested HOME calculation: `[0,90,-60] deg` maps to ID1 pitch-axis position `(225.1666,0,192.0) mm` with the live geometry and passes the configured joint limits.
+- Scoped the implementation to arm configuration, HOME IK resolution, Cartesian endpoint conversion, host/protocol semantics and build artifacts; unrelated dirty files remain untouched.
+- PowerShell startup failed with the known host error `8009001d`; all subsequent inspection uses native `cmd.exe`. Several quoted MSYS `sed` expressions were rejected by `cmd`; unquoted address ranges succeeded and no source file was changed by those failed reads.
+- Updated the active boot-mode naming, HOME joint/Cartesian constants, coordinate-path helpers, host status semantics and protocol documentation/hash while preserving the combined initialization state machine.
+- A host build of the live `arm_kinematics.c` verified FK `[0,90,-60] -> (225.166580,0,192.000000) mm` with `0.000015 mm` error. IK from seed `[0,180,-90]` returned exactly `[0,90,-60]`, and both software-limit and automatic-safe checks returned true.
+- The first two host GCC attempts failed before compilation because `TEMP` pointed to protected `C:\WINDOWS`; an explicit user-local TEMP/TMP retry passed. The temporary test source and executable were removed after the successful result.
+- Keil ARMCC 5.06u7 full rebuild completed with `0 errors / 0 warnings`; current AXF, HEX, MAP and build log were regenerated at 07:05. Image totals are Code 90776, RO-data 764, RW-data 1016 and ZI-data 106620 bytes.
+- MAP confirms the final runtime contains `ArmInit`, `ArmTask`, HOME IK, `DMMotorControl`, `HSLServoInit`, `ArmUsbBridgeTask` and `g_arm_servo_angle_debug`, while application `ChassisInit` and `INS_Init` are removed.
+
+## 2026-08-11 - Phase 40 started
+
+- Reopened the live protocol, scheduler, application selector, arm calibration constants and Keil project membership before editing.
+- Locked the implementation to USB CDC, strict handshake/heartbeat, observation-only FruitDetection, full standalone arm HOME, and no chassis/INS runtime.
+- Confirmed the base positive-X correction will be performed by resaving the physical base zero with the Damiao host tool; firmware mapping and joint limits remain centered at q1=0.
+- PowerShell remains unusable with host error `8009001d`; native `cmd.exe` and Windows Keil tools are used for inspection and build validation.
+- Added the new protocol state machine, generic reliable FIFO, strict heartbeat state, observation-only fruit bridge, scheduler switch, Keil project membership and positive-X saved-zero guard.
+- ARM GCC strict syntax checks pass for the new protocol and fruit bridge. The first MinGW host-test link did not compile because its temporary directory resolved to protected `C:\WINDOWS`; a project-local TEMP/TMP retry is next.
+- The independent `w64devkit` GCC built the host protocol harness with all warnings as errors, and every runtime assertion passed: handshake gating/mismatch, no-ACK FruitDetection, duplicate refresh, no-target/invalid handling, length/CRC rejection, heartbeat echo and exact 3000 ms expiry.
+
+## 2026-08-11 - Phase 40 completed
+
+- Replaced the active legacy arm business protocol with the supplied observation-only FruitDetection contract and hash `0x923FFDD9`, while preserving USB CDC queue ownership, parser resynchronization, high-priority system replies and generic reliable-message infrastructure.
+- Added strict handshake and heartbeat session handling plus the standalone `fruit_usb_bridge`; `g_fruit_usb_debug` exposes only connection, latest result and key packet counters. Fruit packets cannot move the arm or gripper.
+- Removed `ArmUsbBridgeInit/Task` from the active initialization, schedule and Keil target without deleting the existing dirty bridge sources. The full arm, three Damiao motors and two Huaner servos remain active; chassis and INS remain excluded.
+- Preserved HOME `[0,90,-60]` and added the base saved-zero startup guard and Chinese calibration comments. Logical positive X is defined by the physical Damiao zero saved with the vendor host tool, not by an FK sign inversion or 180-degree software offset.
+- ARM GCC strict checks and the host protocol harness passed. HOME FK/IK verification returned `(225.166580,0,192.000000) mm` and `(0,90.000008,-60) deg`.
+- Keil ARMCC 5.06u7 rebuilt AXF/HEX/MAP with `0 errors / 0 warnings`: Code 84080, RO-data 764, RW-data 972 and ZI-data 106384 bytes. MAP retains Fruit/arm/Damiao/Huaner runtime symbols, excludes `ArmUsbBridgeTask`, and removes application chassis/INS initialization.
+- Final flash/SRAM regions fit. After normalizing trailing whitespace in two Keil-generated text artifacts, complete `git diff --check` passes with line-ending conversion warnings only; all Phase 40 temporary files were removed.
+- Firmware flashing, physical base-zero saving, automatic HOME motion and hardware USB validation were not performed in this session.
+
+## 2026-08-11 - Phase 41 started
+
+- Hardware reports both Huaner servos offline and no Damiao enable after the Phase 40 image starts.
+- The current boot design intentionally waits for successful tool-controller initialization and fresh ID1/ID2 position feedback before entering the three-Damiao enable sequence, so the missing motor enable is a downstream symptom.
+- Investigation is scoped to the USART6 controller-board init/DMA/query/reply path and the tool boot gate; chassis, INS, FruitDetection and arm geometry remain unchanged until the exact failure is isolated.
+- Changed the full-arm boot order so all three Damiao motors enable and hold their measured startup positions first. Tool polling continues in parallel, but automatic HOME remains blocked until both Huaner servos have fresh valid feedback and complete their boot positions.
+- Keil rebuilt the new boot order with `0 errors / 0 warnings`: Code 84104, RO-data 764, RW-data 972 and ZI-data 106384 bytes. MAP confirms both the Damiao hold path and USART6 feedback path are linked, while chassis/INS remain removed.
+- Full `git diff --check` passes after normalizing the two Keil-generated text artifacts. The remaining servo fault requires one new hardware run and the selected `g_hsl_servo_debug` counters; no source-side evidence supports callback-registration exhaustion or a dual-ID length mismatch.
+
+## 2026-08-11 - Phase 42 started
+
+- Hardware now confirms both controller-board servos respond correctly in the isolated feedback test.
+- The requested runtime target is the complete arm/Damiao/Huaner initialization and HOME sequence, with chassis and INS still disabled.
+- The supplied six-page controller-board protocol will be used to harden only the position/move/voltage functions required by the arm; action-group features remain out of scope.
+- PowerShell failed with the known `8009001d` startup error, so native `cmd.exe` remains the command shell.
+- Rendered and visually inspected all six PDF pages. The arm-used wire formats are controller-board move `0x03`, position read `0x15` and board voltage `0x0F`; no CRC or per-servo current/temperature reply is defined in this document.
+- Restored the complete arm selector, retained chassis/INS disablement, unified `0x03` move-frame generation, and changed configured multi-ID feedback polling to independent alternating single-ID `0x15` requests.
+- Driver lifecycle review confirms static DMA-buffer ownership and ISR/task separation are sound on STM32F407; no BSP or CubeMX change is required.
+- Strict host syntax checking passes for `hsl_servo.c` with `-Wall -Wextra -Wshadow -Werror`; only the explicitly non-fatal 32-bit CMSIS vector-address cast appears under the 64-bit host compiler.
+
+## 2026-08-11 - Phase 42 completed
+
+- Restored the complete arm runtime while keeping chassis and INS disabled. Startup again initializes both Huaner servos, the three Damiao arm motors, standalone HOME and the observation-only FruitDetection bridge.
+- Controller-board move, position and voltage formats now follow the supplied PDF through centralized builders/parsers and deterministic self-tests. Configured two-servo polling is split into alternating single-ID requests so one missing reply does not invalidate the other servo.
+- Keil ARMCC rebuilt the final AXF/HEX/MAP with `0 errors / 0 warnings`: Code 84400, RO-data 796, RW-data 972 and ZI-data 106384 bytes. MAP retains arm/Damiao/Huaner/Fruit paths and removes chassis/INS entry points.
+- Flashing and hardware HOME/gripper validation were not performed. Untracked binary PDF-render scratch files remain under `tmp/pdfs` because deletion is blocked by the current execution policy; they are not referenced by the project.

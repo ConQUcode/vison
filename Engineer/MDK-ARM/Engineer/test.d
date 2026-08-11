@@ -1,9 +1,6 @@
 engineer\test.o: ..\APPLICATION\Test.c
-engineer\test.o: ../MODULE/motor/DJImotor/DJI_motor.h
-engineer\test.o: ../BSP/CAN/bsp_can.h
+engineer\test.o: ..\APPLICATION\Test.h
 engineer\test.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
-engineer\test.o: ../Core/Inc/can.h
-engineer\test.o: ../Core/Inc/main.h
 engineer\test.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h
 engineer\test.o: ../Core/Inc/stm32f4xx_hal_conf.h
 engineer\test.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rcc.h
@@ -39,6 +36,10 @@ engineer\test.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 engineer\test.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd.h
 engineer\test.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_usb.h
 engineer\test.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd_ex.h
+engineer\test.o: ../MODULE/motor/DJImotor/DJI_motor.h
+engineer\test.o: ../BSP/CAN/bsp_can.h
+engineer\test.o: ../Core/Inc/can.h
+engineer\test.o: ../Core/Inc/main.h
 engineer\test.o: ../MODULE/algorithm/controller.h
 engineer\test.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
 engineer\test.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdlib.h
@@ -50,15 +51,12 @@ engineer\test.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\limits.h
 engineer\test.o: ../MODULE/motor/motor_def.h
 engineer\test.o: ../MODULE/algorithm/ramp_contorller.h
 engineer\test.o: ../MODULE/daemon/daemon.h
-engineer\test.o: ../MODULE/motor/DMmotor/dmmotor.h
-engineer\test.o: ..\APPLICATION\Test.h
 engineer\test.o: ../APPLICATION/arm/arm.h
 engineer\test.o: ../APPLICATION/arm/arm_host.h
-engineer\test.o: ../MODULE/feite_motor/hsl_servo.h
-engineer\test.o: ../APPLICATION/arm/arm_config.h
-engineer\test.o: ../APPLICATION/arm/arm_usb_bridge.h
-engineer\test.o: ../MODULE/protocol/protocol.h
 engineer\test.o: ../MODULE/buzzer/buzzer.h
+engineer\test.o: ../MODULE/motor/DMmotor/dmmotor.h
+engineer\test.o: ..\APPLICATION\fruit_usb_bridge.h
+engineer\test.o: ../MODULE/protocol/protocol.h
 engineer\test.o: ../MODULE/usb/usb.h
 engineer\test.o: ../USB_DEVICE/App/usbd_cdc_if.h
 engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc/usbd_cdc.h
@@ -69,4 +67,3 @@ engineer\test.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
 engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_core.h
 engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ioreq.h
 engineer\test.o: ../Middlewares/ST/STM32_USB_Device_Library/Core/Inc/usbd_ctlreq.h
-engineer\test.o: ../Core/Inc/gpio.h

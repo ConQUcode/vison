@@ -1,5 +1,14 @@
 # Findings
 
+## 2026-08-11 - Controller-board servo protocol alignment
+
+- The ESP32 reference and live STM32 driver use the same controller-board protocol: `55 55 | Length | Command | Count | ...`, move command `0x03`, multi-position-read command `0x15`, no direct-servo checksum.
+- The live CubeMX source and `.ioc` already contain `USART6 9600 8N1`, asynchronous PG14 TX/PG9 RX, and RX/TX DMA, so generated peripheral configuration did not need another edit.
+- At 9600 baud, a one-servo read request plus reply occupies about 14.6 ms on the wire; a two-servo exchange occupies about 18.8 ms before controller turnaround. The prior 20 ms polling period left little or no margin, so the controller-board default was changed to 50 ms.
+- The existing STM32 parser is intentionally stricter than the ESP32 reference: it checks frame length, command, count, IDs, duplicates and the 0..1000 position range while retaining raw TX/RX Watch frames.
+- Added startup validation for `9600/8N1/TX_RX/no-flow-control` and exposed baud/config/expected-reply-length values through the existing debug structures.
+- Keil ARMCC rebuilt the final image successfully: Code 42300, RO-data 628, RW-data 444 and ZI-data 97732 bytes. The 10 warnings are pre-existing declarations/type warnings in inactive `catch.c/catch.h`; the changed servo path produced no warnings.
+
 ## 2026-08-01 - Main-arm speed and completion audit
 
 - Formal USB `TargetControl` motion currently commands `450 mm/s`, while the trajectory layer allows `700 mm/s`; the duration solver is also bounded by `3600 mm/s2` Cartesian acceleration and per-joint velocity/acceleration limits.
@@ -226,6 +235,14 @@
 - Added independent peak absolute current tracking for M3508/M2006 to support threshold tuning from live Watch data.
 # Final Implementation Findings
 
+## 2026-08-02 Gripper and differential chassis baseline
+
+- The live arm has three Damiao main joints; USART6 servo ID1 currently owns vertical-down compensation and ID2 owns base/world-yaw compensation. Only these two tool behaviors are being replaced.
+- `ChassisTask_f` runs the combined `all_cmd_Task()` and the legacy `ChassisInit/ChassisTask` are not called. The replacement chassis must be explicitly initialized and serviced.
+- The BMI088/INS implementation exists, but `ImuTask_f` currently only delays. The new chassis must call `INS_Init()` once before the scheduler and `INS_Task()` at 1 kHz.
+- CAN2 M3508 ID1/ID2 use feedback IDs 0x201/0x202 and the existing shared 0x200 current frame slots. The unused catch mechanism is on CAN1 and remains disabled.
+- Existing DJI feedback is `total_angle` and `speed_aps` in motor-side degrees and degrees/second. Differential-drive conversion must apply gear ratio and explicit feedback signs; the motor reverse flag alone does not normalize feedback direction.
+
 ## 2026-08-01 Generated protocol STOP update
 
 - The latest generated protocol changes only two wire-visible definitions relative to the live firmware: `PROTOCOL_HASH` is now `0x8845D84A`, and `Status` adds `STATUS_STOP=3`. Packet IDs, field layouts, packed sizes, CRC8, transparent reliable sequence byte, ACK behavior and retry settings remain compatible.
@@ -261,3 +278,136 @@
 - `ARM_BOOT_FULL_SCAN=0` selects normal single-reference boot. Set it to `1` only for maintenance, then copy the resulting spans from `g_arm_calibration` back to persistent constants before returning it to `0`.
 - Temporary M3508 ratio-test firmware currently has internal `arm_3508_ratio_test_enable=1`. It commands 1710 motor degrees at 90 motor-deg/s; restore the value to `0` after the test to re-enable normal arm homing.
 - Final Keil ARMCC build completed with zero errors and zero warnings. MATLAB batch execution is unavailable on this host due process exit `0xc0000409`, so formula parity was checked from source and independent numerical round trips.
+## 2026-08-02 Chassis-only 1 m test findings
+
+- The active test initializes only USB/protocol/buzzer, INS, and the two CAN2 M3508 chassis motors; no arm motor or tool-servo instance is registered.
+- M3508 driver feedback units are motor-side degrees and degrees per second. Distance conversion therefore divides total angle by 19.2032 and multiplies by the 47.5 mm wheel radius.
+- The right wheel uses explicit command and feedback signs of -1; the DJI driver's motor reverse setting remains normal so application semantics are visible in chassis_config.h.
+- DaemonIsOnline is used as the feedback gate. The motors remain stopped until both feedback streams and the IMU are healthy, then the test locks encoder and YawTotalAngle zero references.
+- The first hardware run must be wheels-off-ground because command, feedback, and IMU yaw signs still require physical confirmation.
+## 2026-08-10 - USART6 feedback-closure baseline
+
+- CubeMX now generates USART6 full-duplex at 115200 8N1 on PG14 TX and PG9 RX, with normal-mode RX DMA2 Stream1 Channel5 and TX DMA2 Stream6 Channel5. USART6 and both DMA IRQs use priority 5.
+- The live move APIs emit Huaner controller-board frames (`55 55 LEN 03 ...`) without a checksum, while the live position request/parser still uses an incompatible direct-servo ID/length/checksum layout. That mixed protocol is the first functional blocker.
+- The existing move completion path copies the commanded position into status and marks it valid without a reply. Closed-loop supervision must keep commanded and measured positions separate.
+- The current chassis-only firmware does not initialize or service `hsl_servo`. The safe first hardware image should poll ID1/ID2 only, keep arm/chassis motor control disabled and require a sticky Watch unlock/request before any move.
+
+## 2026-08-11 - Huaner feedback-supervision implementation
+
+- The active driver now consistently uses the Huaner controller-board protocol: move command `0x03`, dual-ID position query `55 55 05 15 02 01 02`, and strict two-ID reply length/count validation.
+- The reply layout is still a hardware assumption until a real controller-board capture confirms `55 55 09 15 02 ID POS_L POS_H ...`; the parser intentionally rejects wrong commands, duplicates, missing IDs, truncated frames and positions outside `0..1000`.
+- `HSLServoInit()` runs the same frame builder/parser through a deterministic self-test. `g_hsl_servo_debug.protocol_self_test_passed` must be `1` before USART6 is accepted as initialized.
+- Public move/query APIs build into local stack frames. The driver reserves the single transaction, allocates status slots, copies the frame into the DMA-owned buffer and publishes the state while interrupts are masked, so a BUSY caller cannot overwrite an active TX DMA buffer.
+- RX-to-idle DMA is armed before a query TX. HAL callbacks only publish completion/error flags; parsing, timeout recovery, health supervision and polling remain in the 1 ms task.
+- Per-servo status separates target and feedback positions and exposes velocity, arrival stability, stale/offline state, motion timeout, timestamps and counters. A successful TX no longer claims that a servo is online or at target.
+- The active test image has `HUANER_SERVO_CLOSED_LOOP_TEST_ENABLE=1` and `CHASSIS_ONE_METER_TEST_ENABLE=0`. It does not call `ArmInit`, `ArmTask`, Damiao control, `ChassisInit`, `ChassisTask` or `DJIMotorControl`.
+- Motion is locked at boot. Watch must set `g_huaner_servo_test_debug.motion_unlocked=1`, fill `request_id/request_position/request_time_ms`, then change `request_seq`; no automatic sweep or boot movement exists.
+- Final Keil build generated current `axf/hex/map`: Code 66480, RO-data 2992, RW-data 896, ZI-data 99076, `0 errors / 10 warnings`. All 10 final incremental warnings are from legacy `catch.c/catch.h`; the changed servo, test, arm-tool and USART files compile without warnings.
+- No firmware flash, logic-analyzer capture or physical servo motion was performed. The first bench run must validate the reply bytes and `0..1000` range before Watch motion is unlocked.
+
+## 2026-08-11 - ID1 Watch telemetry scope
+
+- The active controller-board position reply contains only servo ID and position, so measured angle is the only requested physical telemetry available from the verified frame.
+- Servo current, individual servo voltage and temperature are not present in that reply. The firmware must not populate Watch fields for them with zero, constants or values borrowed from the incompatible direct-servo protocol.
+- The public `g_huaner_servo1_debug` snapshot can be reduced independently; sweep scheduling and error handling belong in private `Test.c` runtime state.
+
+## 2026-08-11 - Controller-board voltage command scope
+
+- The photographed Hiwonder 32-bit ARM bus-servo controller uses the active `9600` host-UART framing and advertises board low-voltage alarm plus servo position readback, but not servo temperature readback.
+- First-pass voltage telemetry is therefore explicitly board supply voltage, using controller command `0x0F`: request `55 55 02 0F`, expected reply `55 55 04 0F VL VH`, little-endian millivolts.
+- Voltage polling must remain independent from per-servo online state. A voltage timeout or malformed voltage frame must invalidate only board voltage and must not mark ID1 offline or interrupt the sweep.
+
+## 2026-08-11 - Phase 35 live baseline
+
+- Active `all_init_Task()`/`all_cmd_Task()` currently own only the ID1 0/90-degree sweep; `ArmInit()` is commented and the arm USB bridge is not in the active schedule.
+- `hsl_servo` already provides one-owner DMA transactions, dual-ID 50 ms position polling, board-voltage polling, target/feedback error, measured position velocity, arrival stability and timeout supervision.
+- `arm_tool` still contains ID1 `0.80` vertical compensation, the old 60.3/54 mm magnet geometry, ID2 world-yaw/base compensation, repeat sends and PB12 magnet state.
+- `arm.c` and `arm_trajectory.c` still reject nonzero `tool_pitch_valid`; the USB `TargetControl` and `MotionStatus` third float are still named `yaw_deg`.
+- The generic UART driver must remain communication-only. Gripper contact/jam semantics belong in `arm_tool`, where target intent and feedback history are both available.
+
+## 2026-08-11 - Phase 35 completed implementation
+
+- ID1 now implements absolute tool pitch from the small-link reference with `125/500/875 = -90/0/+90 deg`; every public, trajectory-preflight and final-send path rejects out-of-range values rather than clamping them.
+- Cartesian commands now target the gripper center using a 30 mm pitch-axis offset. Direct, linear, realtime and joint trajectories lock or accept an absolute pitch, preflight the complete ID1 path and update the servo target every 20 ms.
+- ID2 now owns only gripper boot, ready, open and close behavior at `1000/850/800/950`. One-shot closed-loop commands advance from fresh dual-servo position feedback instead of repeated target transmission.
+- Close/boot stall detection uses the locked 300 ms ignore/window timing, error/span/travel thresholds and a 10-position relief. A travelled close obstruction becomes `HELD_CONTACT`; insufficient travel becomes `JAMMED`; boot obstruction prevents READY; reaching 950 becomes `CLOSED_EMPTY`.
+- Task 5, Task 6 and STOP now use feedback-confirmed gripper actions. STOP keeps the current grasp while returning HOME, then opens to 800 and leaves the gripper open.
+- USB IDs `0x04/0x05` now carry pitch, IDs `0x06/0x07` provide reliable tool command/status, maximum payload is 32 bytes and `PROTOCOL_HASH` is `0x1E7AC5B2`.
+- The production `ArmInit`/`ArmTask`/USB bridge schedule is active again. The five-second ID1 sweep remains available only behind `HUANER_SERVO_ID1_SWEEP_TEST_ONLY=0` by default; chassis and IMU are not activated by this phase.
+- Live USART6 configuration remains 9600 baud in `usart.c`, `Engineer.ioc` and `HSL_SERVO_CONTROLLER_BAUD_RATE`; this phase intentionally did not change CubeMX/UART configuration.
+
+## 2026-08-11 - Phase 36 live switching baseline
+
+- The differential chassis implementation and `CHASSIS_AUTO_FORWARD_TEST_ENABLE=1` remain intact in `chassis.c/chassis_config.h`; the active runtime currently selects the production arm only because `Test.c` initializes and services `ArmInit/ArmTask`.
+- `chassis.h` already exposes the stable runtime interface `ChassisInit(attitude_t *)`, `ChassisTask(now_ms)`, `ChassisNotifyImuUpdate(now_ms)` and `ChassisEmergencyStop()`, plus the Watch-visible `g_chassis_debug` odometry and safety snapshot.
+- The arm tool and USB packet ABIs are already complete. The requested interface cleanup should add Chinese semantic comments only and must not reorder enums, fields or packed packet layouts.
+- The safest mode switch is one explicit compile-time selector in `Test.h`, with a compile-time mutual-exclusion check against the isolated ID1 sweep selector.
+- `RobotCMDInit()` only calls `DWT_Init(168)` and does not register motors or remote-control instances; it must remain enabled in chassis mode because INS timing uses DWT delta time.
+- `INS_Init()` explicitly documents that it must run outside the realtime task and returns the shared `attitude_t` snapshot. `INS_Task()` is the 1 kHz owner of BMI088 reads and EKF updates, so the chassis task must only consume that snapshot.
+- The existing USB task can remain active for transport/diagnostics in chassis mode, but `ArmUsbBridgeTask()` must be gated to production-arm mode so no arm business state machine is serviced.
+
+## 2026-08-11 - Phase 36 completed chassis image
+
+- `CHASSIS_ONE_METER_TEST_ONLY=1`, `HUANER_SERVO_ID1_SWEEP_TEST_ONLY=0` and the derived production-arm mode is false. A preprocessor error prevents enabling both bench modes together.
+- Startup now performs `USB_Init -> protocol_init -> BuzzerInit -> INS_Init -> ChassisInit`; it does not call `ArmUsbBridgeInit`, `ArmInit` or `HSLServoInit`.
+- The IMU task now performs `INS_Task()` and then `ChassisNotifyImuUpdate()` every 1 ms. The combined-control task calls `ChassisTask()` and `DJIMotorControl()` every 1 ms; `ChassisTask()` retains its internal 5 ms gate.
+- Existing 1.0 m distance, 0.20 m/s maximum speed, acceleration/deceleration, encoder conversion, IMU heading hold, motor/IMU timeout and direction safety settings were not changed.
+- The final MAP removes all arm/Damiao/tool initialization and periodic-control entry points while retaining the chassis, INS and DJI control symbols.
+- The final isolated image uses Code 64976, RO 2984, RW 1360 and ZI 98568 bytes. SRAM1 uses `0x18330 / 0x1c000`, leaving about 15 KiB headroom.
+- A final isolation audit found that `USB_ProcessTask()` feeds bytes directly into `protocol_fsm_feed()`, whose strong arm-bridge callbacks can accept arm commands even when `ArmUsbBridgeTask()` is gated off. The chassis mode therefore also gates USB RX/TX parsing and protocol tick; the USB task retains only buzzer and daemon service.
+- The rebuilt MAP confirms `USB_ProcessTask`, `protocol_tick`, `on_receive_TargetControl`, `ArmUsbBridgeTask` and all arm/Damiao/tool runtime entry points are removed, while chassis/INS/DJI entry points remain linked.
+
+## 2026-08-11 - Phase 39 endpoint and HOME baseline
+
+- The active arm image already runs the combined servo/Damiao initialization path under the historically named `ARM_BOOT_MODE_DM_SINGLE_AXIS_TEST`; switching to the old `NORMAL` branch would select a different sequential escape/return state machine.
+- `ArmResolveHomePose()` currently bypasses IK in that active mode and directly uses `ARM_SAFE_Q*`; normal tool-enabled HOME instead treats `ARM_USB_HOME_*` as the gripper center and subtracts the 30 mm offset.
+- Cartesian direct, linear and realtime paths still convert `ARM_CONTROL_POINT_TOOL_TIP` through the 30 mm gripper-center offset, while lower-level `ArmSetCartesianTarget()` already treats its input as the wrist/ID1-axis point.
+- Host status currently reports the calculated gripper center in `position_mm/tool_tip_mm`; the USB bridge uses `tool_tip_mm` as the current Cartesian point, so status must change together with command semantics.
+- With `BASE_HEIGHT=62 mm`, `L1=L2=260 mm` and `q3_math=-180-q3`, pose `[0,90,-60] deg` gives `q23=-30 deg` and axis position `(225.1666,0,192.0) mm`.
+- `q2=90 deg` and `q3=-60 deg` are inside the live software/automatic limits (`q2=35..180`, `q3=-190..-35`) and away from their boundaries.
+- The final implementation keeps `g_arm_state.tool_tip` as the physical 30 mm-offset gripper center for diagnostics, but reports `g_arm_state.wrist_center` through host `position_mm/tool_tip_mm` and treats all compatible TOOL_TIP Cartesian commands as the same ID1-axis endpoint.
+- The protocol layout is unchanged, but its hash is now `0x90A149D1` because X/Y semantics changed; an old host build must not silently control the new endpoint definition.
+- The final MAP shows `ArmResolveHomePose` directly references `ArmInverseKinematics3DOF`, and the active image includes the full arm/tool/USB chain while removing chassis/INS initialization.
+
+## 2026-08-11 - Phase 40 FruitDetection protocol baseline
+
+- The supplied generated protocol is a replacement business contract, not an additive update: only Ack, Heartbeat, Handshake and `FruitDetection{fruit_id,status}` remain, with hash `0x923FFDD9`.
+- `FruitDetection` has a two-byte payload and no appended reliable sequence byte, so the MCU must not ACK it or interpret repeated packets as repeated mechanical actions.
+- The live project protocol still has the old Task/Target/Tool packet types and three typed reliable status FIFOs. Its USB copy queue, priority system queue, parser resynchronization and disconnect recovery remain useful and must be preserved.
+- The live protocol declares handshake and heartbeat switches but currently uses optional handshake and no strict timeout; strict 3000 ms session expiry must therefore be implemented, not only configured.
+- The complete arm test path currently calls `ArmUsbBridgeInit/Task`; the replacement observer requires a new bridge and Keil project membership change while leaving the old dirty bridge sources untouched.
+- The live base mapping already has logical zero 0, direction +1 and q1 limits -90..90. The requested physical positive-X reversal is a Damiao saved-zero calibration step, not an FK sign change or a software 180-degree offset.
+
+## 2026-08-11 - Phase 40 completed implementation
+
+- The active USB business protocol now exposes only `FruitDetection 0x10`, `Ack 0xFD`, `Heartbeat 0xFE` and `Handshake 0xFF`, with hash `0x923FFDD9` and a 32-byte parser payload ceiling.
+- A matching handshake is mandatory before application delivery. A wrong hash is counted and receives no echo; after a valid handshake, heartbeat count is echoed and an exact 3000 ms gap invalidates the session and latest fruit result.
+- `FruitDetection` remains a fixed two-byte non-reliable observation packet. It never receives an ACK, and repeated valid frames only refresh `g_fruit_usb_debug` without submitting any arm, trajectory or gripper command.
+- `fruit_id=1..6,status=0..1` is valid; `{0,0}` is no target; all other zero-ID/status or out-of-range combinations are rejected. Disconnect and heartbeat expiry retain raw diagnostic values while forcing `valid=0`.
+- The active schedule initializes USB, protocol, fruit bridge, buzzer and the complete arm/Damiao/Huaner chain. It does not initialize chassis or INS, and the legacy arm USB bridge remains in the worktree but is absent from the active Keil target and schedule.
+- Positive X remains a physical calibration responsibility: point the base toward the desired positive-X side and save that position as zero with the Damiao host tool. Firmware keeps zero offset, positive direction and q1 limits centered on zero and never issues a motor-zero command.
+- Host checks passed the complete protocol state matrix and verified HOME FK `(225.166580,0,192.000000) mm` plus IK `(0,90.000008,-60) deg`. The final Keil image builds with 0 errors and 0 warnings and fits all flash/SRAM regions.
+
+## 2026-08-11 - Phase 41 initial hardware symptom
+
+- The active full-arm boot sequence is tool-first: lack of valid USART6 ID1/ID2 feedback prevents the tool state from becoming ready, and the boot state does not proceed to the three-Damiao enable stage.
+- The observed `servo offline + Damiao not enabled` combination therefore points first to Huaner initialization, query transmission, response reception or parsing rather than to CAN/Damiao enable logic.
+- Live static inspection confirms USART6 is initialized as 9600 8N1 TX/RX before `ArmInit`, both DMA handles are linked, all three USART6/DMA IRQ handlers call HAL, and only `HSLServoInit` occupies an asynchronous callback slot. Callback-table exhaustion is therefore not a credible cause in the current image.
+- `g_hsl_servo_debug.initialized=0` and `online=0` represent different layers: initialization zero means config/self-test/DMA/callback registration failed, while initialized one plus online zero means no fresh valid position reply was parsed.
+- The current full-arm path uses a two-ID position request, unlike the earlier isolated ID1 sweep. The exact dual-ID controller-board response remains the highest-value protocol comparison if initialization is already one.
+- The provided ESP32 reference emits the same dual-ID request and expects `num * 3 + 5 = 11` response bytes for two servos, so the current request/length model is consistent with that known reference. Runtime counters are still required to distinguish no RX from malformed RX.
+
+## 2026-08-11 - Phase 42 current hardware baseline
+
+- Both physical servos are now confirmed online with separate ID1/ID2 position queries, proving the USART6 controller-board wiring, 9600 baud and basic `0x15` request/reply path work on hardware.
+- The current image remains intentionally feedback-only because `HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY=1`; restoring the arm requires changing only the application selector, not re-registering a second UART driver.
+- ID2 calibration is now default/open `550`, close `630`, and its send-path software range is `550..630`.
+- The complete six-page PDF confirms `55 55` framing, 9600 baud, no CRC, and `Length = parameter_count + 2`; every 16-bit time, position and voltage value is little-endian.
+- `CMD_SERVO_MOVE=0x03` uses parameters `count,time_l,time_h,(id,pos_l,pos_h)*count`, so its length field is `count*3+5` and total frame bytes are `count*3+7`.
+- `CMD_GET_BATTERY_VOLTAGE=0x0F` is a four-byte request `55 55 02 0F`; its six-byte reply is `55 55 04 0F mv_l mv_h`.
+- `CMD_MULT_SERVO_POS_READ=0x15` uses request length `count+3`; its reply uses length `count*3+3` and entries `(id,pos_l,pos_h)`.
+- Controller-originated `0x06/0x07/0x08` packets are action-group status reports. The arm does not use action groups, so these packets must not be treated as position/voltage replies and must not desynchronize later `55 55` frames.
+- The USART6 transport is DMA-driven with static module-owned TX/RX buffers. ISR callbacks only publish `volatile` completion/error flags and the received length; all parsing, abort/recovery and transaction changes remain in the 1 kHz task context. STM32F407 has no data-cache maintenance requirement for these buffers.
+- Full-arm polling now alternates protocol-valid single-ID `0x15` requests at half of the configured two-servo period, so each ID still refreshes near 50 ms while timeout/frame errors remain scoped to only the requested servo.
+- Single- and dual-servo `0x03` commands now share one count-driven frame builder. Its deterministic self-test uses the PDF's exact one-servo 1000 ms and two-servo 800 ms examples.
+- Final Keil MAP proves the runtime switch is effective: arm initialization/task, Damiao control, Huaner frame builder/poller and Fruit observer are linked, while chassis and INS initialization sections are linker-removed.

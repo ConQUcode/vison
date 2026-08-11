@@ -1,88 +1,42 @@
 #ifndef __TEST_H
 #define __TEST_H
 
-#include "arm.h"
-#include "hsl_servo.h"
+#include <stdint.h>
 
-typedef enum {
-    ARM_HOST_SIM_WAIT_READY = 0,
-    ARM_HOST_SIM_MOVE_TO_CENTER,
-    ARM_HOST_SIM_WAIT_CENTER,
-    ARM_HOST_SIM_STREAMING
-} Arm_Host_Sim_State_e;
+/*
+ * 应用运行模式：各专项测试必须互斥。
+ * 当前恢复完整机械臂：三台达妙、USART6双舵机和水果观察桥正常运行；
+ * 底盘与INS/IMU仍保持禁用。
+ */
+#define CHASSIS_ONE_METER_TEST_ONLY    0u
+/* 仅用于排查舵机通信；置1时不会初始化机械臂或发送舵机动作。 */
+#define HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY 0u
 
-/* Watch只需观察此结构，确认100Hz发送、目标坐标和返回状态。 */
-typedef struct {
-    uint8_t enabled;
-    Arm_Host_Sim_State_e state;
-    Arm_Command_Result_e last_result;
-    uint32_t command_id;
-    uint32_t send_count;
-    uint32_t reject_count;
-    uint32_t last_send_tick;
-    uint32_t stream_start_tick;
-    float phase_rad;
-    float generated_q_deg[3];
-    Arm_Position_s target_mm;
-} Arm_Host_Sim_Debug_s;
+#if CHASSIS_ONE_METER_TEST_ONLY != 0u && \
+    HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY != 0u
+#error "Chassis test and Huaner servo feedback test cannot run together"
+#endif
 
-extern Arm_Host_Sim_Debug_s g_arm_host_sim_debug;
-
-typedef enum {
-    FEETECH_TEST_STATE_DISABLED = 0,
-    FEETECH_TEST_STATE_WAIT_START,
-    FEETECH_TEST_STATE_SEND,
-    FEETECH_TEST_STATE_WAIT_STEP,
-    FEETECH_TEST_STATE_DONE,
-    FEETECH_TEST_STATE_ERROR
-} Feetech_Servo_Test_State_e;
+/* 两个台架模式都关闭时，运行完整机械臂和水果识别观察链。 */
+#define APPLICATION_ARM_RUN_ENABLE \
+    ((CHASSIS_ONE_METER_TEST_ONLY == 0u) && \
+     (HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY == 0u))
 
 typedef struct {
-    uint8_t enabled;
-    Feetech_Servo_Test_State_e state;
-    uint8_t id;
-    uint8_t step;
-    uint16_t target_deg;
-    uint16_t target_position;
-    HSLServo_Result_e last_result;
-    uint32_t start_tick;
-    uint32_t last_send_tick;
-    uint32_t send_count;
-    uint32_t busy_count;
-    uint32_t error_count;
-} Feetech_Servo_Test_Debug_s;
+    uint8_t driver_initialized;       /* USART6舵机驱动注册成功。 */
+    uint8_t servo1_communication_ok;  /* ID1位置反馈在100ms内有效。 */
+    uint8_t servo2_communication_ok;  /* ID2位置反馈在100ms内有效。 */
+    uint16_t servo1_position;         /* ID1当前控制值，范围0~1000。 */
+    uint16_t servo2_position;         /* ID2当前控制值，范围0~1000。 */
+    float servo1_angle_deg;           /* ID1当前轴角，范围0~240deg。 */
+    float servo2_angle_deg;           /* ID2当前轴角，范围0~240deg。 */
+} Huaner_Dual_Servo_Debug_s;
 
-extern Feetech_Servo_Test_Debug_s g_feetech_servo_test_debug;
+extern Huaner_Dual_Servo_Debug_s g_huaner_dual_servo_debug;
 
-typedef struct {
-    uint8_t pe11_raw;
-    uint8_t pe13_raw;
-    uint8_t pe14_raw;
-    uint8_t pc6_raw;
-    uint8_t pi6_raw;
-    uint8_t pe11_pressed;
-    uint8_t pe13_pressed;
-    uint8_t pe14_pressed;
-    uint8_t pc6_pressed;
-    uint8_t pi6_pressed;
-    uint8_t pressed_mask;
-    uint8_t last_pressed_mask;
-    uint8_t press_edge_mask;
-    uint8_t task_start_edge_mask;
-    uint8_t last_task_id;
-    uint8_t last_task_send_ok;
-    uint32_t buzzer_trigger_count;
-    uint32_t task_start_tx_count;
-    uint32_t task_start_tx_fail_count;
-    uint32_t last_buzzer_tick;
-    uint32_t update_count;
-} User_Key_Debug_s;
-
-extern User_Key_Debug_s g_user_key_debug;
-
+/* 调度器启动前调用一次，根据上面的模式宏注册对应设备。 */
 void all_init_Task(void);
+/* 由1 kHz综合控制任务调用，内部只运行当前选中的控制链。 */
 void all_cmd_Task(void);
-
-
 
 #endif

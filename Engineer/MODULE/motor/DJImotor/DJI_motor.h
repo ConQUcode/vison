@@ -56,6 +56,7 @@ typedef struct
 
     Daemon_Instance *daemon;
     uint32_t feed_cnt;
+    uint32_t feedback_count;
     float dt;
 } DJIMotor_Instance;
 

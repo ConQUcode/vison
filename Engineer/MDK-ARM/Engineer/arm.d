@@ -58,4 +58,3 @@ engineer\arm.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\math.h
 engineer\arm.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\float.h
 engineer\arm.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\limits.h
 engineer\arm.o: ../MODULE/algorithm/ramp_contorller.h
-engineer\arm.o: ../Core/Inc/tim.h

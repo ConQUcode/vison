@@ -58,11 +58,13 @@ void CAN1_RX1_IRQHandler(void);
 void SPI1_IRQHandler(void);
 void TIM8_TRG_COM_TIM14_IRQHandler(void);
 void DMA2_Stream0_IRQHandler(void);
+void DMA2_Stream1_IRQHandler(void);
 void DMA2_Stream2_IRQHandler(void);
 void DMA2_Stream3_IRQHandler(void);
 void CAN2_RX0_IRQHandler(void);
 void CAN2_RX1_IRQHandler(void);
 void OTG_FS_IRQHandler(void);
+void DMA2_Stream6_IRQHandler(void);
 void USART6_IRQHandler(void);
 /* USER CODE BEGIN EFP */
 

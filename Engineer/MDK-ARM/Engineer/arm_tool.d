@@ -3,8 +3,7 @@ engineer\arm_tool.o: ..\APPLICATION\arm\arm_tool.h
 engineer\arm_tool.o: ..\APPLICATION\arm\arm_host.h
 engineer\arm_tool.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
 engineer\arm_tool.o: ..\APPLICATION\arm\arm_config.h
-engineer\arm_tool.o: ../Core/Inc/gpio.h
-engineer\arm_tool.o: ../Core/Inc/main.h
+engineer\arm_tool.o: ../MODULE/feite_motor/hsl_servo.h
 engineer\arm_tool.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h
 engineer\arm_tool.o: ../Core/Inc/stm32f4xx_hal_conf.h
 engineer\arm_tool.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rcc.h
@@ -40,6 +39,5 @@ engineer\arm_tool.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 engineer\arm_tool.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd.h
 engineer\arm_tool.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_usb.h
 engineer\arm_tool.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd_ex.h
-engineer\arm_tool.o: ../MODULE/feite_motor/hsl_servo.h
 engineer\arm_tool.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\math.h
 engineer\arm_tool.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h

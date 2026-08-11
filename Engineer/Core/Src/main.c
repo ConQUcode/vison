@@ -109,7 +109,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
 //	ChassisInit();+*
 //	ArmInit();
+#if HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY == 0u
 	RobotCMDInit();
+#endif
 	all_init_Task();
   /* USER CODE END 2 */
 

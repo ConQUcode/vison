@@ -8,7 +8,6 @@
 #include "arm_wrist.h"
 #include "dmmotor.h"
 #include "can.h"
-#include "tim.h"
 #include "stm32f4xx_hal.h"
 
 #include <math.h>
@@ -62,14 +61,11 @@ typedef struct {
     uint32_t fault_reset_command_id;
     uint32_t active_fault_reset_request;
     uint32_t latest_received_command_id;
-    uint8_t yaw_active;
-    uint32_t yaw_command_id;
-    uint32_t yaw_complete_tick;
-    float yaw_target_deg;
 } Arm_Command_Mailbox_s;
 
 Arm_State_s g_arm_state;
 Arm_DM_Debug_s g_arm_dm_debug;
+Arm_Home_Joint_Debug_s g_arm_home_joint_debug;
 Arm_Kinematics_Debug_s g_arm_kinematics_debug;
 Arm_Control_Debug_s g_arm_control_debug;
 Arm_Teach_Point_s g_arm_teach_point;
@@ -79,28 +75,6 @@ Arm_Boot_Debug_s g_arm_boot_debug;
 static Arm_Joint_Motor_s arm_joint[ARM_AXIS_COUNT];
 static Arm_Runtime_s arm_runtime;
 static Arm_Command_Mailbox_s arm_command_mailbox;
-
-static void ArmBootBuzzerStop(void)
-{
-#if ARM_BOOT_BUZZER_ENABLE != 0u
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 0u);
-    (void)HAL_TIM_PWM_Stop(&htim4, TIM_CHANNEL_3);
-#endif
-}
-
-static uint8_t ArmBootBuzzerStart(void)
-{
-#if ARM_BOOT_BUZZER_ENABLE != 0u
-    /* TIM4由CubeMX配置为4kHz；约50%占空比用于短鸣提示。 */
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3,
-                          ARM_BOOT_BUZZER_COMPARE);
-    if (HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3) != HAL_OK) {
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 0u);
-        return 0u;
-    }
-#endif
-    return 1u;
-}
 
 static uint8_t ArmCommandPose(const float pose_q_deg[3],
                               float speed_deg_s,
@@ -118,9 +92,6 @@ static Arm_Command_Result_e ArmExecuteRealtimeTarget(
     const Arm_Realtime_Cartesian_Target_s *target);
 static Arm_Command_Result_e ArmExecuteToolCommand(
     const Arm_Command_Tool_s *command);
-static uint8_t ArmHostYawActive(uint32_t now_ms);
-static void ArmHostStartYawWait(uint32_t command_id, float yaw_deg,
-                                uint32_t now_ms);
 static void ArmProcessCommandMailbox(uint32_t now_ms);
 static void ArmUpdateHostStatus(void);
 
@@ -129,40 +100,30 @@ static uint8_t ArmResolveHomePose(const float seed_q_deg[3],
                                   Arm_Position_s *target_wrist,
                                   Arm_IK_Status_e *ik_status)
 {
-    const Arm_Position_s target_tool_tip = {
+    const Arm_Position_s target_endpoint = {
         ARM_USB_HOME_X_MM,
         ARM_USB_HOME_Y_MM,
         ARM_USB_HOME_Z_MM
     };
     Arm_IK_Result_s ik_result;
-    float small_link_pitch_deg;
 
     if (seed_q_deg == NULL || target_q_deg == NULL ||
         target_wrist == NULL || ik_status == NULL) {
         return 0u;
     }
+    /*
+     * HOME和上位机Cartesian命令统一以ID1俯仰舵机轴心为受控点。
+     * 这里必须先通过IK、FK误差、软件限位和自动运动区域检查，任何检查
+     * 失败都不会向三台达妙下发目标。
+     */
     memset(&ik_result, 0, sizeof(ik_result));
-    *ik_status = ARM_IK_INVALID_ARGUMENT;
-    if (!ArmToolGetWristFromTipVerticalDown(&target_tool_tip,
-                                            target_wrist)) {
-        *ik_status = ARM_IK_OUT_OF_REACH;
-        return 0u;
-    }
-    *ik_status = ArmInverseKinematics3DOF(target_wrist, seed_q_deg,
-                                          &ik_result);
+    *target_wrist = target_endpoint;
+    *ik_status = ArmInverseKinematics3DOF(
+        &target_endpoint, seed_q_deg, &ik_result);
     if (*ik_status != ARM_IK_OK ||
         ik_result.position_error_mm > ARM_LINEAR_FK_ERROR_MAX_MM ||
         !ArmJointPoseWithinSoftLimits(ik_result.q_deg) ||
         !ArmAutoPoseIsSafe(ik_result.q_deg)) {
-        return 0u;
-    }
-    small_link_pitch_deg = ik_result.q_deg[ARM_JOINT_SHOULDER] +
-        (-180.0f - ik_result.q_deg[ARM_JOINT_ELBOW]);
-    if (!ArmToolServo1AngleValid(
-            ArmToolServo1AngleForVerticalDown(small_link_pitch_deg)) ||
-        !ArmToolServo2WorldYawValidForQ1(0.0f,
-                                         ik_result.q_deg[ARM_JOINT_BASE_YAW])) {
-        *ik_status = ARM_IK_COLLISION_RISK;
         return 0u;
     }
     memcpy(target_q_deg, ik_result.q_deg, sizeof(ik_result.q_deg));
@@ -178,7 +139,10 @@ static uint8_t ArmToolReadyForMotion(void)
      * 这里表示末端工具模型已经完成上电初始化，可以参与主臂解算。
      * USART6舵机的最近发送结果只作为末端状态观察量，不阻塞三达妙轨迹。
      */
-    return tool->init_state == ARM_TOOL_INIT_DONE;
+    return tool->init_state == ARM_TOOL_INIT_DONE &&
+           tool->servo_feedback_valid[0] != 0u &&
+           tool->servo_feedback_valid[1] != 0u &&
+           ArmToolGripperFaulted() == 0u;
 #else
     return 1u;
 #endif
@@ -491,16 +455,11 @@ static void ArmLatchFault(Arm_Fault_e fault)
     g_arm_state.start_state = fault == ARM_FAULT_EMERGENCY_STOP ?
         ARM_START_ESTOP : ARM_START_FAULT;
     ArmAbortMotion(ARM_MOTION_FAULT_ABORT);
-    ArmBootBuzzerStop();
     arm_runtime.elbow_coupling_active = 0u;
     ArmToolStopServo1Tracking();
     ArmToolClearPendingCommands();
     ArmDisableAll();
     arm_runtime.disable_sent = 1u;
-    if (fault == ARM_FAULT_EMERGENCY_STOP ||
-        g_arm_tool_debug.magnet_on != 0u) {
-        ArmToolSetMagnet(0u);
-    }
 }
 
 static void ArmSetStartState(Arm_Start_State_e state, uint32_t now_ms)
@@ -635,15 +594,6 @@ static void ArmProcessEnableOnly(uint32_t now_ms)
             ArmSetStartState(ARM_START_REGISTERED, now_ms);
             break;
     }
-}
-
-static uint8_t ArmSetJointCommandRaw(uint8_t axis,
-                                    float target_deg,
-                                    float speed_deg_s,
-                                    uint8_t allow_escape)
-{
-    return ArmSetJointCommandForPose(axis, target_deg, NULL, speed_deg_s,
-                                     allow_escape);
 }
 
 static uint8_t ArmSetJointCommandForPose(uint8_t axis,
@@ -1067,6 +1017,15 @@ static void ArmUpdateFeedback(uint32_t now_ms)
         g_arm_state.q_feedback_deg[axis] = joint->feedback_deg;
         g_arm_state.q_target_deg[axis] = joint->target_deg;
     }
+    /* 转成台架上直观的物理角：HOME时应分别接近-90deg和60deg。 */
+    g_arm_home_joint_debug.shoulder_current_deg =
+        -g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER];
+    g_arm_home_joint_debug.shoulder_target_deg =
+        -g_arm_state.q_target_deg[ARM_JOINT_SHOULDER];
+    g_arm_home_joint_debug.elbow_included_current_deg =
+        -g_arm_state.q_feedback_deg[ARM_JOINT_ELBOW];
+    g_arm_home_joint_debug.elbow_included_target_deg =
+        -g_arm_state.q_target_deg[ARM_JOINT_ELBOW];
     g_arm_state.all_targets_synced = ArmAllTargetsSynced();
     ArmForwardKinematics3DOF(g_arm_state.q_feedback_deg[0],
                              g_arm_state.q_feedback_deg[1],
@@ -1124,15 +1083,9 @@ static void ArmUpdateTeachAndKinematicsDebug(void)
     g_arm_teach_point.small_link_pitch_deg =
         g_arm_state.small_link_pitch_deg;
     g_arm_teach_point.tool_ready = tool->tool_ready;
-    g_arm_teach_point.magnet_on = tool->magnet_on;
-    memcpy(g_arm_teach_point.tool_servo_target_deg,
-           tool->servo_target_deg,
-           sizeof(g_arm_teach_point.tool_servo_target_deg));
     memcpy(g_arm_teach_point.tool_servo_target_pos,
            tool->servo_target_pos,
            sizeof(g_arm_teach_point.tool_servo_target_pos));
-    g_arm_teach_point.tool_vertical_down_enabled =
-        tool->vertical_down_enabled;
     g_arm_teach_point.tool_error_code = tool->error_code;
     g_arm_teach_point.update_count = update_count;
 
@@ -1239,6 +1192,16 @@ static void ArmProcessAutoInit(uint32_t now_ms)
             seed_q_deg[0] = arm_joint[ARM_JOINT_BASE_YAW].feedback_deg;
             seed_q_deg[1] = arm_joint[ARM_JOINT_SHOULDER].feedback_deg;
             seed_q_deg[2] = arm_joint[ARM_JOINT_ELBOW].feedback_deg;
+            /*
+             * q1=0必须来自底座朝向+X后保存的达妙零点。若上电反馈已在
+             * 正常q1范围外，禁止用一次大角度自动运动掩盖错误零点。
+             */
+            if (ArmCheckLimit(ARM_JOINT_BASE_YAW, seed_q_deg[0]) !=
+                ARM_LIMIT_INSIDE_SOFT) {
+                init->state = ARM_DM_AUTO_INIT_FAULT;
+                init->result = ARM_COMMAND_PREFLIGHT_FAILED;
+                break;
+            }
             if (!ArmResolveHomePose(seed_q_deg, init->target_q_deg,
                                     &init->target_wrist_mm,
                                     &init->ik_status)) {
@@ -1263,8 +1226,11 @@ static void ArmProcessAutoInit(uint32_t now_ms)
             break;
 
         case ARM_DM_AUTO_INIT_WAIT_AXIS:
-            (void)ArmToolSetVerticalDownFromPitch(
-                g_arm_state.small_link_pitch_deg);
+            if (ArmToolGetState()->tool_pitch_target_valid != 0u) {
+                (void)ArmToolTrackPitch(
+                    ArmToolGetState()->tool_pitch_target_deg,
+                    g_arm_state.small_link_pitch_deg, now_ms);
+            }
             if (ArmPoseArrived(init->target_q_deg, now_ms)) {
                 init->axis = ARM_DM_TEST_NONE;
                 init->done = 1u;
@@ -1314,8 +1280,6 @@ static void ArmSetBootState(Arm_Boot_State_e state, uint32_t now_ms)
 
 static void ArmProcessBootSequence(uint32_t now_ms)
 {
-    Arm_Motion_Result_e motion_result;
-
     g_arm_boot_debug.elapsed_ms =
         (uint32_t)(now_ms - g_arm_boot_debug.state_tick);
 
@@ -1331,7 +1295,16 @@ static void ArmProcessBootSequence(uint32_t now_ms)
                  */
                 arm_runtime.elbow_coupling_active =
                     ARM_ELBOW_SHOULDER_COUPLING_ENABLE != 0u ? 1u : 0u;
-                ArmSetBootState(ARM_BOOT_AUTO_INIT, now_ms);
+                /*
+                 * 达妙先完成使能并保持上电当前位置，末端舵机在后台继续
+                 * 查询反馈。两台舵机未就绪时禁止自动HOME，但不再阻塞
+                 * 三台达妙进入位置保持，便于分别判断CAN与USART6故障。
+                 */
+                if (ArmToolReadyForMotion() && ArmToolTxIdle()) {
+                    ArmSetBootState(ARM_BOOT_AUTO_INIT, now_ms);
+                } else {
+                    ArmSetBootState(ARM_BOOT_WAIT_TOOL, now_ms);
+                }
             }
             break;
 
@@ -1340,8 +1313,6 @@ static void ArmProcessBootSequence(uint32_t now_ms)
             if (g_arm_dm_debug.auto_init.state != ARM_DM_AUTO_INIT_DONE) {
                 ArmProcessAutoInit(now_ms);
             }
-            (void)ArmToolSetVerticalDownFromPitch(
-                g_arm_state.small_link_pitch_deg);
             if (g_arm_dm_debug.auto_init.state == ARM_DM_AUTO_INIT_FAULT) {
                 g_arm_boot_debug.motion_result =
                     ARM_MOTION_RESULT_PREFLIGHT_FAILED;
@@ -1349,17 +1320,13 @@ static void ArmProcessBootSequence(uint32_t now_ms)
             } else if (g_arm_dm_debug.auto_init.state ==
                        ARM_DM_AUTO_INIT_DONE) {
                 arm_runtime.elbow_coupling_active = 1u;
-                ArmSetBootState(ARM_BOOT_WAIT_TOOL, now_ms);
+                ArmSetBootState(ARM_BOOT_STABILIZE, now_ms);
             }
             break;
 
         case ARM_BOOT_WAIT_TOOL:
-            (void)ArmToolSetVerticalDownFromPitch(
-                g_arm_state.small_link_pitch_deg);
-            if (ArmToolReadyForMotion() &&
-                ArmToolGetState()->servo1_slew_active == 0u &&
-                ArmToolTxIdle()) {
-                ArmSetBootState(ARM_BOOT_STABILIZE, now_ms);
+            if (ArmToolReadyForMotion() && ArmToolTxIdle()) {
+                ArmSetBootState(ARM_BOOT_AUTO_INIT, now_ms);
             } else if (ArmToolGetState()->init_state == ARM_TOOL_INIT_ERROR ||
                        g_arm_boot_debug.elapsed_ms >=
                            ARM_BOOT_TOOL_INIT_TIMEOUT_MS) {
@@ -1376,169 +1343,42 @@ static void ArmProcessBootSequence(uint32_t now_ms)
                 break;
             }
             if (g_arm_boot_debug.elapsed_ms >=
-                ARM_BOOT_TOOL_TEST_STABLE_MS) {
+                ARM_BOOT_STABILIZE_MS) {
+#if ARM_TOOL_ENABLE != 0u
                 ArmSetBootState(
-                    g_arm_boot_debug.tool_test_enabled != 0u ?
-                        ARM_BOOT_START_TOOL_TEST : ARM_BOOT_READY,
+                    ARM_BOOT_GRIPPER_READY_COMMAND,
                     now_ms);
-            }
-            break;
-
-        case ARM_BOOT_START_TOOL_TEST:
-            if (!ArmToolGetWristFromTipVerticalDown(
-                    &g_arm_boot_debug.target_tool_tip_mm,
-                    &g_arm_boot_debug.target_wrist_mm)) {
-                g_arm_boot_debug.motion_result =
-                    ARM_MOTION_RESULT_PREFLIGHT_FAILED;
-                g_arm_boot_debug.ik_status = ARM_IK_OUT_OF_REACH;
-                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
-                break;
-            }
-            motion_result = ArmMoveLinearToolTipVerticalDown(
-                &g_arm_boot_debug.target_tool_tip_mm,
-                ARM_BOOT_TOOL_TEST_SPEED_MM_S);
-            g_arm_boot_debug.motion_result = motion_result;
-            g_arm_boot_debug.ik_status = g_arm_motion_debug.ik_status;
-            if (motion_result != ARM_MOTION_RESULT_OK) {
-                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
-                break;
-            }
-            memcpy(g_arm_boot_debug.target_q_deg,
-                   g_arm_motion_debug.target_q_deg,
-                   sizeof(g_arm_boot_debug.target_q_deg));
-            g_arm_boot_debug.servo1_target_deg =
-                ArmToolServo1AngleForVerticalDown(
-                    g_arm_boot_debug.target_q_deg[ARM_JOINT_SHOULDER] +
-                    (-180.0f -
-                     g_arm_boot_debug.target_q_deg[ARM_JOINT_ELBOW]));
-            g_arm_boot_debug.tool_test_started = 1u;
-            ArmSetBootState(ARM_BOOT_RUN_TOOL_TEST, now_ms);
-            break;
-
-        case ARM_BOOT_RUN_TOOL_TEST:
-            ArmTrajectoryTask(now_ms);
-            if (!ArmTrajectoryIsBusy() &&
-                g_arm_motion_debug.motion_state == ARM_MOTION_HOLDING &&
-                g_arm_motion_debug.trajectory_progress >= 1.0f &&
-                ArmToolGetState()->servo1_slew_active == 0u) {
-                g_arm_boot_debug.tool_test_completed = 1u;
-                g_arm_boot_debug.motion_result = ARM_MOTION_RESULT_OK;
-                ArmToolSetMagnet(1u);
-                ArmSetBootState(ARM_BOOT_SERVO2_COMMAND_135, now_ms);
-            } else if (g_arm_boot_debug.elapsed_ms >=
-                       ARM_BOOT_TOOL_TEST_TIMEOUT_MS) {
-                ArmTrajectoryCancel();
-                g_arm_boot_debug.motion_result =
-                    ARM_MOTION_RESULT_NOT_READY;
-                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
-            }
-            break;
-
-        case ARM_BOOT_SERVO2_COMMAND_135:
-            ArmTrajectoryTask(now_ms);
-            if (!ArmAllFeedbackValid(now_ms) ||
-                !ArmAllTargetsSynced() || !ArmAllMotorsEnabled()) {
-                ArmToolSetMagnet(0u);
-                g_arm_boot_debug.motion_result =
-                    ARM_MOTION_RESULT_NOT_READY;
-                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
-                break;
-            }
-            g_arm_boot_debug.servo2_target_deg =
-                ARM_BOOT_SERVO2_TEST_FORWARD_DEG;
-            g_arm_boot_debug.servo2_result = ArmToolSetServo2Angle(
-                ARM_BOOT_SERVO2_TEST_FORWARD_DEG);
-            if (g_arm_boot_debug.servo2_result == ARM_COMMAND_OK) {
-                g_arm_boot_debug.servo2_test_step = 1u;
-                ArmSetBootState(ARM_BOOT_SERVO2_WAIT_135, now_ms);
-            } else if (g_arm_boot_debug.servo2_result != ARM_COMMAND_BUSY) {
-                ArmToolSetMagnet(0u);
-                g_arm_boot_debug.motion_result =
-                    ARM_MOTION_RESULT_NOT_READY;
-                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
-            }
-            break;
-
-        case ARM_BOOT_SERVO2_WAIT_135:
-            ArmTrajectoryTask(now_ms);
-            if (!ArmAllFeedbackValid(now_ms) ||
-                !ArmAllTargetsSynced() || !ArmAllMotorsEnabled()) {
-                ArmToolSetMagnet(0u);
-                g_arm_boot_debug.motion_result =
-                    ARM_MOTION_RESULT_NOT_READY;
-                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
-                break;
-            }
-            if (g_arm_boot_debug.elapsed_ms >=
-                ARM_BOOT_SERVO2_TEST_MOVE_TIME_MS +
-                    ARM_BOOT_SERVO2_TEST_SETTLE_MS) {
-                ArmSetBootState(ARM_BOOT_SERVO2_COMMAND_45, now_ms);
-            }
-            break;
-
-        case ARM_BOOT_SERVO2_COMMAND_45:
-            ArmTrajectoryTask(now_ms);
-            if (!ArmAllFeedbackValid(now_ms) ||
-                !ArmAllTargetsSynced() || !ArmAllMotorsEnabled()) {
-                ArmToolSetMagnet(0u);
-                g_arm_boot_debug.motion_result =
-                    ARM_MOTION_RESULT_NOT_READY;
-                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
-                break;
-            }
-            g_arm_boot_debug.servo2_target_deg =
-                ARM_BOOT_SERVO2_TEST_REVERSE_DEG;
-            g_arm_boot_debug.servo2_result = ArmToolSetServo2Angle(
-                ARM_BOOT_SERVO2_TEST_REVERSE_DEG);
-            if (g_arm_boot_debug.servo2_result == ARM_COMMAND_OK) {
-                g_arm_boot_debug.servo2_test_step = 2u;
-                ArmSetBootState(ARM_BOOT_SERVO2_WAIT_45, now_ms);
-            } else if (g_arm_boot_debug.servo2_result != ARM_COMMAND_BUSY) {
-                ArmToolSetMagnet(0u);
-                g_arm_boot_debug.motion_result =
-                    ARM_MOTION_RESULT_NOT_READY;
-                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
-            }
-            break;
-
-        case ARM_BOOT_SERVO2_WAIT_45:
-            ArmTrajectoryTask(now_ms);
-            if (!ArmAllFeedbackValid(now_ms) ||
-                !ArmAllTargetsSynced() || !ArmAllMotorsEnabled()) {
-                ArmToolSetMagnet(0u);
-                g_arm_boot_debug.motion_result =
-                    ARM_MOTION_RESULT_NOT_READY;
-                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
-                break;
-            }
-            if (g_arm_boot_debug.elapsed_ms >=
-                ARM_BOOT_SERVO2_TEST_MOVE_TIME_MS +
-                    ARM_BOOT_SERVO2_TEST_SETTLE_MS) {
-                ArmToolSetMagnet(0u);
-                g_arm_boot_debug.servo2_test_completed = 1u;
-                g_arm_boot_debug.magnet_test_completed = 1u;
-                g_arm_boot_debug.buzzer_started = 0u;
-                g_arm_boot_debug.buzzer_completed = 0u;
-                ArmSetBootState(ARM_BOOT_BUZZER_NOTIFY, now_ms);
-            }
-            break;
-
-        case ARM_BOOT_BUZZER_NOTIFY:
-            ArmTrajectoryTask(now_ms);
-            if (g_arm_boot_debug.buzzer_started == 0u) {
-                g_arm_boot_debug.buzzer_started = 1u;
-                if (!ArmBootBuzzerStart()) {
-                    /* 提示音失败不影响机械臂测试结果，直接进入READY。 */
-                    g_arm_boot_debug.buzzer_completed = 1u;
-                    ArmSetBootState(ARM_BOOT_READY, now_ms);
-                    break;
-                }
-            }
-            if (g_arm_boot_debug.elapsed_ms >=
-                ARM_BOOT_BUZZER_DURATION_MS) {
-                ArmBootBuzzerStop();
-                g_arm_boot_debug.buzzer_completed = 1u;
+#else
+                /* 主臂台架模式不等待夹爪，三轴归正稳定后直接进入READY。 */
                 ArmSetBootState(ARM_BOOT_READY, now_ms);
+#endif
+            }
+            break;
+
+        case ARM_BOOT_GRIPPER_READY_COMMAND:
+        {
+            Arm_Command_Result_e gripper_result =
+                ArmToolSetGripper(ARM_GRIPPER_COMMAND_READY);
+
+            if (gripper_result == ARM_COMMAND_OK) {
+                ArmSetBootState(ARM_BOOT_GRIPPER_READY_WAIT, now_ms);
+            } else if (gripper_result != ARM_COMMAND_BUSY) {
+                g_arm_boot_debug.motion_result =
+                    ARM_MOTION_RESULT_NOT_READY;
+                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
+            }
+            break;
+        }
+
+        case ARM_BOOT_GRIPPER_READY_WAIT:
+            if (ArmToolGetState()->gripper_state == ARM_GRIPPER_READY) {
+                ArmSetBootState(ARM_BOOT_READY, now_ms);
+            } else if (ArmToolGripperFaulted() != 0u ||
+                       g_arm_boot_debug.elapsed_ms >=
+                           ARM_GRIPPER_CLOSE_DEADLINE_MS) {
+                g_arm_boot_debug.motion_result =
+                    ARM_MOTION_RESULT_NOT_READY;
+                ArmSetBootState(ARM_BOOT_FAULT, now_ms);
             }
             break;
 
@@ -1550,10 +1390,8 @@ static void ArmProcessBootSequence(uint32_t now_ms)
 
         case ARM_BOOT_FAULT:
         default:
-            ArmBootBuzzerStop();
             ArmToolStopServo1Tracking();
             ArmToolClearPendingCommands();
-            ArmToolSetMagnet(0u);
             ArmTrajectoryCancel();
             g_arm_state.mode = ARM_MODE_FAULT;
             g_arm_state.start_state = ARM_START_FAULT;
@@ -1740,6 +1578,7 @@ void ArmInit(void)
 
     memset(&g_arm_state, 0, sizeof(g_arm_state));
     memset(&g_arm_dm_debug, 0, sizeof(g_arm_dm_debug));
+    memset(&g_arm_home_joint_debug, 0, sizeof(g_arm_home_joint_debug));
     memset(&g_arm_kinematics_debug, 0, sizeof(g_arm_kinematics_debug));
     memset(&g_arm_control_debug, 0, sizeof(g_arm_control_debug));
     memset(&g_arm_teach_point, 0, sizeof(g_arm_teach_point));
@@ -1815,6 +1654,7 @@ void ArmInit(void)
     g_arm_dm_debug.auto_init.speed_deg_s = ARM_DM_AUTO_INIT_SPEED_DEG_S;
     g_arm_dm_debug.auto_init.start_deg = NAN;
     g_arm_dm_debug.auto_init.target_deg = NAN;
+    /* 兼容保留target_tool_tip_mm字段名；其内容是ID1俯仰舵机轴心。 */
     g_arm_dm_debug.auto_init.target_tool_tip_mm.x_mm = ARM_USB_HOME_X_MM;
     g_arm_dm_debug.auto_init.target_tool_tip_mm.y_mm = ARM_USB_HOME_Y_MM;
     g_arm_dm_debug.auto_init.target_tool_tip_mm.z_mm = ARM_USB_HOME_Z_MM;
@@ -1826,13 +1666,10 @@ void ArmInit(void)
            sizeof(g_arm_dm_debug.auto_init.target_q_deg));
     g_arm_dm_debug.auto_init.elapsed_ms = 0u;
     g_arm_dm_debug.auto_init.cycle_count = 0u;
+    /* 先使能三台达妙原位保持，末端反馈就绪后才允许自动HOME。 */
     g_arm_boot_debug.state = ARM_BOOT_WAIT_MOTORS;
-    g_arm_boot_debug.tool_test_enabled = ARM_BOOT_TOOL_TEST_ENABLE;
     g_arm_boot_debug.motion_result = ARM_MOTION_RESULT_NOT_READY;
     g_arm_boot_debug.ik_status = ARM_IK_INVALID_ARGUMENT;
-    g_arm_boot_debug.target_tool_tip_mm.x_mm = ARM_BOOT_TOOL_TEST_X_MM;
-    g_arm_boot_debug.target_tool_tip_mm.y_mm = ARM_BOOT_TOOL_TEST_Y_MM;
-    g_arm_boot_debug.target_tool_tip_mm.z_mm = ARM_BOOT_TOOL_TEST_Z_MM;
     g_arm_boot_debug.state_tick = arm_runtime.boot_tick;
     ArmWristInit();
     ArmToolInit();
@@ -1859,6 +1696,7 @@ void ArmTask(void)
     uint32_t now_ms = HAL_GetTick();
 
     ArmUpdateFeedback(now_ms);
+    ArmToolUpdateSmallLinkPitch(g_arm_state.small_link_pitch_deg);
     ArmProcessCommandMailbox(now_ms);
 #if ARM_BOOT_MODE == ARM_BOOT_MODE_DM_ENABLE_ONLY
     ArmProcessEnableOnly(now_ms);
@@ -1887,7 +1725,6 @@ void ArmTask(void)
         }
         /* 反馈state含义尚未实机逐状态验收，联调阶段只观察，不据此失能。 */
         if (ArmTemperatureAtOrAbove(ARM_TEMPERATURE_HOLD_C)) {
-            ArmToolSetMagnet(0u);
             ArmTrajectoryCancel();
             g_arm_dm_debug.auto_init.result = ARM_COMMAND_NOT_READY;
             goto arm_task_finish;
@@ -1915,38 +1752,38 @@ void ArmTask(void)
 #endif
 arm_task_finish:
     ArmUpdateFeedback(now_ms);
+    ArmToolUpdateSmallLinkPitch(g_arm_state.small_link_pitch_deg);
     if (g_arm_state.mode == ARM_MODE_READY &&
         g_arm_state.start_state == ARM_START_READY &&
         g_arm_state.fault_latched == ARM_FAULT_NONE &&
         g_arm_state.kinematics_valid != 0u &&
         ARM_BOOT_MODE != ARM_BOOT_MODE_TOOL_SERVO_INIT_ONLY) {
-        (void)ArmToolSetVerticalDownFromPitch(
-            g_arm_state.small_link_pitch_deg);
-        (void)ArmToolTrackServo2WorldYaw(
-            g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW], now_ms);
+        const Arm_Tool_State_s *tool = ArmToolGetState();
+
+        if (!ArmTrajectoryIsBusy() && !ArmTrajectoryRealtimeActive() &&
+            tool->tool_pitch_target_valid != 0u) {
+            (void)ArmToolTrackPitch(tool->tool_pitch_target_deg,
+                g_arm_state.small_link_pitch_deg, now_ms);
+        }
     }
-    /*
-     * 末端舵机统一放在本周期主臂反馈、轨迹和补偿目标更新之后处理：
-     * ID1竖直补偿与ID2底座/yaw补偿先在同一周期生成，再由
-     * ArmToolTask统一推进USART6事务并决定双舵机合帧或单帧发送。
-     */
+    /* 统一推进USART6事务，动作发送与位置/电压查询保持单owner。 */
     ArmToolTask(now_ms);
-    (void)ArmToolGetTipFromWrist(&g_arm_state.wrist_center,
+#if ARM_TOOL_ENABLE != 0u
+    (void)ArmToolGetCenterFromWrist(&g_arm_state.wrist_center,
         g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW],
-        0.0f, &g_arm_state.tool_tip);
+        ArmToolGetState()->tool_pitch_feedback_deg,
+        &g_arm_state.tool_tip);
+#else
+    /* 无末端舵机时，调试和上位机位置统一退化为腕部轴心。 */
+    g_arm_state.tool_tip = g_arm_state.wrist_center;
+#endif
     {
         const Arm_Tool_State_s *tool = ArmToolGetState();
 
         g_arm_state.tool_ready = tool->tool_ready;
-        g_arm_state.magnet_on = tool->magnet_on;
-        memcpy(g_arm_state.tool_servo_target_deg,
-               tool->servo_target_deg,
-               sizeof(g_arm_state.tool_servo_target_deg));
         memcpy(g_arm_state.tool_servo_target_pos,
                tool->servo_target_pos,
                sizeof(g_arm_state.tool_servo_target_pos));
-        g_arm_state.tool_vertical_down_enabled =
-            tool->vertical_down_enabled;
         g_arm_state.tool_error_code = tool->error_code;
     }
     ArmUpdateTeachAndKinematicsDebug();
@@ -2034,7 +1871,6 @@ static Arm_Command_Result_e ArmExecuteJointCommand(
     const Arm_Joint_Command_s *command)
 {
     Arm_Motion_Result_e result;
-    float world_yaw_deg;
 
     if (command == NULL || !ArmJointPoseWithinSoftLimits(command->q_deg)) {
         return ARM_COMMAND_INVALID;
@@ -2048,14 +1884,6 @@ static Arm_Command_Result_e ArmExecuteJointCommand(
     }
     if (ArmTrajectoryIsBusy()) {
         return ARM_COMMAND_BUSY;
-    }
-    world_yaw_deg = ArmToolGetServo2WorldYawTarget();
-    if (!ArmToolServo2WorldYawValidForQ1(
-            world_yaw_deg,
-            g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW]) ||
-        !ArmToolServo2WorldYawValidForQ1(
-            world_yaw_deg, command->q_deg[ARM_JOINT_BASE_YAW])) {
-        return ARM_COMMAND_PREFLIGHT_FAILED;
     }
     result = command->move_type == ARM_MOVE_DIRECT ?
         ArmTrajectorySetJointDirect(command->q_deg) :
@@ -2076,32 +1904,17 @@ static Arm_Command_Result_e ArmExecuteCartesianCommand(
     const Arm_Cartesian_Command_s *command)
 {
     Arm_Motion_Result_e result;
-    Arm_IK_Result_s ik_result;
-    Arm_Command_Result_e yaw_result;
-    float world_yaw_deg;
-    float target_q1_deg;
 
     if (command == NULL) {
         return ARM_COMMAND_INVALID;
     }
-    if (command->tool_pitch_valid) {
+    if (command->tool_yaw_valid != 0u) {
         return ARM_COMMAND_UNSUPPORTED;
     }
     if (command->control_point != ARM_CONTROL_POINT_WRIST_CENTER &&
         command->control_point != ARM_CONTROL_POINT_TOOL_TIP) {
         return ARM_COMMAND_INVALID;
     }
-    if (command->tool_yaw_valid != 0u) {
-        if (!isfinite(command->tool_yaw_deg) ||
-            command->tool_yaw_deg < ARM_USB_YAW_MIN_DEG ||
-            command->tool_yaw_deg > ARM_USB_YAW_MAX_DEG) {
-            return ARM_COMMAND_INVALID;
-        }
-    }
-    world_yaw_deg = command->tool_yaw_valid != 0u ?
-        command->tool_yaw_deg : ArmToolGetServo2WorldYawTarget();
-    target_q1_deg = atan2f(command->target_mm.y_mm,
-                          command->target_mm.x_mm) * ARM_RAD_TO_DEG;
     if (g_arm_state.mode != ARM_MODE_READY ||
         g_arm_state.start_state != ARM_START_READY ||
         g_arm_state.fault_latched != ARM_FAULT_NONE ||
@@ -2112,38 +1925,8 @@ static Arm_Command_Result_e ArmExecuteCartesianCommand(
     if (ArmTrajectoryIsBusy()) {
         return ARM_COMMAND_BUSY;
     }
-    if (!ArmToolServo2WorldYawValidForQ1(
-            world_yaw_deg,
-            g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW]) ||
-        !ArmToolServo2WorldYawValidForQ1(world_yaw_deg, target_q1_deg)) {
-        return ARM_COMMAND_PREFLIGHT_FAILED;
-    }
-    memset(&ik_result, 0, sizeof(ik_result));
-    if (command->move_type == ARM_MOVE_DIRECT) {
-        result = command->control_point == ARM_CONTROL_POINT_TOOL_TIP ?
-            ArmSetToolTipTargetVerticalDown(&command->target_mm,
-                                            &ik_result) :
-            ArmSetCartesianTarget(&command->target_mm, &ik_result);
-    } else {
-        float speed_mm_s = command->max_speed_mm_s > 0.0f ?
-            command->max_speed_mm_s : ARM_LINEAR_DEFAULT_SPEED_MM_S;
-
-        result = command->control_point == ARM_CONTROL_POINT_TOOL_TIP ?
-            ArmMoveLinearToolTipVerticalDown(&command->target_mm,
-                                             speed_mm_s) :
-            ArmMoveLinear(&command->target_mm, speed_mm_s);
-    }
+    result = ArmTrajectoryStageCartesianCommand(command);
     if (result == ARM_MOTION_RESULT_OK) {
-        if (command->tool_yaw_valid != 0u) {
-            yaw_result = ArmToolSetServo2WorldYawTarget(
-                command->tool_yaw_deg);
-            if (yaw_result != ARM_COMMAND_OK) {
-                ArmTrajectoryCancel();
-                return yaw_result;
-            }
-            ArmHostStartYawWait(command->command_id, command->tool_yaw_deg,
-                                HAL_GetTick());
-        }
         return ARM_COMMAND_OK;
     }
     if (result == ARM_MOTION_RESULT_BUSY) {
@@ -2161,7 +1944,10 @@ static Arm_Command_Result_e ArmExecuteCartesianCommand(
 static Arm_Command_Result_e ArmExecuteRealtimeTarget(
     const Arm_Realtime_Cartesian_Target_s *target)
 {
-    if (target != NULL && target->tool_yaw_valid != 0u) {
+    if (target == NULL) {
+        return ARM_COMMAND_INVALID;
+    }
+    if (target->tool_yaw_valid != 0u) {
         return ARM_COMMAND_UNSUPPORTED;
     }
     if (g_arm_state.mode != ARM_MODE_READY ||
@@ -2170,13 +1956,6 @@ static Arm_Command_Result_e ArmExecuteRealtimeTarget(
         ArmTemperatureAtOrAbove(ARM_TEMPERATURE_HOLD_C) ||
         !ArmToolReadyForMotion()) {
         return ARM_COMMAND_NOT_READY;
-    }
-    if (target == NULL ||
-        !ArmToolServo2WorldYawValidForQ1(
-            ArmToolGetServo2WorldYawTarget(),
-            atan2f(target->target_mm.y_mm, target->target_mm.x_mm) *
-                ARM_RAD_TO_DEG)) {
-        return ARM_COMMAND_PREFLIGHT_FAILED;
     }
     return ArmTrajectorySubmitRealtimeTarget(target);
 }
@@ -2194,48 +1973,34 @@ static Arm_Command_Result_e ArmExecuteToolCommand(
     }
 
     switch (command->action) {
-        case ARM_TOOL_ACTION_MAGNET_ON:
+        case ARM_TOOL_ACTION_SET_PITCH:
             if (!ready) {
                 return ARM_COMMAND_NOT_READY;
             }
-            ArmToolSetMagnet(1u);
-            return ARM_COMMAND_OK;
-
-        case ARM_TOOL_ACTION_MAGNET_OFF:
-            ArmToolSetMagnet(0u);
-            return ARM_COMMAND_OK;
-
-        case ARM_TOOL_ACTION_SERVO1_ANGLE:
-            if (!ready) {
-                return ARM_COMMAND_NOT_READY;
+            if (!ArmToolPitchValidForPose(command->pitch_deg,
+                                          g_arm_state.q_feedback_deg)) {
+                return ARM_COMMAND_PREFLIGHT_FAILED;
             }
-            return ArmToolSetServo1Angle(command->servo1_deg);
-
-        case ARM_TOOL_ACTION_SERVO2_ANGLE:
-            if (!ready) {
-                return ARM_COMMAND_NOT_READY;
+            if (ArmToolSetPitchDeg(command->pitch_deg) != ARM_COMMAND_OK) {
+                return ARM_COMMAND_INVALID;
             }
-            return ArmToolSetServo2Angle(command->servo2_deg);
+            return ArmToolTrackPitch(command->pitch_deg,
+                g_arm_state.small_link_pitch_deg, HAL_GetTick());
 
-        case ARM_TOOL_ACTION_SERVO2_WORLD_YAW:
-            if (!ready) {
-                return ARM_COMMAND_NOT_READY;
-            }
-            return ArmToolSetServo2WorldYawTarget(command->servo2_deg);
+        case ARM_TOOL_ACTION_GRIPPER_READY:
+            return ready ? ArmToolSetGripper(ARM_GRIPPER_COMMAND_READY) :
+                           ARM_COMMAND_NOT_READY;
 
-        case ARM_TOOL_ACTION_RESET_DEFAULT:
+        case ARM_TOOL_ACTION_GRIPPER_OPEN:
+            return ArmToolSetGripper(ARM_GRIPPER_COMMAND_OPEN);
+
+        case ARM_TOOL_ACTION_GRIPPER_CLOSE:
+            return ready ? ArmToolSetGripper(ARM_GRIPPER_COMMAND_CLOSE) :
+                           ARM_COMMAND_NOT_READY;
+
+        case ARM_TOOL_ACTION_RESET_SAFE:
         {
-            Arm_Command_Result_e r1;
-            Arm_Command_Result_e r2;
-
-            ArmToolSetMagnet(0u);
-            r1 = ArmToolSetVerticalDownFromPitch(
-                g_arm_state.small_link_pitch_deg);
-            r2 = ArmToolSetServo2WorldYawTarget(0.0f);
-            if (r1 != ARM_COMMAND_OK) {
-                return r1;
-            }
-            return r2;
+            return ArmToolSetGripper(ARM_GRIPPER_COMMAND_OPEN);
         }
 
         case ARM_TOOL_ACTION_NONE:
@@ -2255,8 +2020,8 @@ static uint8_t ArmToolCommandAllowedBeforeReady(const Arm_Command_s *command)
     if (command == NULL || command->type != ARM_COMMAND_TYPE_TOOL) {
         return 0u;
     }
-    return command->payload.tool.action == ARM_TOOL_ACTION_MAGNET_OFF ||
-           command->payload.tool.action == ARM_TOOL_ACTION_RESET_DEFAULT;
+    return command->payload.tool.action == ARM_TOOL_ACTION_GRIPPER_OPEN ||
+           command->payload.tool.action == ARM_TOOL_ACTION_RESET_SAFE;
 }
 
 static uint8_t ArmCommandIdIsNewer(uint32_t command_id)
@@ -2351,28 +2116,6 @@ static void ArmHostStartCommand(uint32_t command_id,
     g_arm_host_status.active_command_id = command_id;
     g_arm_host_status.active_command_type = type;
     g_arm_host_status.active_command_state = state;
-}
-
-static uint8_t ArmHostYawActive(uint32_t now_ms)
-{
-    if (arm_command_mailbox.yaw_active == 0u) {
-        return 0u;
-    }
-    if ((int32_t)(now_ms - arm_command_mailbox.yaw_complete_tick) >= 0) {
-        arm_command_mailbox.yaw_active = 0u;
-        return 0u;
-    }
-    return 1u;
-}
-
-static void ArmHostStartYawWait(uint32_t command_id, float yaw_deg,
-                                uint32_t now_ms)
-{
-    arm_command_mailbox.yaw_active = 1u;
-    arm_command_mailbox.yaw_command_id = command_id;
-    arm_command_mailbox.yaw_target_deg = yaw_deg;
-    arm_command_mailbox.yaw_complete_tick = now_ms +
-        ARM_USB_YAW_MOVE_TIME_MS + ARM_USB_YAW_SETTLE_MS;
 }
 
 Arm_Command_Result_e ArmSubmitCommand(const Arm_Command_s *command)
@@ -2622,8 +2365,7 @@ static void ArmProcessCommandMailbox(uint32_t now_ms)
     }
 
     if (result == ARM_COMMAND_OK) {
-        if (command.type == ARM_COMMAND_TYPE_REALTIME_CARTESIAN ||
-            command.type == ARM_COMMAND_TYPE_TOOL) {
+        if (command.type == ARM_COMMAND_TYPE_REALTIME_CARTESIAN) {
             ArmHostFinishCommand(command.command_id, command.type,
                                  ARM_COMMAND_STATE_COMPLETED,
                                  ARM_COMMAND_OK);
@@ -2730,7 +2472,7 @@ Arm_Fault_Reset_Result_e ArmRequestFaultReset(void)
 static void ArmUpdateHostStatus(void)
 {
     const Arm_Tool_State_s *tool = ArmToolGetState();
-    Arm_Position_s current_tool_tip = g_arm_state.tool_tip;
+    Arm_Position_s current_endpoint = g_arm_state.wrist_center;
     uint8_t all_motors_ready = g_arm_state.motor_online[0] != 0u &&
         g_arm_state.motor_online[1] != 0u &&
         g_arm_state.motor_online[2] != 0u &&
@@ -2747,7 +2489,6 @@ static void ArmUpdateHostStatus(void)
         ArmToolReadyForMotion();
     uint8_t trajectory_busy = ArmTrajectoryIsBusy();
     uint8_t realtime_active = ArmTrajectoryRealtimeActive();
-    uint8_t yaw_busy = ArmHostYawActive(HAL_GetTick());
 
     if (g_arm_host_status.active_command_id != 0u &&
         g_arm_host_status.active_command_type ==
@@ -2779,7 +2520,7 @@ static void ArmUpdateHostStatus(void)
             ArmHostFinishCommand(g_arm_host_status.active_command_id,
                 g_arm_host_status.active_command_type,
                 ARM_COMMAND_STATE_FAULTED, ARM_COMMAND_NOT_READY);
-        } else if (!trajectory_busy && !yaw_busy &&
+        } else if (!trajectory_busy &&
                    g_arm_motion_debug.motion_state == ARM_MOTION_HOLDING &&
                    g_arm_motion_debug.trajectory_progress >= 1.0f) {
             ArmHostFinishCommand(g_arm_host_status.active_command_id,
@@ -2796,9 +2537,33 @@ static void ArmUpdateHostStatus(void)
         }
     }
 
+    if (g_arm_host_status.active_command_id != 0u &&
+        g_arm_host_status.active_command_type == ARM_COMMAND_TYPE_TOOL) {
+        Arm_Tool_Action_e action =
+            arm_command_mailbox.command.payload.tool.action;
+
+        if (ArmToolGripperFaulted() != 0u ||
+            tool->servo_feedback_valid[0] == 0u ||
+            tool->servo_feedback_valid[1] == 0u) {
+            ArmHostFinishCommand(g_arm_host_status.active_command_id,
+                ARM_COMMAND_TYPE_TOOL, ARM_COMMAND_STATE_FAULTED,
+                ARM_COMMAND_NOT_READY);
+        } else if (action == ARM_TOOL_ACTION_SET_PITCH) {
+            if (tool->servo_arrived[0] != 0u) {
+                ArmHostFinishCommand(g_arm_host_status.active_command_id,
+                    ARM_COMMAND_TYPE_TOOL, ARM_COMMAND_STATE_COMPLETED,
+                    ARM_COMMAND_OK);
+            }
+        } else if (ArmToolGripperActionComplete() != 0u) {
+            ArmHostFinishCommand(g_arm_host_status.active_command_id,
+                ARM_COMMAND_TYPE_TOOL, ARM_COMMAND_STATE_COMPLETED,
+                ARM_COMMAND_OK);
+        }
+    }
+
     g_arm_host_status.update_count++;
     g_arm_host_status.ready = ready;
-    g_arm_host_status.busy = trajectory_busy || yaw_busy ||
+    g_arm_host_status.busy = trajectory_busy ||
         arm_command_mailbox.pending != 0u ||
         g_arm_host_status.active_command_id != 0u;
     g_arm_host_status.realtime_active = realtime_active;
@@ -2816,28 +2581,36 @@ static void ArmUpdateHostStatus(void)
            sizeof(g_arm_host_status.q_feedback_deg));
     memcpy(g_arm_host_status.q_target_deg, g_arm_state.q_target_deg,
            sizeof(g_arm_host_status.q_target_deg));
-    (void)ArmToolGetTipFromWrist(&g_arm_state.wrist_center,
-        g_arm_state.q_feedback_deg[ARM_JOINT_BASE_YAW],
-        0.0f, &current_tool_tip);
-    g_arm_host_status.position_mm = current_tool_tip;
+    /* 线协议和主臂IK统一上报ID1俯仰舵机轴心。 */
+    g_arm_host_status.position_mm = current_endpoint;
     g_arm_host_status.target_position_mm =
         g_arm_motion_debug.target_position_mm;
     g_arm_host_status.tool_ready = tool->tool_ready;
-    g_arm_host_status.magnet_on = tool->magnet_on;
     memcpy(g_arm_host_status.servo_online, tool->servo_online,
            sizeof(g_arm_host_status.servo_online));
-    memcpy(g_arm_host_status.servo_target_deg, tool->servo_target_deg,
-           sizeof(g_arm_host_status.servo_target_deg));
     memcpy(g_arm_host_status.servo_target_pos, tool->servo_target_pos,
            sizeof(g_arm_host_status.servo_target_pos));
+    g_arm_host_status.tool_pitch_target_deg =
+        tool->tool_pitch_target_deg;
+    g_arm_host_status.tool_pitch_feedback_deg =
+        tool->tool_pitch_feedback_deg;
+    g_arm_host_status.tool_pitch_servo_pos =
+        tool->tool_pitch_servo_pos;
+    g_arm_host_status.gripper_state = (uint8_t)tool->gripper_state;
+    g_arm_host_status.gripper_target_state =
+        (uint8_t)tool->gripper_target_state;
+    g_arm_host_status.gripper_target_pos = tool->gripper_target_pos;
+    g_arm_host_status.gripper_feedback_pos = tool->gripper_feedback_pos;
+    g_arm_host_status.gripper_position_error =
+        tool->gripper_position_error;
+    g_arm_host_status.gripper_stall_candidate =
+        tool->gripper_stall_candidate;
+    g_arm_host_status.gripper_stall_latched =
+        tool->gripper_stall_latched;
     g_arm_host_status.wrist_center_mm = g_arm_state.wrist_center;
-    g_arm_host_status.tool_tip_mm = current_tool_tip;
-    g_arm_host_status.tool_vertical_down_enabled =
-        tool->vertical_down_enabled;
+    /* 兼容保留字段名；新协议语义同样是ID1舵机轴心。 */
+    g_arm_host_status.tool_tip_mm = current_endpoint;
     g_arm_host_status.tool_error_code = tool->error_code;
-    g_arm_host_status.tool_yaw_active = yaw_busy;
-    g_arm_host_status.tool_yaw_target_deg =
-        ArmToolGetServo2WorldYawTarget();
     g_arm_host_status.trajectory_progress =
         g_arm_motion_debug.trajectory_progress;
     memcpy(g_arm_host_status.mos_temperature_c,
@@ -2853,7 +2626,7 @@ static void ArmUpdateHostStatus(void)
         g_arm_host_status.state = ARM_HOST_STATE_FAULT;
     } else if (realtime_active) {
         g_arm_host_status.state = ARM_HOST_STATE_REALTIME;
-    } else if (trajectory_busy || yaw_busy ||
+    } else if (trajectory_busy ||
                g_arm_host_status.active_command_id != 0u) {
         g_arm_host_status.state = ARM_HOST_STATE_MOVING;
     } else if (ready) {

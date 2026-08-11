@@ -1306,9 +1306,9 @@
               <FilePath>..\APPLICATION\arm\arm_tool.c</FilePath>
             </File>
             <File>
-              <FileName>arm_usb_bridge.c</FileName>
+              <FileName>fruit_usb_bridge.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\APPLICATION\arm\arm_usb_bridge.c</FilePath>
+              <FilePath>..\APPLICATION\fruit_usb_bridge.c</FilePath>
             </File>
             <File>
               <FileName>catch.c</FileName>
@@ -2627,9 +2627,6 @@
           </Files>
         </Group>
         <Group>
-          <GroupName>::CMSIS</GroupName>
-        </Group>
-        <Group>
           <GroupName>Middlewares/Library/DSP Library/DSP Library</GroupName>
           <GroupOption>
             <CommonProperty>
@@ -2726,6 +2723,9 @@
               </FileOption>
             </File>
           </Files>
+        </Group>
+        <Group>
+          <GroupName>::CMSIS</GroupName>
         </Group>
       </Groups>
     </Target>

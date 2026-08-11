@@ -1,594 +1,331 @@
 #include "chassis.h"
+
+#include "chassis_config.h"
 #include "DJI_motor.h"
-#include "bsp_dwt.h"
+#include "daemon.h"
 #include "remote.h"
-#include "ins_task.h"
-#include "user_lib.h"
-#include "robot_def.h"
-#include "nac.h"
-#include "usb.h" // “˝»ÎUSBƒ£øÈ
+#include "stm32f4xx_hal.h"
 
+#include <math.h>
+#include <string.h>
+
+#define CHASSIS_PI 3.14159265358979323846f
+#define CHASSIS_DEG_TO_RAD (CHASSIS_PI / 180.0f)
+#define CHASSIS_RAD_TO_DEG (180.0f / CHASSIS_PI)
+
+Chassis_Debug_s g_chassis_debug;
+/* catch.c‰ªçË¢´KeilÂ∑•Á®ãÁºñËØë‰ΩÜÊú¨ËΩÆ‰∏çËøêË°åÔºå‰øùÁïôÁ©∫Á¨¶Âè∑‰ªÖÊª°Ë∂≥ÈìæÊé•„ÄÇ */
 RC_ctrl_t *rc_cmd;
-static DJIMotor_Instance *motor_lf, *motor_rf, *motor_lb, *motor_rb;                                     // left right forward back
-static DJIMotor_Instance *motor_steering_lf, *motor_steering_rf, *motor_steering_lb, *motor_steering_rb; // 6020µÁª˙ 
-static PID_Instance chassis_follow_pid;  // µ◊≈Ã∏˙ÀÊPID
-static float vt_lf, vt_rf, vt_lb, vt_rb; // µ◊≈ÃÀŸ∂»Ω‚À„∫Ûµƒ¡Ÿ ± ‰≥ˆ,¥˝Ω¯––œﬁ∑˘
-static float at_lf, at_rf, at_lb, at_rb; // µ◊≈ÃµƒΩ«∂»Ω‚À„∫Ûµƒ¡Ÿ ± ‰≥ˆ,¥˝Ω¯––œﬁ∑˘
+static DJIMotor_Instance *chassis_left_motor;
+static DJIMotor_Instance *chassis_right_motor;
+static attitude_t *chassis_imu;
+static uint32_t chassis_last_control_tick;
+static uint32_t chassis_imu_stable_tick;
+static uint32_t chassis_stop_stable_tick;
+static float chassis_left_zero_angle_deg;
+static float chassis_right_zero_angle_deg;
+static float chassis_last_left_distance_m;
+static float chassis_last_right_distance_m;
+static float chassis_last_imu_yaw_deg;
+static float chassis_ramped_linear_m_s;
 
-Chassis_Ctrl_Cmd_s chassis_ctrl_cmd;
-
-void ChassisInit()
+static float ChassisClamp(float value, float min_value, float max_value)
 {
-	    USB_Init(); // ≥ı ºªØUSBƒ£øÈ
-		rc_cmd = RemoteControlInit(&huart3);
-	// Àƒ∏ˆ¬÷◊”µƒ≤Œ ˝“ª—˘,∏ƒtx_id∫Õ∑¥◊™±Í÷æŒªº¥ø…
-    Motor_Init_Config_s chassis_motor_config = {
-        .can_init_config.can_handle   = &hcan2,
-        .controller_param_init_config = {
-            .speed_PID = {
-                .Kp            = 4, // 3
-                .Ki            = 0.2, // 0.5
-                .Kd            = 0.005,   // 0
-                .IntegralLimit = 3000,//5000
-                .Improve       = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
-                .MaxOut        = 10000,
-            },
-            .current_PID = {
-                .Kp            = 1, // 1
-                .Ki            = 0.01,   // 0
-                .Kd            = 0,
-                .IntegralLimit = 3000,//3000
-                .Improve       = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
-                .MaxOut        = 10000,
-            },
-        },
-        .controller_setting_init_config = {
-            .angle_feedback_source = MOTOR_FEED,
-            .speed_feedback_source = MOTOR_FEED,
-            .outer_loop_type       = SPEED_LOOP,
-            .close_loop_type       = CURRENT_LOOP | SPEED_LOOP,
-        },
-        .motor_type = M3508,
-    };
-    //  @todo: µ±«∞ªπ√ª”–…Ë÷√µÁª˙µƒ’˝∑¥◊™,»‘»ª–Ë“™ ÷∂ØÃÌº”referenceµƒ’˝∏∫∫≈,–Ë“™µÁª˙moduleµƒ÷ß≥÷,¥˝–ﬁ∏ƒ.
-    chassis_motor_config.can_init_config.tx_id                             = 4;
-    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_NORMAL;
-       motor_lf                                                               = DJIMotorInit(&chassis_motor_config);
-
-    chassis_motor_config.can_init_config.tx_id                             = 1;
-    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
-    motor_rf                                                               = DJIMotorInit(&chassis_motor_config);
-
-    chassis_motor_config.can_init_config.tx_id                             = 3;
-    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
-    motor_lb                                                               = DJIMotorInit(&chassis_motor_config);
-
-    chassis_motor_config.can_init_config.tx_id                             = 2;
-		chassis_motor_config.controller_param_init_config.speed_PID.Kp         =2;
-    chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
-    motor_rb                                                               = DJIMotorInit(&chassis_motor_config);
- 
-		 Motor_Init_Config_s chassis_motor_config1 = {
-        .can_init_config.can_handle   = &hcan1,
-        .controller_param_init_config = {
-            .speed_PID = {
-                .Kp            = 4, // 3
-                .Ki            = 0.2, // 0.5
-                .Kd            = 0.005,   // 0
-                .IntegralLimit = 3000,//5000
-                .Improve       = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
-                .MaxOut        = 10000,
-            },
-            .current_PID = {
-                .Kp            = 1, // 1
-                .Ki            = 0.01,   // 0
-                .Kd            = 0,
-                .IntegralLimit = 3000,//3000
-                .Improve       = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
-                .MaxOut        = 10000,
-            },
-        },
-        .controller_setting_init_config = {
-            .angle_feedback_source = MOTOR_FEED,
-            .speed_feedback_source = MOTOR_FEED,
-            .outer_loop_type       = SPEED_LOOP,
-            .close_loop_type       = CURRENT_LOOP | SPEED_LOOP,
-        },
-        .motor_type = M3508,
-    };
-
-    // 6020µÁª˙≥ı ºªØ
-    Motor_Init_Config_s chassis_motor_steering_config = {
-        .can_init_config.can_handle   = &hcan2,
-        .controller_param_init_config = {
-            .angle_PID = {
-                .Kp                = 12,
-                .Ki                = 0.2,
-                .Kd                = 0,
-                .CoefA             = 5,
-                .CoefB             = 0.1,
-                .Improve           = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement | PID_DerivativeFilter | PID_ChangingIntegrationRate,
-                .IntegralLimit     = 1000,
-                .MaxOut            = 16000,
-                .Derivative_LPF_RC = 0.001,
-                .DeadBand          = 0.5,
-            },
-            .speed_PID = {
-                .Kp            = 40,
-                .Ki            = 3,
-                .Kd            = 0,
-                .Improve       = PID_Integral_Limit | PID_Derivative_On_Measurement | PID_ChangingIntegrationRate | PID_OutputFilter,
-                .IntegralLimit = 4000,
-                .MaxOut        = 20000,
-                .Output_LPF_RC = 0.03,
-            },
-//						.angle_PID = {
-//                .Kp                = 15,
-//                .Ki                = 0.5,
-//                .Kd                = 0.1,
-//                .CoefA             = 5,
-//                .CoefB             = 0.1,
-//                .Improve           = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement | PID_DerivativeFilter | PID_ChangingIntegrationRate,
-//                .IntegralLimit     = 1000,
-//                .MaxOut            = 16000,
-//                .Derivative_LPF_RC = 0.001,
-//                .DeadBand          = 0.5,
-//            },
-//            .speed_PID = {
-//                .Kp            = 30,
-//                .Ki            = 0.5,
-//                .Kd            = 0.001,
-//                .Improve       = PID_Integral_Limit | PID_Derivative_On_Measurement | PID_ChangingIntegrationRate | PID_OutputFilter,
-//                .IntegralLimit = 4000,
-//                .MaxOut        = 16000,
-//                .Output_LPF_RC = 0.03,
-//            },
-        },
-        .controller_setting_init_config = {
-            .angle_feedback_source = MOTOR_FEED,
-            .speed_feedback_source = MOTOR_FEED,
-            .outer_loop_type       = ANGLE_LOOP,
-            .close_loop_type       = SPEED_LOOP | ANGLE_LOOP,
-            .motor_reverse_flag    = MOTOR_DIRECTION_NORMAL,
-        },
-        .motor_type = GM6020,
-    };
-    chassis_motor_steering_config.can_init_config.tx_id = 4;
-    motor_steering_lf                                   = DJIMotorInit(&chassis_motor_steering_config);
-    chassis_motor_steering_config.can_init_config.tx_id = 1;
-    motor_steering_rf                                   = DJIMotorInit(&chassis_motor_steering_config);
-    chassis_motor_steering_config.can_init_config.tx_id = 3;
-    motor_steering_lb                                   = DJIMotorInit(&chassis_motor_steering_config);
-    chassis_motor_steering_config.can_init_config.tx_id = 2;
-    motor_steering_rb                                   = DJIMotorInit(&chassis_motor_steering_config);
-
-		PID_Init_Config_s chassis_follow_pid_conf = {
-        .Kp                = 150, // 6
-        .Ki                = 0.1f,
-        .Kd                = 17, // 0.5
-        .DeadBand          = 0.5,
-        .CoefA             = 0.2,
-        .CoefB             = 0.3,
-        .Improve           = PID_Trapezoid_Intergral | PID_DerivativeFilter | PID_DerivativeFilter | PID_Derivative_On_Measurement | PID_Integral_Limit | PID_Derivative_On_Measurement | PID_ErrorHandle,
-        .IntegralLimit     = 500, // 200
-        .MaxOut            = 25000,
-        .Derivative_LPF_RC = 0.01, // 0.01
-    };
-    PIDInit(&chassis_follow_pid, &chassis_follow_pid_conf);
-       chassis_ctrl_cmd.Chassis_IMU_data = INS_Init();
-        chassis_ctrl_cmd.correct_mode =  IMU_CORRECT_HYBRID;
-        chassis_ctrl_cmd.imu_enable = 1;                       //  πƒ‹IMU–£◊º
-        chassis_ctrl_cmd.target_yaw = 0;
-        chassis_ctrl_cmd.offset_w = 0;
+    if (value < min_value) return min_value;
+    if (value > max_value) return max_value;
+    return value;
 }
 
-/**
- * @brief  π∂ÊµÁª˙Ω«∂»◊Ó–°–˝◊™£¨»°”≈ª°£¨∑¿÷πµÁª˙–˝◊™≤ª±ÿ“™µƒ––≥Ã
- *          ¿˝»Á£∫…œ¥ŒΩ«∂»Œ™0£¨ƒø±ÍΩ«∂»Œ™135∂»£¨
- *          µÁª˙ª·—°‘ÒƒÊ ±’Î–˝◊™÷¡-45∂»£¨∂¯≤ª «À≥ ±’Î–˝◊™÷¡135∂»£¨
- *          ¡Ω∏ˆΩ«∂»∂ºª·»√¬÷µÁª˙¥¶”⁄Õ¨“ª∆Ω––œﬂ…œ
- *
- * @param angle ƒø±ÍΩ«∂»
- * @param last_angle …œ¥ŒΩ«∂»
- *
- */
-static void MinmizeRotation(float *angle, const float *last_angle, float *speed)
+static float ChassisMotorDegSToWheelMS(float motor_deg_s, float sign)
 {
-    float rotation = *angle - *last_angle;
-
-    if (rotation > 90) {
-        *angle -= 180;
-        *speed = -(*speed);
-    } else if (rotation < -90) {
-        *angle += 180;
-        *speed = -(*speed);
-    }
+    return sign * motor_deg_s * CHASSIS_DEG_TO_RAD /
+        CHASSIS_REDUCTION_RATIO * CHASSIS_WHEEL_RADIUS_M;
 }
-/**
- * @brief Õ≥“ªµƒIMUΩ«∂»–£◊º∫Ø ˝£¨÷ß≥÷∂‡÷÷ƒ£ Ω
- * @param target_vw ƒø±ÍΩ«ÀŸ∂»£®¿¥◊‘÷∏¡Ó£©
- * @return –£◊º∫Ûµƒoffset_w
- */
-static float UpdateIMUCorrection(float target_vw)
+
+static float ChassisWheelMSToMotorDegS(float wheel_m_s)
 {
-    if(!chassis_ctrl_cmd.imu_enable) {
-        return 0;  // IMUŒ¥ πƒ‹£¨≤ª–£◊º
+    return wheel_m_s / CHASSIS_WHEEL_RADIUS_M *
+        CHASSIS_REDUCTION_RATIO * CHASSIS_RAD_TO_DEG;
+}
+
+static float ChassisAngleToDistance(float angle_deg, float zero_deg,
+                                    float feedback_sign)
+{
+    return feedback_sign * (angle_deg - zero_deg) * CHASSIS_DEG_TO_RAD /
+        CHASSIS_REDUCTION_RATIO * CHASSIS_WHEEL_RADIUS_M;
+}
+
+static uint8_t ChassisImuFinite(void)
+{
+    return chassis_imu != NULL && isfinite(chassis_imu->Yaw) &&
+        isfinite(chassis_imu->YawTotalAngle) &&
+        isfinite(chassis_imu->Gyro[Z]);
+}
+
+static uint8_t ChassisMotorsOnline(void)
+{
+    uint8_t left_online = chassis_left_motor != NULL &&
+        chassis_left_motor->daemon != NULL &&
+        DaemonIsOnline(chassis_left_motor->daemon);
+    uint8_t right_online = chassis_right_motor != NULL &&
+        chassis_right_motor->daemon != NULL &&
+        DaemonIsOnline(chassis_right_motor->daemon);
+    g_chassis_debug.left_online = left_online;
+    g_chassis_debug.right_online = right_online;
+    return left_online && right_online;
+}
+
+static void ChassisSetWheelTargets(float left_m_s, float right_m_s)
+{
+    float left_motor_deg_s = ChassisWheelMSToMotorDegS(left_m_s) *
+        CHASSIS_LEFT_COMMAND_SIGN;
+    float right_motor_deg_s = ChassisWheelMSToMotorDegS(right_m_s) *
+        CHASSIS_RIGHT_COMMAND_SIGN;
+    g_chassis_debug.left_target_m_s = left_m_s;
+    g_chassis_debug.right_target_m_s = right_m_s;
+    g_chassis_debug.left_target_motor_deg_s = left_motor_deg_s;
+    g_chassis_debug.right_target_motor_deg_s = right_motor_deg_s;
+    if (chassis_left_motor != NULL) DJIMotorSetRef(chassis_left_motor, left_motor_deg_s);
+    if (chassis_right_motor != NULL) DJIMotorSetRef(chassis_right_motor, right_motor_deg_s);
+}
+
+static void ChassisStopOutputs(void)
+{
+    chassis_ramped_linear_m_s = 0.0f;
+    g_chassis_debug.linear_command_m_s = 0.0f;
+    g_chassis_debug.angular_command_rad_s = 0.0f;
+    ChassisSetWheelTargets(0.0f, 0.0f);
+}
+
+static void ChassisLatchFault(Chassis_Fault_e fault)
+{
+    if (g_chassis_debug.state != CHASSIS_TEST_FAULT) {
+        if (fault == CHASSIS_FAULT_MOTOR_OFFLINE) g_chassis_debug.motor_offline_count++;
+        if (fault == CHASSIS_FAULT_IMU_INVALID) g_chassis_debug.imu_fault_count++;
     }
-    
-    float current_yaw = chassis_ctrl_cmd.Chassis_IMU_data->Yaw;
-    float offset = 0;
-    
-    switch(chassis_ctrl_cmd.correct_mode)
-    {
-        case IMU_CORRECT_STRAIGHT:
-            // ÷±œﬂƒ£ Ω£∫÷ª‘⁄Œﬁ◊™ÀŸ÷∏¡Ó ±–£◊º
-            if(fabsf(target_vw) < 100.0f) {  // À¿«¯≈–∂œ
-                // ∑Ω∞∏∂˛–ﬁ∏ƒ£∫Ω´ŒÛ≤Óº∆À„ªªŒ™ "ƒø±Í -  µº "£¨æ¿’˝’˝∑¥¿°∑¢…¢Œ Ã‚
-                float yaw_error = chassis_ctrl_cmd.last_yaw - current_yaw;
-                // ¥¶¿ÌΩ«∂»Ã¯±‰
-                if(yaw_error > 180.0f) yaw_error -= 360.0f;
-                else if(yaw_error < -180.0f) yaw_error += 360.0f;
-                offset = PIDCalculate(&chassis_follow_pid, yaw_error, 0);
-            } else {
-                // ”–◊™ÀŸ÷∏¡Ó ±£¨∏¸–¬≤ŒøºΩ«∂»£¨≤ª–£◊º
-                chassis_ctrl_cmd.last_yaw = current_yaw;
-                offset = 0;
+    g_chassis_debug.fault = fault;
+    g_chassis_debug.state = CHASSIS_TEST_FAULT;
+    g_chassis_debug.motion_enabled = 0u;
+    ChassisStopOutputs();
+    if (chassis_left_motor != NULL) DJIMotorStop(chassis_left_motor);
+    if (chassis_right_motor != NULL) DJIMotorStop(chassis_right_motor);
+}
+
+static void ChassisCaptureZero(uint32_t now_ms)
+{
+    chassis_left_zero_angle_deg = chassis_left_motor->measure.total_angle;
+    chassis_right_zero_angle_deg = chassis_right_motor->measure.total_angle;
+    chassis_last_left_distance_m = 0.0f;
+    chassis_last_right_distance_m = 0.0f;
+    chassis_last_imu_yaw_deg = CHASSIS_IMU_YAW_SIGN * chassis_imu->YawTotalAngle;
+    g_chassis_debug.yaw_zero_deg = chassis_last_imu_yaw_deg;
+    g_chassis_debug.heading_target_deg = 0.0f;
+    g_chassis_debug.x_m = 0.0f;
+    g_chassis_debug.y_m = 0.0f;
+    g_chassis_debug.travel_distance_m = 0.0f;
+    g_chassis_debug.state_tick = now_ms;
+}
+
+static void ChassisUpdateOdometry(void)
+{
+    float left_distance, right_distance, dl, dr, ds, yaw_deg, yaw_mid_rad;
+    g_chassis_debug.left_total_angle_deg = chassis_left_motor->measure.total_angle;
+    g_chassis_debug.right_total_angle_deg = chassis_right_motor->measure.total_angle;
+    left_distance = ChassisAngleToDistance(g_chassis_debug.left_total_angle_deg,
+        chassis_left_zero_angle_deg, CHASSIS_LEFT_FEEDBACK_SIGN);
+    right_distance = ChassisAngleToDistance(g_chassis_debug.right_total_angle_deg,
+        chassis_right_zero_angle_deg, CHASSIS_RIGHT_FEEDBACK_SIGN);
+    dl = left_distance - chassis_last_left_distance_m;
+    dr = right_distance - chassis_last_right_distance_m;
+    ds = 0.5f * (dl + dr);
+    yaw_deg = CHASSIS_IMU_YAW_SIGN * chassis_imu->YawTotalAngle -
+        g_chassis_debug.yaw_zero_deg;
+    yaw_mid_rad = 0.5f * (chassis_last_imu_yaw_deg -
+        g_chassis_debug.yaw_zero_deg + yaw_deg) * CHASSIS_DEG_TO_RAD;
+    g_chassis_debug.x_m += ds * cosf(yaw_mid_rad);
+    g_chassis_debug.y_m += ds * sinf(yaw_mid_rad);
+    g_chassis_debug.yaw_deg = yaw_deg;
+    g_chassis_debug.wheel_yaw_deg =
+        (right_distance - left_distance) / CHASSIS_TRACK_WIDTH_M *
+        CHASSIS_RAD_TO_DEG;
+    g_chassis_debug.imu_wheel_yaw_error_deg = yaw_deg -
+        g_chassis_debug.wheel_yaw_deg;
+    g_chassis_debug.left_distance_m = left_distance;
+    g_chassis_debug.right_distance_m = right_distance;
+    g_chassis_debug.travel_distance_m = 0.5f * (left_distance + right_distance);
+    g_chassis_debug.left_speed_m_s = ChassisMotorDegSToWheelMS(
+        chassis_left_motor->measure.speed_aps, CHASSIS_LEFT_FEEDBACK_SIGN);
+    g_chassis_debug.right_speed_m_s = ChassisMotorDegSToWheelMS(
+        chassis_right_motor->measure.speed_aps, CHASSIS_RIGHT_FEEDBACK_SIGN);
+    g_chassis_debug.imu_gyro_z_rad_s = CHASSIS_IMU_YAW_SIGN * chassis_imu->Gyro[Z];
+    chassis_last_left_distance_m = left_distance;
+    chassis_last_right_distance_m = right_distance;
+    chassis_last_imu_yaw_deg = CHASSIS_IMU_YAW_SIGN * chassis_imu->YawTotalAngle;
+    g_chassis_debug.left_feedback_count =
+        chassis_left_motor->feedback_count;
+    g_chassis_debug.right_feedback_count =
+        chassis_right_motor->feedback_count;
+}
+
+uint8_t ChassisInit(attitude_t *imu)
+{
+    Motor_Init_Config_s config;
+    memset(&g_chassis_debug, 0, sizeof(g_chassis_debug));
+    memset(&config, 0, sizeof(config));
+    chassis_imu = imu;
+    config.can_init_config.can_handle = &hcan2;
+    config.controller_param_init_config.speed_PID.Kp = CHASSIS_SPEED_PID_KP;
+    config.controller_param_init_config.speed_PID.Ki = CHASSIS_SPEED_PID_KI;
+    config.controller_param_init_config.speed_PID.Kd = CHASSIS_SPEED_PID_KD;
+    config.controller_param_init_config.speed_PID.IntegralLimit = CHASSIS_SPEED_PID_I_LIMIT;
+    config.controller_param_init_config.speed_PID.MaxOut = CHASSIS_MOTOR_CURRENT_LIMIT;
+    config.controller_param_init_config.speed_PID.Improve =
+        (PID_Improvement_e)(PID_Trapezoid_Intergral |
+        PID_Integral_Limit | PID_Derivative_On_Measurement);
+    config.controller_param_init_config.current_PID.Kp = CHASSIS_CURRENT_PID_KP;
+    config.controller_param_init_config.current_PID.Ki = CHASSIS_CURRENT_PID_KI;
+    config.controller_param_init_config.current_PID.IntegralLimit = CHASSIS_CURRENT_PID_I_LIMIT;
+    config.controller_param_init_config.current_PID.MaxOut = CHASSIS_MOTOR_CURRENT_LIMIT;
+    config.controller_param_init_config.current_PID.Improve =
+        (PID_Improvement_e)(PID_Trapezoid_Intergral |
+        PID_Integral_Limit | PID_Derivative_On_Measurement);
+    config.controller_setting_init_config.angle_feedback_source = MOTOR_FEED;
+    config.controller_setting_init_config.speed_feedback_source = MOTOR_FEED;
+    config.controller_setting_init_config.outer_loop_type = SPEED_LOOP;
+    config.controller_setting_init_config.close_loop_type =
+        (Closeloop_Type_e)(SPEED_LOOP | CURRENT_LOOP);
+    config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_NORMAL;
+    config.controller_setting_init_config.feedback_reverse_flag = FEEDBACK_DIRECTION_NORMAL;
+    config.motor_type = M3508;
+    config.can_init_config.tx_id = CHASSIS_LEFT_MOTOR_ID;
+    chassis_left_motor = DJIMotorInit(&config);
+    config.can_init_config.tx_id = CHASSIS_RIGHT_MOTOR_ID;
+    chassis_right_motor = DJIMotorInit(&config);
+    if (chassis_left_motor == NULL || chassis_right_motor == NULL || chassis_imu == NULL) {
+        ChassisLatchFault(CHASSIS_FAULT_INIT);
+        return 0u;
+    }
+    DJIMotorStop(chassis_left_motor);
+    DJIMotorStop(chassis_right_motor);
+    g_chassis_debug.initialized = 1u;
+    g_chassis_debug.left_can_id = CHASSIS_LEFT_MOTOR_ID;
+    g_chassis_debug.right_can_id = CHASSIS_RIGHT_MOTOR_ID;
+    g_chassis_debug.state = CHASSIS_AUTO_FORWARD_TEST_ENABLE != 0u ?
+        CHASSIS_TEST_WAIT_IMU : CHASSIS_TEST_DISABLED;
+    g_chassis_debug.state_tick = HAL_GetTick();
+    chassis_last_control_tick = HAL_GetTick();
+    return 1u;
+}
+
+void ChassisNotifyImuUpdate(uint32_t now_ms) { g_chassis_debug.imu_update_tick = now_ms; }
+void ChassisEmergencyStop(void) { ChassisLatchFault(CHASSIS_FAULT_INIT); }
+
+void ChassisTask(uint32_t now_ms)
+{
+    float dt_s, remaining_m, desired_linear_m_s, max_linear_step;
+    float angular_rad_s, left_m_s, right_m_s, mean_abs_speed;
+    if (g_chassis_debug.initialized == 0u ||
+        (uint32_t)(now_ms - chassis_last_control_tick) < CHASSIS_CONTROL_PERIOD_MS) return;
+    dt_s = (float)(now_ms - chassis_last_control_tick) * 0.001f;
+    chassis_last_control_tick = now_ms;
+    g_chassis_debug.control_count++;
+    g_chassis_debug.imu_healthy = ChassisImuFinite() &&
+        (uint32_t)(now_ms - g_chassis_debug.imu_update_tick) <= CHASSIS_IMU_UPDATE_TIMEOUT_MS;
+    switch (g_chassis_debug.state) {
+        case CHASSIS_TEST_WAIT_IMU:
+            ChassisStopOutputs();
+            if (g_chassis_debug.imu_healthy == 0u) { chassis_imu_stable_tick = 0u; break; }
+            if (chassis_imu_stable_tick == 0u) chassis_imu_stable_tick = now_ms;
+            if ((uint32_t)(now_ms - chassis_imu_stable_tick) >= CHASSIS_IMU_STABLE_MS &&
+                (uint32_t)(now_ms - g_chassis_debug.state_tick) >= CHASSIS_TEST_START_DELAY_MS) {
+                g_chassis_debug.state = CHASSIS_TEST_WAIT_MOTORS;
+                g_chassis_debug.state_tick = now_ms;
             }
             break;
-            
-        case IMU_CORRECT_ROTATION:
-            // ◊™Õ‰ƒ£ Ω£∫∏˙◊Ÿƒø±ÍΩ«∂»
-            if(fabsf(target_vw) > 100.0f) {
-                // ”–◊™ÀŸ÷∏¡Ó ±£¨∏¸–¬ƒø±ÍΩ«∂»
-                chassis_ctrl_cmd.target_yaw += target_vw * 0.001f; // ª˝∑÷º∆À„∆⁄Õ˚Ω«∂»
-                // πÈ“ªªØµΩ-180~180
-                while(chassis_ctrl_cmd.target_yaw > 180.0f) chassis_ctrl_cmd.target_yaw -= 360.0f;
-                while(chassis_ctrl_cmd.target_yaw < -180.0f) chassis_ctrl_cmd.target_yaw += 360.0f;
-            }
-            // ∑Ω∞∏∂˛–ﬁ∏ƒ£∫Ω´º∆À„”Îƒø±ÍΩ«∂»µƒŒÛ≤ÓªªŒ™ "ƒø±Í -  µº "
-            float target_error = chassis_ctrl_cmd.target_yaw - current_yaw;
-            if(target_error > 180.0f) target_error -= 360.0f;
-            else if(target_error < -180.0f) target_error += 360.0f;
-            offset = PIDCalculate(&chassis_follow_pid, target_error, 0);
+        case CHASSIS_TEST_WAIT_MOTORS:
+            ChassisStopOutputs();
+            if (g_chassis_debug.imu_healthy == 0u) { ChassisLatchFault(CHASSIS_FAULT_IMU_INVALID); break; }
+            if (ChassisMotorsOnline()) { ChassisCaptureZero(now_ms); g_chassis_debug.state = CHASSIS_TEST_SETTLE_ZERO; }
             break;
-            
-        case IMU_CORRECT_HYBRID:
-        {
-            // ªÏ∫œƒ£ Ω£∫∏˘æ›◊™ÀŸ¥Û–°∂ØÃ¨µ˜’˚
-            // ∑Ω∞∏∂˛–ﬁ∏ƒ£∫Ω´ŒÛ≤Óº∆À„ªªŒ™ "ƒø±Í -  µº "
-            float yaw_error = chassis_ctrl_cmd.last_yaw - current_yaw;
-            // ¥¶¿ÌΩ«∂»Ã¯±‰
-            if(yaw_error > 180.0f) yaw_error -= 360.0f;
-            else if(yaw_error < -180.0f) yaw_error += 360.0f;
-            
-            if(fabsf(target_vw) < 100.0f) {
-                // –°◊™ÀŸªÚ÷±œﬂ£∫±£≥÷Ω«∂»
-                offset = PIDCalculate(&chassis_follow_pid, yaw_error, 0);
-            } else {
-                // ¥Û◊™ÀŸ£∫∏®÷˙øÿ÷∆£¨ºı–°PID‘ˆ“Ê
-                offset = PIDCalculate(&chassis_follow_pid, yaw_error, 0) * 0.5f;
-                // ∏¸–¬≤ŒøºΩ«∂»£¨±‹√‚ŒÛ≤Ó¿€ª˝
-                chassis_ctrl_cmd.last_yaw = current_yaw;
+        case CHASSIS_TEST_SETTLE_ZERO:
+            ChassisStopOutputs();
+            if (!ChassisMotorsOnline()) { ChassisLatchFault(CHASSIS_FAULT_MOTOR_OFFLINE); break; }
+            if (g_chassis_debug.imu_healthy == 0u) { ChassisLatchFault(CHASSIS_FAULT_IMU_INVALID); break; }
+            ChassisUpdateOdometry();
+            if ((uint32_t)(now_ms - g_chassis_debug.state_tick) >= CHASSIS_ZERO_SETTLE_MS) {
+                ChassisCaptureZero(now_ms);
+                DJIMotorEnable(chassis_left_motor); DJIMotorEnable(chassis_right_motor);
+                g_chassis_debug.motion_enabled = 1u;
+                g_chassis_debug.test_start_tick = now_ms;
+                g_chassis_debug.left_direction_check_start_m = 0.0f;
+                g_chassis_debug.right_direction_check_start_m = 0.0f;
+                g_chassis_debug.state = CHASSIS_TEST_RUNNING;
             }
             break;
-        }
-            
+        case CHASSIS_TEST_RUNNING:
+            if (!ChassisMotorsOnline()) { ChassisLatchFault(CHASSIS_FAULT_MOTOR_OFFLINE); break; }
+            if (g_chassis_debug.imu_healthy == 0u) { ChassisLatchFault(CHASSIS_FAULT_IMU_INVALID); break; }
+            ChassisUpdateOdometry();
+            if ((uint32_t)(now_ms - g_chassis_debug.test_start_tick) >=
+                    CHASSIS_DIRECTION_CHECK_MS &&
+                (g_chassis_debug.left_distance_m <
+                     CHASSIS_DIRECTION_CHECK_MIN_M ||
+                 g_chassis_debug.right_distance_m <
+                     CHASSIS_DIRECTION_CHECK_MIN_M)) {
+                g_chassis_debug.direction_fault_count++;
+                ChassisLatchFault(CHASSIS_FAULT_DIRECTION);
+                break;
+            }
+            if ((uint32_t)(now_ms - g_chassis_debug.test_start_tick) >= CHASSIS_TEST_TIMEOUT_MS) { ChassisLatchFault(CHASSIS_FAULT_TIMEOUT); break; }
+            if (fabsf(g_chassis_debug.travel_distance_m) > CHASSIS_EXCESS_DISTANCE_M) { ChassisLatchFault(CHASSIS_FAULT_EXCESS_DISTANCE); break; }
+            remaining_m = CHASSIS_TEST_DISTANCE_M - g_chassis_debug.travel_distance_m;
+            if (remaining_m <= CHASSIS_DISTANCE_TOLERANCE_M) {
+                g_chassis_debug.state = CHASSIS_TEST_STOPPING;
+                g_chassis_debug.state_tick = now_ms; chassis_stop_stable_tick = 0u;
+                ChassisStopOutputs(); break;
+            }
+            desired_linear_m_s = ChassisClamp(CHASSIS_TEST_POSITION_KP * remaining_m,
+                CHASSIS_TEST_MIN_SPEED_M_S, CHASSIS_TEST_MAX_SPEED_M_S);
+            if (remaining_m < CHASSIS_TEST_DECEL_DISTANCE_M) {
+                desired_linear_m_s = ChassisClamp(CHASSIS_TEST_MAX_SPEED_M_S * remaining_m /
+                    CHASSIS_TEST_DECEL_DISTANCE_M, CHASSIS_TEST_MIN_SPEED_M_S, CHASSIS_TEST_MAX_SPEED_M_S);
+            }
+            max_linear_step = CHASSIS_MAX_LINEAR_ACCEL_M_S2 * dt_s;
+            if (desired_linear_m_s > chassis_ramped_linear_m_s + max_linear_step)
+                chassis_ramped_linear_m_s += max_linear_step;
+            else chassis_ramped_linear_m_s = desired_linear_m_s;
+            g_chassis_debug.heading_error_deg = g_chassis_debug.heading_target_deg - g_chassis_debug.yaw_deg;
+            angular_rad_s = CHASSIS_HEADING_KP_RAD_S_PER_DEG * g_chassis_debug.heading_error_deg -
+                CHASSIS_HEADING_KD * g_chassis_debug.imu_gyro_z_rad_s;
+            angular_rad_s = ChassisClamp(angular_rad_s, -CHASSIS_MAX_ANGULAR_RAD_S, CHASSIS_MAX_ANGULAR_RAD_S);
+            left_m_s = chassis_ramped_linear_m_s - angular_rad_s * CHASSIS_TRACK_WIDTH_M * 0.5f;
+            right_m_s = chassis_ramped_linear_m_s + angular_rad_s * CHASSIS_TRACK_WIDTH_M * 0.5f;
+            g_chassis_debug.linear_command_m_s = chassis_ramped_linear_m_s;
+            g_chassis_debug.angular_command_rad_s = angular_rad_s;
+            g_chassis_debug.heading_correction_rad_s = angular_rad_s;
+            ChassisSetWheelTargets(left_m_s, right_m_s);
+            break;
+        case CHASSIS_TEST_STOPPING:
+            ChassisSetWheelTargets(0.0f, 0.0f);
+            if (!ChassisMotorsOnline()) { ChassisLatchFault(CHASSIS_FAULT_MOTOR_OFFLINE); break; }
+            if (g_chassis_debug.imu_healthy == 0u) { ChassisLatchFault(CHASSIS_FAULT_IMU_INVALID); break; }
+            ChassisUpdateOdometry();
+            mean_abs_speed = 0.5f * (fabsf(g_chassis_debug.left_speed_m_s) + fabsf(g_chassis_debug.right_speed_m_s));
+            if (mean_abs_speed <= CHASSIS_STOP_SPEED_M_S) {
+                if (chassis_stop_stable_tick == 0u) chassis_stop_stable_tick = now_ms;
+                if ((uint32_t)(now_ms - chassis_stop_stable_tick) >= CHASSIS_STOP_STABLE_MS) {
+                    DJIMotorStop(chassis_left_motor); DJIMotorStop(chassis_right_motor);
+                    g_chassis_debug.motion_enabled = 0u;
+                    g_chassis_debug.state = CHASSIS_TEST_COMPLETED;
+                    g_chassis_debug.state_tick = now_ms;
+                }
+            } else chassis_stop_stable_tick = 0u;
+            break;
+        case CHASSIS_TEST_COMPLETED:
+        case CHASSIS_TEST_FAULT:
+        case CHASSIS_TEST_DISABLED:
         default:
-            offset = 0;
+            ChassisStopOutputs();
             break;
-    }
-    
-    return offset;
-}
-
-void GetCmd(){
-	
-	//Ω‚À„À∆∫ı”–µ„Œ Ã‚£¨◊Û◊ﬂ±‰÷±œﬂ£¨÷±œﬂ±‰◊Û◊ﬂ£¨“Ú¥À’‚÷±Ω”∏ƒ¡Ω∏ˆ÷·
-	chassis_ctrl_cmd.vy = ((float)rc_cmd->rc.rocker_l_/660)*40000;
-	chassis_ctrl_cmd.vx= ((float)rc_cmd->rc.rocker_l1/660)*40000;
-	
-	chassis_ctrl_cmd.vw = ((float)rc_cmd->rc.dial/660)*10000;
-
-}
-
-
-/**
- * @brief ∂Ê¬÷µÁª˙Ω«∂»Ω‚À„
- *
- */
-static void SteeringWheelCalculate()
-{
-    float offset_lf, offset_rf, offset_lb, offset_rb;     // ”√”⁄º∆À„∂Ê¬÷µƒΩ«∂»
-    float at_lf_last, at_rf_last, at_lb_last, at_rb_last; // …œ¥ŒµƒΩ«∂»
-		float chassis_vx = 0;
-		float chassis_vy = 0;
-		float chassis_vw = 0;
-    at_lb_last = motor_steering_lb->measure.total_angle;
-    at_lf_last = motor_steering_lf->measure.total_angle;
-    at_rf_last = motor_steering_rf->measure.total_angle;
-    at_rb_last = motor_steering_rb->measure.total_angle;
-	
-	// ≈–∂œ «∑Ò”–ÀŸ∂»÷∏¡Ó£®œ»≈–∂œ,∫Û∏≥÷µ£©
-	if(chassis_ctrl_cmd.vx != 0 || chassis_ctrl_cmd.vy != 0 || chassis_ctrl_cmd.vw != 0) {
-		// ”–ÀŸ∂»÷∏¡Ó ±,’˝≥£‘À∂Ø—ßΩ‚À„≤¢∆Ù”√IMU–£◊º
-		chassis_vx = chassis_ctrl_cmd.vx;
-		chassis_vy = chassis_ctrl_cmd.vy;
-		//  ◊¥Œ‘À–– ±≥ı ºªØlast_yaw
-		static uint8_t first_run = 1;
-		if(first_run) {
-			chassis_ctrl_cmd.last_yaw = chassis_ctrl_cmd.Chassis_IMU_data->Yaw;
-			first_run = 0;
-		}
-		chassis_ctrl_cmd.offset_w = UpdateIMUCorrection(chassis_ctrl_cmd.vw);
-		chassis_vw = chassis_ctrl_cmd.vw + chassis_ctrl_cmd.offset_w;
-	} else {
-		// ÕÍ»´æ≤÷π ±,≤ªµ˜”√IMU–£◊º
-		chassis_vx = 0;
-		chassis_vy = 0;
-		chassis_vw = 0;  
-	}
-    
-        // …˙≥…‘§º∆À„±‰¡ø£¨ºı…Ÿº∆À„¡ø£¨ø’º‰ªª ±º‰
-        // chassis_vx = chassis_vx * 1.5;chassis_vy = chassis_vy * 1.5;
-//        float w      = chassis_cmd_recv.wz * CHASSIS_WHEEL_OFFSET * SQRT2;
-		float w = chassis_vw;
-        float temp_x = chassis_vx - w, temp_y = chassis_vy - w;
-        arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_lf); // lf£∫y- , x-
-        temp_y = chassis_vy + w;                                 // ÷ÿ∏¥¿˚”√±‰¡ø,temp_x = chassis_vy - w;”Î…œ¥Œœ‡Õ¨“Ú¥À◊¢ Õ
-        arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_lb); // lb: y+ , x-
-        temp_x = chassis_vx + w;                                 // temp_y = chassis_vx + w;”Î…œ¥Œœ‡Õ¨“Ú¥À◊¢ Õ
-        arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_rb); // rb: y+ , x+
-        temp_y = chassis_vy - w;                                 // temp_x = chassis_vy + w;”Î…œ¥Œœ‡Õ¨“Ú¥À◊¢ Õ
-        arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_rf); // rf: y- , x+
-    
-        // º∆À„Ω«∂»∆´“∆
-        offset_lf = atan2f(chassis_vy - w, chassis_vx - w) * RAD_2_DEGREE; // lf:  y- , x-
-        offset_rf = atan2f(chassis_vy - w, chassis_vx + w) * RAD_2_DEGREE; // rf:  y- , x+
-        offset_lb = atan2f(chassis_vy + w, chassis_vx - w) * RAD_2_DEGREE; // lb:  y+ , x-
-        offset_rb = atan2f(chassis_vy + w, chassis_vx + w) * RAD_2_DEGREE; // rb:  y+ , x+
-  
-        at_lf = STEERING_CHASSIS_ALIGN_ANGLE_LF + offset_lf; 
-        at_rf = STEERING_CHASSIS_ALIGN_ANGLE_RF + offset_rf;
-        at_lb = STEERING_CHASSIS_ALIGN_ANGLE_LB + offset_lb;
-        at_rb = STEERING_CHASSIS_ALIGN_ANGLE_RB + offset_rb;
-				
-		    ANGLE_LIMIT_360_TO_180_ABS(at_lf);
-        ANGLE_LIMIT_360_TO_180_ABS(at_rf);
-        ANGLE_LIMIT_360_TO_180_ABS(at_lb);
-        ANGLE_LIMIT_360_TO_180_ABS(at_rb);
-
-        MinmizeRotation(&at_lf, &at_lf_last, &vt_lf);
-        MinmizeRotation(&at_rf, &at_rf_last, &vt_rf);
-        MinmizeRotation(&at_lb, &at_lb_last, &vt_lb);
-        MinmizeRotation(&at_rb, &at_rb_last, &vt_rb);
-
-    DJIMotorSetRef(motor_steering_lf, at_lf);
-    DJIMotorSetRef(motor_steering_rf, at_rf);
-    DJIMotorSetRef(motor_steering_lb, at_lb);//+90
-    DJIMotorSetRef(motor_steering_rb, at_rb);
-		if (w==6000){
-			DJIMotorSetRef(motor_lf, 0 );
-			DJIMotorSetRef(motor_rf, 0 );
-			DJIMotorSetRef(motor_lb, 0 );
-			DJIMotorSetRef(motor_rb, 0 );
-		}
-		else{
-		DJIMotorSetRef(motor_lf, vt_lf );
-    DJIMotorSetRef(motor_rf, vt_rf );
-    DJIMotorSetRef(motor_lb, vt_lb );
-    DJIMotorSetRef(motor_rb, vt_rb );
-		}
-	}
-
-/**
- * @brief ∂Ê¬÷‘À∂Ø—ßΩ‚À„(Ω«ÀŸ∂»øÿ÷∆∞Ê±æ-IMU∏®÷˙)
- * @param vx «∞Ω¯ÀŸ∂»   
- * @param vy ∫·“∆ÀŸ∂»    
- * @param vw Ω«ÀŸ∂»(–˝◊™ÀŸ∂»)
- * @note ÷±Ω”øÿ÷∆Ω«ÀŸ∂»£¨IMU∏®÷˙–ﬁ’˝
- * @note [»˝¬÷«–ªªÀµ√˜]: 
- *       ‘≠Àƒ¬÷¬ﬂº≠“—±ª◊¢ Õ±£¥Ê°£»˝¬÷ƒ£ Ωœ¬£¨id3Œ™«∞∂•µ„£¨id1Œ™◊Û∫Û£¨id2Œ™”“∫Û°£
- *       »Á–Ë«–ªªªÿÀƒ¬÷£¨÷ª–ËΩ‚ø™◊¢ ÕµƒÀƒ¬÷¥˙¬Î£¨≤¢◊¢ ÕµÙµ±«∞µƒ»˝¬÷¥˙¬Îº¥ø…°£
- */
-void SteeringWheelKinematics(float vx, float vy, float vw)
-{
-    // ================== »˝¬÷ƒ£ Ω±‰¡ø…˘√˜ ==================
-    float offset_1, offset_2, offset_3;
-    float at_1_last, at_2_last, at_3_last;
-    float vt_1, vt_2, vt_3;
-    float at_1, at_2, at_3;
-
-    // ================== ‘≠Àƒ¬÷ƒ£ Ω±‰¡ø…˘√˜ (±£¡Ù) ==================
-    /*
-    float offset_lf, offset_rf, offset_lb, offset_rb;
-    float at_lf_last, at_rf_last, at_lb_last, at_rb_last;
-    */
-    
-    float chassis_vx = 0;
-    float chassis_vy = 0;
-    float chassis_vw = 0;
-    static uint8_t first_run_kinematics = 1;
-
-    // ================== ªÒ»°…œ¥ŒΩ«∂» (»˝¬÷) ==================
-    // ◊¢“‚£∫ºŸ…Ëƒ„µƒ»˝¬÷µÁª˙÷∏’Îƒø«∞∏¥”√‘≠Àƒ¬÷÷∏’Î£∫
-    // id3(«∞) -> motor_steering_lf
-    // id1(◊Û∫Û) -> motor_steering_lb
-    // id2(”“∫Û) -> motor_steering_rb
-    // «Î∏˘æ› µº ”≤º˛∞Û∂®µƒ÷∏’ÎΩ¯––µ˜’˚£¨’‚¿Ô π”√lf/lb/rb¥˙÷∏3/1/2
-    at_3_last = motor_steering_lf->measure.total_angle; // 3∫≈:«∞
-    at_1_last = motor_steering_lb->measure.total_angle; // 1∫≈:◊Û∫Û
-    at_2_last = motor_steering_rb->measure.total_angle; // 2∫≈:”“∫Û
-    
-    // ================== ªÒ»°…œ¥ŒΩ«∂» (‘≠Àƒ¬÷) ==================
-    /*
-    at_lb_last = motor_steering_lb->measure.total_angle;
-    at_lf_last = motor_steering_lf->measure.total_angle;
-    at_rf_last = motor_steering_rf->measure.total_angle;
-    at_rb_last = motor_steering_rb->measure.total_angle;
-    */
-
-    //  ◊¥Œ‘À–– ±≥ı ºªØlast_yaw
-    if(first_run_kinematics) {
-        chassis_ctrl_cmd.last_yaw = chassis_ctrl_cmd.Chassis_IMU_data->Yaw;
-        first_run_kinematics = 0;
-    }
-
-    // Ω«ÀŸ∂»øÿ÷∆ƒ£ Ω£¨÷±Ω””√¥´»Îvw£¨ø…—°µ˛º”IMU–ﬁ’˝
-    chassis_ctrl_cmd.offset_w = UpdateIMUCorrection(vw);
-    chassis_vw = vw + chassis_ctrl_cmd.offset_w;
-
-    // …Ë÷√œﬂÀŸ∂»
-    chassis_vx = vx;
-    chassis_vy = vy;
-
-    float w = chassis_vw;
-
-    // ================== ‘À∂Ø—ßΩ‚À„ (»˝¬÷ƒ£ Ω) ==================
-    // ∏˘æ› chassis.h ÷–µƒ∫Í∂®“Â (W3_X, W3_Y µ») º∆À„∑÷¡ø
-    // 3∫≈¬÷ («∞∂•µ„)
-    float temp_x_3 = chassis_vx - w * W3_Y; 
-    float temp_y_3 = chassis_vy + w * W3_X;
-    
-    // 1∫≈¬÷ (◊Û∫Û)
-    float temp_x_1 = chassis_vx - w * W1_Y;
-    float temp_y_1 = chassis_vy + w * W1_X;
-    
-    // 2∫≈¬÷ (”“∫Û)
-    float temp_x_2 = chassis_vx - w * W2_Y;
-    float temp_y_2 = chassis_vy + w * W2_X;
-
-    // º∆À„ÀŸ∂»±Í¡ø
-    arm_sqrt_f32(temp_x_1 * temp_x_1 + temp_y_1 * temp_y_1, &vt_1);
-    arm_sqrt_f32(temp_x_2 * temp_x_2 + temp_y_2 * temp_y_2, &vt_2);
-    arm_sqrt_f32(temp_x_3 * temp_x_3 + temp_y_3 * temp_y_3, &vt_3);
-
-    // º∆À„∆⁄Õ˚Ω«∂»
-    offset_1 = atan2f(temp_y_1, temp_x_1) * RAD_2_DEGREE;
-    offset_2 = atan2f(temp_y_2, temp_x_2) * RAD_2_DEGREE;
-    offset_3 = atan2f(temp_y_3, temp_x_3) * RAD_2_DEGREE;
-
-    // ================== ‘À∂Ø—ßΩ‚À„ (‘≠Àƒ¬÷ƒ£ Ω) ==================
-    /*
-    float temp_x = chassis_vx - w, temp_y = chassis_vy - w;
-    arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_lf);
-    temp_y = chassis_vy + w;
-    arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_lb);
-    temp_x = chassis_vx + w;
-    arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_rb);
-    temp_y = chassis_vy - w;
-    arm_sqrt_f32(temp_x * temp_x + temp_y * temp_y, &vt_rf);
-
-    offset_lf = atan2f(chassis_vy - w, chassis_vx - w) * RAD_2_DEGREE;
-    offset_rf = atan2f(chassis_vy - w, chassis_vx + w) * RAD_2_DEGREE;
-    offset_lb = atan2f(chassis_vy + w, chassis_vx - w) * RAD_2_DEGREE;
-    offset_rb = atan2f(chassis_vy + w, chassis_vx + w) * RAD_2_DEGREE;
-    */
-
-    // ================== æ¯∂‘∆´Ω«…Ë∂® (»˝¬÷) ==================
-    // ◊¢“‚£∫ºŸ…Ëƒ„µƒ∂‘∆Î≈‰÷√ƒø«∞∏¥”√: lf->3, lb->1, rb->2 
-    at_3 = STEERING_CHASSIS_ALIGN_ANGLE_3 + offset_3; // 3∫≈:«∞
-    at_1 = STEERING_CHASSIS_ALIGN_ANGLE_1 + offset_1; // 1∫≈:◊Û∫Û
-    at_2 = STEERING_CHASSIS_ALIGN_ANGLE_2 + offset_2; // 2∫≈:”“∫Û
-    
-    ANGLE_LIMIT_360_TO_180_ABS(at_3);
-    ANGLE_LIMIT_360_TO_180_ABS(at_1);
-    ANGLE_LIMIT_360_TO_180_ABS(at_2);
-
-    MinmizeRotation(&at_3, &at_3_last, &vt_3);
-    MinmizeRotation(&at_1, &at_1_last, &vt_1);
-    MinmizeRotation(&at_2, &at_2_last, &vt_2);
-
-    // ================== æ¯∂‘∆´Ω«…Ë∂® (‘≠Àƒ¬÷) ==================
-    /*
-    at_lf = STEERING_CHASSIS_ALIGN_ANGLE_LF + offset_lf;
-    at_rf = STEERING_CHASSIS_ALIGN_ANGLE_RF + offset_rf;
-    at_lb = STEERING_CHASSIS_ALIGN_ANGLE_LB + offset_lb;
-    at_rb = STEERING_CHASSIS_ALIGN_ANGLE_RB + offset_rb;
-
-    ANGLE_LIMIT_360_TO_180_ABS(at_lf);
-    ANGLE_LIMIT_360_TO_180_ABS(at_rf);
-    ANGLE_LIMIT_360_TO_180_ABS(at_lb);
-    ANGLE_LIMIT_360_TO_180_ABS(at_rb);
-
-    MinmizeRotation(&at_lf, &at_lf_last, &vt_lf);
-    MinmizeRotation(&at_rf, &at_rf_last, &vt_rf);
-    MinmizeRotation(&at_lb, &at_lb_last, &vt_lb);
-    MinmizeRotation(&at_rb, &at_rb_last, &vt_rb);
-    */
-
-    // ================== œ¬∑¢µÁøÿ÷∏¡Ó (»˝¬÷) ==================
-    DJIMotorSetRef(motor_steering_lf, at_3); // ”√lf÷∏’Î¥˙¥Ú3∫≈
-    DJIMotorSetRef(motor_steering_rf, at_1); // ”√lb÷∏’Î¥˙¥Ú1∫≈
-    DJIMotorSetRef(motor_steering_rb, at_2); // ”√rb÷∏’Î¥˙¥Ú2∫≈
-
-    if(w == 0 && vx == 0 && vy == 0) {
-        DJIMotorSetRef(motor_lf, 0);
-        DJIMotorSetRef(motor_lb, 0);
-        DJIMotorSetRef(motor_rb, 0);
-    } else {
-        DJIMotorSetRef(motor_lf, vt_3); // 3∫≈:«∞
-        DJIMotorSetRef(motor_rf, vt_1); // 1∫≈:◊Û∫Û
-        DJIMotorSetRef(motor_rb, vt_2); // 2∫≈:”“∫Û
-    }
-
-    // ================== œ¬∑¢µÁøÿ÷∏¡Ó (‘≠Àƒ¬÷) ==================
-    /*
-    DJIMotorSetRef(motor_steering_lf, at_lf);
-    DJIMotorSetRef(motor_steering_rf, at_rf);
-    DJIMotorSetRef(motor_steering_lb, at_lb);
-    DJIMotorSetRef(motor_steering_rb, at_rb);
-
-    if(w == 0 && vx == 0 && vy == 0) {
-        DJIMotorSetRef(motor_lf, 0);
-        DJIMotorSetRef(motor_rf, 0);
-        DJIMotorSetRef(motor_lb, 0);
-        DJIMotorSetRef(motor_rb, 0);
-    } else {
-        DJIMotorSetRef(motor_lf, vt_lf);
-        DJIMotorSetRef(motor_rf, vt_rf);
-        DJIMotorSetRef(motor_lb, vt_lb);
-        DJIMotorSetRef(motor_rb, vt_rb);
-    }
-    */
-}
-
-void ChassisTest_OldVersion(){
-    //  π”√“£øÿ∆˜ƒ£ƒ‚…œŒªª˙÷∏¡ÓΩ¯––≤‚ ‘
-    // ◊Û“°∏À…œœ¬(rocker_l1) -> øÿ÷∆«∞Ω¯ÀŸ∂» vx
-    // ◊Û“°∏À◊Û”“(rocker_l_) -> øÿ÷∆∫·“∆ÀŸ∂» vy
-    // ≤¶¬÷(dial) -> øÿ÷∆–˝◊™ÀŸ∂» vw
-
-    float test_vx = ((float)rc_cmd->rc.rocker_l1 / 660.0f) * 12000.0f; // ÀŸ∂»œµ ˝£¨∏˘æ› µº «Èøˆµ˜’˚
-    float test_vy = ((float)rc_cmd->rc.rocker_l_ / 660.0f) * 12000.0f; // ∫·“∆ÀŸ∂»œµ ˝
-    float test_vw = -((float)rc_cmd->rc.dial / 660.0f) * 25000.0f;      // Ω«ÀŸ∂»œµ ˝
-
-    // ºÚµ•µƒÀ¿«¯¥¶¿Ì£¨∑¿÷πŒÛ¥•
-    if(fabsf(test_vx) < 200.0f) test_vx = 0;
-    if(fabsf(test_vy) < 200.0f) test_vy = 0;
-    if(fabsf(test_vw) < 100.0f) test_vw = 0;
-
-    // µ˜”√–¬Ω«ÀŸ∂»øÿ÷∆Ω‚À„∫Ø ˝
-    SteeringWheelKinematics(test_vx, test_vy, test_vw);
-}
-/**
- * @brief µ◊≈Ã÷˜»ŒŒÒ»Îø⁄£¨USB/“£øÿ∆˜◊‘∂Ø«–ªª
- * ”≈œ» π”√USB÷∏¡Ó£¨≥¨ ±‘Ú«–ªªŒ™“£øÿ∆˜≤‚ ‘
- */
-void ChassisTask()
-{
-	
-	//ChassisTest_OldVersion();
-	
-    // ºÏ≤ÈUSB ˝æ›≥¨ ± (500ms)
-    // »Áπ˚…œŒªª˙Õ£÷π∑¢ÀÕ£¨µ◊≈Ã”¶∏√Õ£÷π£¨∑¿÷π ßøÿ
-    if (HAL_GetTick() - usb_last_recv_time < 500) {
-        // Œ¥≥¨ ±£¨ π”√USB÷∏¡Ó
-        // µ•Œª◊™ªª: 
-        // …œŒªª˙µ•Œª: œﬂÀŸ∂» m/s, Ω«ÀŸ∂» rad/s
-        // ◊™ªªœµ ˝: LINEAR_VELOCITY_TO_MOTOR_RPM (m/s -> RPM)
-        float cmd_vx = usb_chassis_cmd.linear_x * LINEAR_VELOCITY_TO_MOTOR_RPM; 
-        float cmd_vy = usb_chassis_cmd.linear_y * LINEAR_VELOCITY_TO_MOTOR_RPM;
-        float cmd_vw = usb_chassis_cmd.angular_z * LINEAR_VELOCITY_TO_MOTOR_RPM; 
-        SteeringWheelKinematics(cmd_vx, cmd_vy, cmd_vw);
     }
 }

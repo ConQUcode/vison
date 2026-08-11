@@ -17,8 +17,6 @@ extern RC_ctrl_t *rc_cmd;
 int IR_sensor_level;
 float control;
 int a=0;
-static int8_t is_init_2006 = 0;
-static int8_t is_init_3508 = 0;
 uint8_t ID[] = {1, 2};
 int16_t Pos[] = {2000, 2000};    // 目标位置
 uint16_t Speed[] = {1000, 1000}; // 运行速度
@@ -69,7 +67,7 @@ void dianji_init(){
                 .Kp                = 3,
                 .Ki                = 1.5,
                 .Kd                = 0.1,
-                .Improve           = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement | PID_DerivativeFilter | PID_ErrorHandle,
+                .Improve           = (PID_Improvement_e)(PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement | PID_DerivativeFilter | PID_ErrorHandle),
                 .IntegralLimit     = 60000,
                 .MaxOut            = 40000,
                 .Derivative_LPF_RC = 0.01,
@@ -80,7 +78,7 @@ void dianji_init(){
 							.Kd = 0.004,//0.008
 							// .CoefA         = 0.2,
 							// .CoefB         = 0.3,
-							.Improve       = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
+							.Improve       = (PID_Improvement_e)(PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement),
 							.IntegralLimit = 10000,
 							.MaxOut        = 15000,
 					},
@@ -98,7 +96,7 @@ void dianji_init(){
 			.controller_setting_init_config = {
 					.speed_feedback_source = MOTOR_FEED,
 					.outer_loop_type       = ANGLE_LOOP, 
-					.close_loop_type       = CURRENT_LOOP | SPEED_LOOP | ANGLE_LOOP   ,
+					.close_loop_type       = (Closeloop_Type_e)(CURRENT_LOOP | SPEED_LOOP | ANGLE_LOOP),
 					.motor_reverse_flag    = MOTOR_DIRECTION_NORMAL, 
 					.feedforward_flag      = CURRENT_AND_SPEED_FEEDFORWARD,
 			},
@@ -118,7 +116,7 @@ void dianji_init(){
             .Kp                = 10	,
 		  			.Ki                = 0.5,
             .Kd                = 0.1,
-            .Improve           = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement | PID_DerivativeFilter | PID_ErrorHandle,
+            .Improve           = (PID_Improvement_e)(PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement | PID_DerivativeFilter | PID_ErrorHandle),
             .IntegralLimit     = 50000,
             .MaxOut            = 50000,
             .Derivative_LPF_RC = 0.01,
@@ -127,7 +125,7 @@ void dianji_init(){
             .Kp = 4,
             .Ki = 0.025,
             .Kd = 0.02,
-            .Improve       = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
+            .Improve       = (PID_Improvement_e)(PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement),
             .IntegralLimit = 10000,
             .MaxOut        = 15000,
         },
@@ -143,7 +141,7 @@ void dianji_init(){
     .controller_setting_init_config = {
         .speed_feedback_source = MOTOR_FEED,
         .outer_loop_type       = ANGLE_LOOP, 
-        .close_loop_type       = CURRENT_LOOP | SPEED_LOOP | ANGLE_LOOP,
+        .close_loop_type       = (Closeloop_Type_e)(CURRENT_LOOP | SPEED_LOOP | ANGLE_LOOP),
         .motor_reverse_flag    = MOTOR_DIRECTION_NORMAL, 
         .feedforward_flag      = CURRENT_AND_SPEED_FEEDFORWARD,
     },
@@ -153,7 +151,8 @@ void dianji_init(){
 }
 
 
-static void LiftInit() {
+#if 0
+static void LiftInit(void) {
 	
     // ״̬ A����ʼ�� M2006 (IR ����������)
     if (!is_init_2006) {
@@ -198,8 +197,9 @@ static void LiftInit() {
         }
     }
 }
+#endif
 
-void catch_init(){
+void catch_init(void){
 	//DWT_Init(168);
 //  duoji_init();
 
@@ -243,7 +243,7 @@ WritePosEx2(3, 1100, 500, 20, 1500);
 
 
 
-void catch_all(){
+void catch_all(void){
 
 static uint32_t catch_start_time = 0;
 static uint8_t is_timing = 0; // 标志位：是否正在计时

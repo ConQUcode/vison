@@ -152,13 +152,8 @@ typedef enum {
     ARM_BOOT_AUTO_INIT,
     ARM_BOOT_WAIT_TOOL,
     ARM_BOOT_STABILIZE,
-    ARM_BOOT_START_TOOL_TEST,
-    ARM_BOOT_RUN_TOOL_TEST,
-    ARM_BOOT_SERVO2_COMMAND_135,
-    ARM_BOOT_SERVO2_WAIT_135,
-    ARM_BOOT_SERVO2_COMMAND_45,
-    ARM_BOOT_SERVO2_WAIT_45,
-    ARM_BOOT_BUZZER_NOTIFY,
+    ARM_BOOT_GRIPPER_READY_COMMAND,
+    ARM_BOOT_GRIPPER_READY_WAIT,
     ARM_BOOT_READY,
     ARM_BOOT_FAULT
 } Arm_Boot_State_e;
@@ -215,10 +210,7 @@ typedef struct {
     uint16_t wrist_pwm_us;
     uint8_t wrist_configured;
     uint8_t tool_ready;
-    uint8_t magnet_on;
-    float tool_servo_target_deg[2];
     uint16_t tool_servo_target_pos[2];
-    uint8_t tool_vertical_down_enabled;
     uint32_t tool_error_code;
     uint32_t update_count;
 } Arm_Teach_Point_s;
@@ -253,10 +245,7 @@ typedef struct {
     float small_link_pitch_deg;
     float end_pitch_deg;
     uint8_t tool_ready;
-    uint8_t magnet_on;
-    float tool_servo_target_deg[2];
     uint16_t tool_servo_target_pos[2];
-    uint8_t tool_vertical_down_enabled;
     uint32_t tool_error_code;
     uint16_t wrist_pwm_us;
     uint32_t state_elapsed_ms;
@@ -306,6 +295,7 @@ typedef struct {
     float speed_deg_s;
     float start_deg;
     float target_deg;
+    /* 兼容字段名；当前记录ID1俯仰舵机轴心HOME目标。 */
     Arm_Position_s target_tool_tip_mm;
     Arm_Position_s target_wrist_mm;
     Arm_IK_Status_e ik_status;
@@ -316,22 +306,8 @@ typedef struct {
 
 typedef struct {
     Arm_Boot_State_e state;
-    uint8_t tool_test_enabled;
-    uint8_t tool_test_started;
-    uint8_t tool_test_completed;
-    uint8_t magnet_test_completed;
-    uint8_t servo2_test_step;
-    uint8_t servo2_test_completed;
-    uint8_t buzzer_started;
-    uint8_t buzzer_completed;
     Arm_Motion_Result_e motion_result;
-    Arm_Command_Result_e servo2_result;
     Arm_IK_Status_e ik_status;
-    Arm_Position_s target_tool_tip_mm;
-    Arm_Position_s target_wrist_mm;
-    float target_q_deg[3];
-    float servo1_target_deg;
-    float servo2_target_deg;
     uint32_t state_tick;
     uint32_t elapsed_ms;
 } Arm_Boot_Debug_s;
@@ -352,6 +328,17 @@ typedef struct {
     Arm_Fault_Reset_Result_e fault_reset_result;
     Arm_DM_Axis_Debug_s axis[3];
 } Arm_DM_Debug_s;
+
+/*
+ * 大臂/小臂归正观察量：仅保留台架测试最需要的四个角度。
+ * 大臂使用物理安装角；小臂使用其与大臂之间的物理夹角。
+ */
+typedef struct {
+    float shoulder_current_deg;       /* 大臂当前物理角，HOME约-90deg。 */
+    float shoulder_target_deg;        /* 大臂目标物理角，HOME为-90deg。 */
+    float elbow_included_current_deg; /* 当前两杆夹角，HOME约60deg。 */
+    float elbow_included_target_deg;  /* 目标两杆夹角，HOME为60deg。 */
+} Arm_Home_Joint_Debug_s;
 
 typedef struct {
     uint8_t kinematics_valid;
@@ -426,6 +413,7 @@ typedef struct {
 
 extern Arm_State_s g_arm_state;
 extern Arm_DM_Debug_s g_arm_dm_debug;
+extern Arm_Home_Joint_Debug_s g_arm_home_joint_debug;
 extern Arm_Kinematics_Debug_s g_arm_kinematics_debug;
 extern Arm_Motion_Debug_s g_arm_motion_debug;
 extern Arm_Control_Debug_s g_arm_control_debug;

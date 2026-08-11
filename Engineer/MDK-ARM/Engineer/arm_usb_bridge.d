@@ -3,9 +3,9 @@ engineer\arm_usb_bridge.o: ..\APPLICATION\arm\arm_usb_bridge.h
 engineer\arm_usb_bridge.o: ../MODULE/protocol/protocol.h
 engineer\arm_usb_bridge.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stddef.h
 engineer\arm_usb_bridge.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
-engineer\arm_usb_bridge.o: ..\APPLICATION\arm\arm_config.h
 engineer\arm_usb_bridge.o: ..\APPLICATION\arm\arm.h
 engineer\arm_usb_bridge.o: ..\APPLICATION\arm\arm_host.h
+engineer\arm_usb_bridge.o: ..\APPLICATION\arm\arm_config.h
 engineer\arm_usb_bridge.o: ..\APPLICATION\arm\arm_tool.h
 engineer\arm_usb_bridge.o: ../MODULE/buzzer/buzzer.h
 engineer\arm_usb_bridge.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h

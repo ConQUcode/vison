@@ -353,6 +353,7 @@ static void DecodeDJIMotor(CAN_Instance *can_instance)
 
     DaemonReload(motor->daemon); // 重载守护进程
     motor->dt = DWT_GetDeltaT(&motor->feed_cnt);
+    motor->feedback_count++;
 
     // 解析数据并对电流和速度进行滤波,电机的反馈报文具体格式见电机说明手册
     measure->last_ecd           = measure->ecd;

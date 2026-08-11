@@ -4,19 +4,19 @@
 /* 坐标：+X车头、+Y车体左侧、+Z向上；长度mm、角度deg、时间ms。 */
 
 /*
- * 当前为三轴联调模式：复用已验证的三电机使能/当前位置保持流程，
- * 三轴使能后直接将ARM_USB_HOME_*电磁铁末端点换算为关节角，低速
- * 同步进入HOME姿态。稳定到位后才报告READY并等待正式上位机命令。
- * 三轴方向确认后，将ARM_BOOT_MODE切到ARM_BOOT_MODE_NORMAL即可进入
- * 自动脱困和小臂/大臂/底座顺序回安全姿态。
+ * 完整初始化复用已经实机验证的组合流程：先闭环初始化ID1/ID2舵机，
+ * 再使能三台达妙并同步当前位置，随后将ARM_USB_HOME_*作为ID1俯仰
+ * 舵机轴心坐标执行IK归正；最后ID2回到默认位置550才发布整机READY。
+ * 历史名称DM_SINGLE_AXIS_TEST仅作源码兼容，不再表示单轴测试。
  */
 #define ARM_BOOT_MODE_NORMAL               0u
-#define ARM_BOOT_MODE_DM_SINGLE_AXIS_TEST  1u
+#define ARM_BOOT_MODE_FULL_INIT            1u
+#define ARM_BOOT_MODE_DM_SINGLE_AXIS_TEST  ARM_BOOT_MODE_FULL_INIT
 #define ARM_BOOT_MODE_TEACH_POINT          2u
 #define ARM_BOOT_MODE_DM_ENABLE_ONLY       3u
 #define ARM_BOOT_MODE_TOOL_SERVO_INIT_ONLY 4u
 #ifndef ARM_BOOT_MODE
-#define ARM_BOOT_MODE ARM_BOOT_MODE_DM_SINGLE_AXIS_TEST
+#define ARM_BOOT_MODE ARM_BOOT_MODE_FULL_INIT
 #endif
 
 #define ARM_DM_TEST_NONE      0u
@@ -27,29 +27,9 @@
 #define ARM_DM_TEST_AXIS ARM_DM_TEST_NONE
 #endif
 
-/*
- * 内部上电验证：由ArmTask的启动状态机直接调用轨迹层，不经过Host邮箱。
- * 三达妙与末端初始化完成后移动到一个TOOL_TIP点，末端保持竖直向下；
- * 整个流程完成后才向外发布READY。
- */
-#define ARM_BOOT_TOOL_TEST_ENABLE          0u
 #define ARM_REALTIME_HOST_SIM_ENABLE       0u
-#define ARM_BOOT_TOOL_TEST_X_MM          250.0f
-#define ARM_BOOT_TOOL_TEST_Y_MM            00.0f
-#define ARM_BOOT_TOOL_TEST_Z_MM          10.0f
-#define ARM_BOOT_TOOL_TEST_SPEED_MM_S    250.0f
-#define ARM_BOOT_TOOL_TEST_STABLE_MS      500u
+#define ARM_BOOT_STABILIZE_MS             500u
 #define ARM_BOOT_TOOL_INIT_TIMEOUT_MS    8000u
-#define ARM_BOOT_TOOL_TEST_TIMEOUT_MS   25000u
-/* 到达内部测试点后，电磁铁吸取5s，再自动释放并进入READY。 */
-#define ARM_BOOT_MAGNET_TEST_HOLD_MS     5000u
-#define ARM_BOOT_SERVO2_TEST_FORWARD_DEG  135.0f
-#define ARM_BOOT_SERVO2_TEST_REVERSE_DEG   45.0f
-#define ARM_BOOT_SERVO2_TEST_MOVE_TIME_MS 500u
-#define ARM_BOOT_SERVO2_TEST_SETTLE_MS    100u
-#define ARM_BOOT_BUZZER_ENABLE              0u
-#define ARM_BOOT_BUZZER_COMPARE           125u
-#define ARM_BOOT_BUZZER_DURATION_MS      3000u
 #define ARM_REALTIME_HOST_SIM_PERIOD_MS    10u
 #define ARM_REALTIME_HOST_SIM_CYCLE_MS   6000u
 #define ARM_REALTIME_HOST_SIM_SPEED_MM_S   20.0f
@@ -76,7 +56,11 @@
 #define ARM_ELBOW_MASTER_ID     0x11u
 #define ARM_ELBOW_COMMAND_ID   0x101u
 
-/* 电机零位已由上位机永久保存；固件不再发送清零命令。 */
+/*
+ * 电机零位已由达妙上位机永久保存；固件不发送清零命令。
+ * 底座必须先物理朝向用户定义的+X方向，再把该姿态保存为0deg。
+ * 固件保持q1=0deg对应+X，不在FK/IK中反转X，也不增加180deg软件偏置。
+ */
 #define ARM_BASE_MOTOR_ZERO_TRIM_RAD       0.0f
 #define ARM_SHOULDER_MOTOR_ZERO_TRIM_RAD   0.0f
 #define ARM_ELBOW_MOTOR_ZERO_TRIM_RAD      0.0f
@@ -132,13 +116,15 @@
 #define ARM_AUTO_Q3_MAX_DEG ARM_Q3_SOFT_MAX_DEG
 
 /*
- * 启动后的前向待机姿态：
- * q2=60deg 对应大臂物理安装角-60deg；
- * q3=-60deg 对应大臂与小臂之间的物理夹角60deg，使末端更靠近原点。
+ * HOME解析目标：q1=0deg，物理大臂=-90deg对应内部q2=+90deg，
+ * 两杆物理夹角60deg对应内部q3=-60deg。ARM_SAFE_Q*既用于HOME的IK
+ * 参考/自检，也供旧NORMAL顺序回位流程使用；电机永久零位参数不改变。
  */
-#define ARM_SAFE_Q1_DEG                     0.0f
-#define ARM_SAFE_Q2_DEG                    60.0f
-#define ARM_SAFE_Q3_DEG                  (-60.0f)
+#define ARM_HOME_SHOULDER_PHYSICAL_DEG     (-90.0f)
+#define ARM_HOME_ELBOW_INCLUDED_DEG          60.0f
+#define ARM_SAFE_Q1_DEG                       0.0f
+#define ARM_SAFE_Q2_DEG  (-(ARM_HOME_SHOULDER_PHYSICAL_DEG))
+#define ARM_SAFE_Q3_DEG  (-(ARM_HOME_ELBOW_INCLUDED_DEG))
 
 /* 启动、脱困、回位和保护参数。 */
 /* 主控与达妙同时上电时，先留出电机自身启动时间，再进入原初始化流程。 */
@@ -204,85 +190,54 @@
 #define ARM_WRIST_ZERO_OFFSET_DEG                   0.0f
 #define ARM_WRIST_DIRECTION                         1.0f
 
-#define ARM_TOOL_ENABLE                              1u
-#define ARM_TOOL_SERVO1_ID                           1u
-#define ARM_TOOL_SERVO2_ID                           2u
-#define ARM_TOOL_SERVO_DEG_MIN                       0.0f
-#define ARM_TOOL_SERVO_DEG_MAX                     180.0f
-#define ARM_TOOL_SERVO_NEUTRAL_DEG                  90.0f
-#define ARM_TOOL_SERVO_POS_MIN                       0u
-#define ARM_TOOL_SERVO_POS_MAX                    1000u
-/* 各舵机机械装配中位：逻辑90deg分别对应以下控制板位置。 */
-#define ARM_TOOL_SERVO1_NEUTRAL_POS                516u
-#define ARM_TOOL_SERVO2_NEUTRAL_POS                500u
-#define ARM_TOOL_SERVO2_POS_MIN                      0u
-#define ARM_TOOL_SERVO2_POS_MAX                   1000u
-/*
- * ID2实机/上位机标定：控制位置0~1000对应约270deg机械转角。
- * 位置500仍作为装配中位，对应逻辑90deg；因此当前可表示的逻辑角约为
- * -45deg~225deg。该独立量程不得用于ID1，ID1继续沿用0~180deg映射。
- */
-#define ARM_TOOL_SERVO2_RANGE_DEG                  270.0f
-#define ARM_TOOL_SERVO2_LOGIC_MIN_DEG              \
-    (ARM_TOOL_SERVO_NEUTRAL_DEG -                   \
-     ((float)(ARM_TOOL_SERVO2_NEUTRAL_POS - ARM_TOOL_SERVO2_POS_MIN) * \
-      ARM_TOOL_SERVO2_RANGE_DEG /                   \
-      (float)(ARM_TOOL_SERVO2_POS_MAX - ARM_TOOL_SERVO2_POS_MIN)))
-#define ARM_TOOL_SERVO2_LOGIC_MAX_DEG              \
-    (ARM_TOOL_SERVO_NEUTRAL_DEG +                   \
-     ((float)(ARM_TOOL_SERVO2_POS_MAX - ARM_TOOL_SERVO2_NEUTRAL_POS) * \
-      ARM_TOOL_SERVO2_RANGE_DEG /                   \
-      (float)(ARM_TOOL_SERVO2_POS_MAX - ARM_TOOL_SERVO2_POS_MIN)))
-#define ARM_TOOL_SERVO2_YAW_DIRECTION                1.0f
-/*
- * 仅校正上位机下发的yaw分量，不改变底座q1补偿：
- * yaw > 0使用正向增益，yaw < 0使用负向增益。
- */
-#define ARM_TOOL_SERVO2_HOST_YAW_POS_GAIN            1.00f//顺时针应该减小
-#define ARM_TOOL_SERVO2_HOST_YAW_NEG_GAIN            1.00f//逆时针需要更多
-#define ARM_TOOL_SERVO2_APPLY_HOST_YAW_GAIN(yaw_deg) \
-    ((yaw_deg) > 0.0f ?                              \
-        (yaw_deg) * ARM_TOOL_SERVO2_HOST_YAW_POS_GAIN : \
-        (yaw_deg) * ARM_TOOL_SERVO2_HOST_YAW_NEG_GAIN)
-/* ID2底座偏航补偿方向经实机确认需相对理论方向反转。 */
-#define ARM_TOOL_SERVO2_BASE_COMPENSATION_ENABLE     1u
-#define ARM_TOOL_SERVO2_BASE_COMPENSATION_SCALE     (-1.0f)
-/* 与ID1的20ms补偿节拍对齐，提高双舵机合帧命中率（50Hz）。 */
-#define ARM_TOOL_SERVO2_TRACK_UPDATE_PERIOD_MS      20u
-#define ARM_TOOL_SERVO2_TRACK_DEADBAND_DEG           0.5f
-#define ARM_TOOL_SERVO2_TRACK_TIME_MS                0u
-/* ID1上电初始化目标；不改变90deg机械中位及其位置标定。 */
-#define ARM_TOOL_SERVO1_INIT_DEG                    45.0f
-/* ID1角度增大用于抵消小臂向上俯仰，保持电磁铁末端竖直向下。 */
-#define ARM_TOOL_SERVO1_DIRECTION                    1.0f
-/*
- * ID1竖直补偿实机标定值。
- * 理论几何比例为1.00，但当前软件按0~1000位置映射到0~180deg，
- * 舵机/控制板的真实机械角度量程与该逻辑量程并不完全一致；0.80已在
- * 多个机械臂目标姿态下实测，可使电磁铁末端保持良好竖直状态。
- * 后续不要仅依据理论比例改回1.00。若确需调整，应记录多个明显不同的
- * small_link_pitch_deg、实际末端倾角和servo_target_pos后重新标定。
- */
-#define ARM_TOOL_SERVO1_COMPENSATION_SCALE           0.80f
-#define ARM_TOOL_SERVO1_ARM_LENGTH_MM               60.3f
-#define ARM_TOOL_MAGNET_OFFSET_MM                   54.0f
-#define ARM_TOOL_SERVO2_FIXED_DEG                   90.0f
-/* ID1根据小臂绝对俯仰动态补偿，使电磁铁末端保持竖直向下。 */
-#define ARM_TOOL_VERTICAL_COMPENSATION_ENABLE         1u
-#define ARM_TOOL_SERVO_INIT_TIME_MS                500u
-#define ARM_TOOL_SERVO_INIT_START_DELAY_MS        1000u
-#define ARM_TOOL_SERVO_INIT_RETRY_PERIOD_MS        300u
-#define ARM_TOOL_SERVO_INIT_REPEAT_COUNT             5u
-/*
- * ID1动态竖直补偿使用全速跟踪：每次直接追到最新轨迹补偿角，
- * 控制板运动时间填0ms；初始化仍单独使用500ms，避免上电猛跳。
- */
-#define ARM_TOOL_SERVO1_FULL_SPEED_TRACK_ENABLE       1u
-#define ARM_TOOL_SERVO1_SLEW_RATE_DEG_S             10.0f
-#define ARM_TOOL_SERVO1_SLEW_PERIOD_MS               20u
-#define ARM_TOOL_SERVO_TRACK_TIME_MS                  0u
-#define ARM_TOOL_SERVO_UPDATE_PERIOD_MS             30u
-#define ARM_TOOL_SERVO_COMMAND_DEADBAND_DEG          0.5f
+/* 恢复USART6上的ID1俯仰舵机和ID2夹爪舵机闭环初始化及反馈轮询。 */
+#define ARM_TOOL_ENABLE                               1u
+#define ARM_TOOL_SERVO_RANGE_DEG                    240.0f
+#define ARM_TOOL_SERVO_POS_MIN                        0u
+#define ARM_TOOL_SERVO_POS_MAX                     1000u
+
+#define ARM_TOOL_PITCH_SERVO_ID                       1u
+#define ARM_TOOL_PITCH_NEUTRAL_POS                  500u
+#define ARM_TOOL_PITCH_SERVO_MIN_POS                125u
+#define ARM_TOOL_PITCH_SERVO_MAX_POS                875u
+#define ARM_TOOL_PITCH_RELATIVE_MIN_DEG            (-90.0f)
+#define ARM_TOOL_PITCH_RELATIVE_MAX_DEG              90.0f
+#define ARM_TOOL_PITCH_DIRECTION                      1.0f
+#define ARM_TOOL_PITCH_AXIS_TO_CENTER_MM             30.0f
+#define ARM_TOOL_PITCH_UPDATE_PERIOD_MS              20u
+#define ARM_TOOL_PITCH_COMMAND_DEADBAND_POS            2u
+#define ARM_TOOL_PITCH_TRACK_TIME_MS                   0u
+
+#define ARM_GRIPPER_SERVO_ID                           2u
+#define ARM_GRIPPER_SERVO_MIN_POS                    550u
+#define ARM_GRIPPER_SERVO_MAX_POS                    630u
+/* ID2上电、等待抓取和释放均回到默认张开位置550。 */
+#define ARM_GRIPPER_DEFAULT_POS                      550u
+#define ARM_GRIPPER_BOOT_POS          ARM_GRIPPER_DEFAULT_POS
+#define ARM_GRIPPER_READY_POS         ARM_GRIPPER_DEFAULT_POS
+#define ARM_GRIPPER_OPEN_POS          ARM_GRIPPER_DEFAULT_POS
+/* 收到抓取命令后，ID2向控制值增大方向闭合到630。 */
+#define ARM_GRIPPER_CLOSE_POS                        630u
+#define ARM_GRIPPER_MOVE_TIME_MS                     500u
+#define ARM_GRIPPER_BOOT_MOVE_TIME_MS               1000u
+#define ARM_GRIPPER_RELIEF_POS                        10u
+#define ARM_GRIPPER_RELIEF_MOVE_TIME_MS              150u
+#define ARM_GRIPPER_SETTLE_MS                        200u
+#define ARM_GRIPPER_STALL_START_IGNORE_MS            300u
+#define ARM_GRIPPER_STALL_ERROR_POS                   20u
+#define ARM_GRIPPER_STALL_WINDOW_MS                  300u
+#define ARM_GRIPPER_STALL_MAX_POSITION_SPAN            3u
+#define ARM_GRIPPER_STALL_MIN_CLOSE_TRAVEL_POS        20u
+#define ARM_GRIPPER_CLOSE_DEADLINE_MS               1500u
+#define ARM_GRIPPER_BOOT_DEADLINE_MS                2000u
+
+#define ARM_TOOL_BOOT_START_DELAY_MS                 300u
+#define ARM_TOOL_BOOT_MOVE_TIME_MS                  1000u
+#define ARM_TOOL_ACTION_DEADLINE_MARGIN_MS           500u
+
+/* Compatibility IDs remain aliases while callers migrate to tool semantics. */
+#define ARM_TOOL_SERVO1_ID ARM_TOOL_PITCH_SERVO_ID
+#define ARM_TOOL_SERVO2_ID ARM_GRIPPER_SERVO_ID
 
 /*
  * USB末端高度随X方向线性标定（上位机坐标单位均为mm）：
@@ -294,28 +249,19 @@
 #define ARM_USB_Z_MAP_X_MAX_MM                     450.0f
 #define ARM_USB_MOVE_Z_AT_X_MIN_MM                  37.2f
 #define ARM_USB_MOVE_Z_AT_X_MAX_MM                  51.7f
-#define ARM_USB_MAGNET_Z_AT_X_MIN_MM                21.6f
-#define ARM_USB_MAGNET_Z_AT_X_MAX_MM                21.8f
+#define ARM_USB_GRIPPER_Z_AT_X_MIN_MM               21.6f
+#define ARM_USB_GRIPPER_Z_AT_X_MAX_MM               21.8f
 #define ARM_USB_TARGET_TRAVEL_Z_MM                   45.0f
 #define ARM_USB_MOVE_SPEED_MM_S                    700.0f
-#define ARM_USB_MAGNET_ACTION_DELAY_MS             500u
-#define ARM_USB_MAGNET_DWELL_MS                    500u
-#define ARM_USB_MAGNET_Z_SPEED_MM_S                100.0f
-#define ARM_USB_HOME_X_MM                          205.0f
+#define ARM_USB_GRIPPER_Z_SPEED_MM_S                100.0f
+/* 上位机/HOME的XYZ均表示ID1俯仰舵机轴心，不包含轴外30mm夹爪长度。 */
+#define ARM_USB_HOME_X_MM                          225.1666f
 #define ARM_USB_HOME_Y_MM                            0.0f
-#define ARM_USB_HOME_Z_MM                           90.0f
+#define ARM_USB_HOME_Z_MM                          192.0f
 #define ARM_USB_HOME_SPEED_MM_S                    200.0f
-#define ARM_USB_YAW_MIN_DEG                       (-110.0f)
-#define ARM_USB_YAW_MAX_DEG                         110.0f
-#define ARM_USB_YAW_NEUTRAL_DEG                      90.0f
-#define ARM_USB_YAW_MOVE_TIME_MS                    500u
-#define ARM_USB_YAW_SETTLE_MS                       100u
-#define ARM_TOOL_SERVO2_REPEAT_COUNT                  3u
-#define ARM_TOOL_SERVO2_REPEAT_PERIOD_MS            100u
-
-#define ARM_MAGNET_GPIO_PORT                       GPIOB
-#define ARM_MAGNET_GPIO_PIN                        GPIO_PIN_12
-#define ARM_MAGNET_ACTIVE_LEVEL                    GPIO_PIN_SET
-#define ARM_MAGNET_INACTIVE_LEVEL                  GPIO_PIN_RESET
+#define ARM_USB_TOOL_PITCH_MIN_DEG                (-180.0f)
+#define ARM_USB_TOOL_PITCH_MAX_DEG                  180.0f
+#define ARM_USB_TOOL_PITCH_MOVE_TIME_MS             500u
+#define ARM_USB_TOOL_SETTLE_MS                      200u
 
 #endif

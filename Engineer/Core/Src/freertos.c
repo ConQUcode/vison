@@ -25,16 +25,20 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "Test.h"
+#if HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY == 0u
+#include "usb.h"
+#include "daemon.h"
+#include "buzzer.h"
+#include "protocol.h"
+#endif
+#if CHASSIS_ONE_METER_TEST_ONLY != 0u
 #include "chassis.h"
 #include "ins_task.h"
-#include "DJI_motor.h"
-#include "usb.h"
-#include "Test.h"
-#include "catch.h"
-#include "daemon.h"
-#include "protocol.h"
-#include "arm_usb_bridge.h"
-#include "buzzer.h"
+#endif
+#if APPLICATION_ARM_RUN_ENABLE != 0u
+#include "fruit_usb_bridge.h"
+#endif
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -154,6 +158,11 @@ void ImuTask_f(void const * argument)
   /* Infinite loop */
   for(;;)
   {
+#if CHASSIS_ONE_METER_TEST_ONLY != 0u
+    /* BMI088读取和EKF解算固定由本任务以1 kHz运行。 */
+    INS_Task();
+    ChassisNotifyImuUpdate(HAL_GetTick());
+#endif
     osDelay(1);
   }
   /* USER CODE END ImuTask_f */
@@ -188,20 +197,26 @@ void ChassisTask_f(void const * argument)
 void Usb_f(void const * argument)
 {
   /* USER CODE BEGIN Usb_f */
+#if HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY == 0u
   uint32_t last_daemon_tick = 0u;
+#endif
   /* Infinite loop */
   for(;;)
   {
+#if HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY == 0u
 		uint32_t now_ms = HAL_GetTick();
-		USB_ProcessTask();
-		USB_TxTask();
-		protocol_tick(now_ms);
-		ArmUsbBridgeTask(now_ms);
-		BuzzerTask(now_ms);
+#if APPLICATION_ARM_RUN_ENABLE != 0u
+			USB_ProcessTask();
+			USB_TxTask();
+			protocol_tick(now_ms);
+			FruitUsbBridgeTask(now_ms);
+#endif
+			BuzzerTask(now_ms);
 		if ((uint32_t)(now_ms - last_daemon_tick) >= 10u) {
 			last_daemon_tick = now_ms;
 			DaemonTask();
 		}
+#endif
     osDelay(1);
   }
   /* USER CODE END Usb_f */

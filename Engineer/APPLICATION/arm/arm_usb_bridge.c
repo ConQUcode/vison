@@ -1,12 +1,13 @@
 #include "arm_usb_bridge.h"
 
-#include "arm_config.h"
 #include "arm.h"
+#include "arm_config.h"
 #include "arm_host.h"
 #include "arm_tool.h"
 #include "buzzer.h"
 #include "stm32f4xx_hal.h"
 #include "usb.h"
+
 #include <math.h>
 #include <string.h>
 
@@ -15,107 +16,25 @@ Arm_Usb_Comm_Debug_s g_arm_usb_comm_debug;
 
 static uint32_t next_internal_command_id = 1u;
 static uint32_t active_arm_command_id;
+static uint32_t active_tool_command_id;
+static uint32_t last_tool_command_id;
+static uint8_t last_tool_state;
+static uint8_t last_tool_fault;
+static uint8_t pending_tool_gripper_action;
 static uint8_t active_task_id;
 static uint8_t active_business;
-static uint8_t last_motion_state;
-static uint8_t last_motion_fault;
 static uint8_t pending_task_end;
 static uint8_t last_action_failed;
 static uint8_t stop_task_id;
 static uint8_t stop_safe_latched;
+static uint8_t target_move_phase;
+static uint8_t last_motion_state;
+static uint8_t last_motion_fault;
 static float action_x_mm;
 static float action_y_mm;
-static float active_target_x_mm;
-static float active_target_y_mm;
-static float active_target_z_mm;
-static float active_target_yaw_deg;
 static float pending_target_x_mm;
 static float pending_target_y_mm;
-static float pending_target_yaw_deg;
-static uint8_t target_move_phase;
-static uint8_t target_yaw_pending;
-static uint8_t target_yaw_waiting;
-static uint32_t target_yaw_complete_tick;
-static uint8_t magnet_action_done;
-static uint8_t magnet_off_reset_done;
-static uint32_t magnet_off_reset_tick;
-static uint32_t state_tick;
-
-static float ArmUsbServo2MaxYawAbsDeg(void)
-{
-    return fmaxf(fabsf(ARM_USB_YAW_MIN_DEG),
-                 fabsf(ARM_USB_YAW_MAX_DEG));
-}
-
-static float ArmUsbServo2HalfRangePos(void)
-{
-    return ((float)ARM_TOOL_SERVO2_POS_MAX -
-            (float)ARM_TOOL_SERVO2_POS_MIN);
-}
-
-static uint16_t ArmUsbYawToServo2Position(float yaw_deg)
-{
-    float max_yaw_deg = ArmUsbServo2MaxYawAbsDeg();
-    float half_range_pos = ArmUsbServo2HalfRangePos();
-    float pos_f;
-
-    if (!isfinite(yaw_deg) ||
-        max_yaw_deg <= 0.000001f ||
-        half_range_pos <= 0.000001f) {
-        return ARM_TOOL_SERVO2_NEUTRAL_POS;
-    }
-    pos_f = (float)ARM_TOOL_SERVO2_NEUTRAL_POS +
-        ARM_TOOL_SERVO2_YAW_DIRECTION *
-        ARM_TOOL_SERVO2_APPLY_HOST_YAW_GAIN(yaw_deg) * half_range_pos /
-        ARM_TOOL_SERVO2_RANGE_DEG;
-    if (pos_f < (float)ARM_TOOL_SERVO2_POS_MIN) {
-        pos_f = (float)ARM_TOOL_SERVO2_POS_MIN;
-    }
-    if (pos_f > (float)ARM_TOOL_SERVO2_POS_MAX) {
-        pos_f = (float)ARM_TOOL_SERVO2_POS_MAX;
-    }
-    return (uint16_t)(pos_f + 0.5f);
-}
-
-static uint8_t ArmUsbFinite3(float a, float b, float c)
-{
-    return isfinite(a) && isfinite(b) && isfinite(c);
-}
-
-static float ArmUsbZMapRatioForX(float x_mm)
-{
-    float clamped_x_mm;
-    float x_range_mm = ARM_USB_Z_MAP_X_MAX_MM -
-                       ARM_USB_Z_MAP_X_MIN_MM;
-
-    if (!isfinite(x_mm) || x_range_mm <= 0.000001f) {
-        return 0.0f;
-    }
-    clamped_x_mm = x_mm;
-    if (clamped_x_mm < ARM_USB_Z_MAP_X_MIN_MM) {
-        clamped_x_mm = ARM_USB_Z_MAP_X_MIN_MM;
-    } else if (clamped_x_mm > ARM_USB_Z_MAP_X_MAX_MM) {
-        clamped_x_mm = ARM_USB_Z_MAP_X_MAX_MM;
-    }
-    return (clamped_x_mm - ARM_USB_Z_MAP_X_MIN_MM) / x_range_mm;
-}
-
-static float ArmUsbDefaultZForX(float x_mm)
-{
-    float ratio = ArmUsbZMapRatioForX(x_mm);
-
-    return ARM_USB_MOVE_Z_AT_X_MIN_MM + ratio *
-        (ARM_USB_MOVE_Z_AT_X_MAX_MM - ARM_USB_MOVE_Z_AT_X_MIN_MM);
-}
-
-static float ArmUsbMagnetActionZForX(float x_mm)
-{
-    float ratio = ArmUsbZMapRatioForX(x_mm);
-
-    return ARM_USB_MAGNET_Z_AT_X_MIN_MM + ratio *
-        (ARM_USB_MAGNET_Z_AT_X_MAX_MM -
-         ARM_USB_MAGNET_Z_AT_X_MIN_MM);
-}
+static float pending_target_pitch_deg;
 
 static uint32_t ArmUsbNextInternalCommandId(void)
 {
@@ -125,140 +44,96 @@ static uint32_t ArmUsbNextInternalCommandId(void)
     return next_internal_command_id++;
 }
 
-static MotionFault ArmUsbFaultFromCommandResult(Arm_Command_Result_e result)
+static float ArmUsbZMapRatioForX(float x_mm)
 {
-    switch (result) {
-        case ARM_COMMAND_PREFLIGHT_FAILED:
-            return MOTIONFAULT_IK_UNREACHABLE;
-        case ARM_COMMAND_INVALID:
-        case ARM_COMMAND_UNSUPPORTED:
-        case ARM_COMMAND_DUPLICATE:
-            return MOTIONFAULT_COLLISION;
-        case ARM_COMMAND_BUSY:
-        case ARM_COMMAND_NOT_READY:
-        case ARM_COMMAND_MODE_DENIED:
-            return MOTIONFAULT_TIMEOUT;
-        case ARM_COMMAND_TIMEOUT:
-            return MOTIONFAULT_TIMEOUT;
-        case ARM_COMMAND_OK:
-        default:
-            return MOTIONFAULT_NONE;
+    float range = ARM_USB_Z_MAP_X_MAX_MM - ARM_USB_Z_MAP_X_MIN_MM;
+
+    if (range <= 0.000001f || x_mm <= ARM_USB_Z_MAP_X_MIN_MM) {
+        return 0.0f;
     }
+    if (x_mm >= ARM_USB_Z_MAP_X_MAX_MM) {
+        return 1.0f;
+    }
+    return (x_mm - ARM_USB_Z_MAP_X_MIN_MM) / range;
 }
 
-static MotionFault ArmUsbFaultFromHost(const Arm_Host_Status_s *status)
+static float ArmUsbTravelZForX(float x_mm)
 {
-    if (status == NULL) {
-        return MOTIONFAULT_TIMEOUT;
-    }
-    if (status->fault_code == ARM_FAULT_EMERGENCY_STOP) {
-        return MOTIONFAULT_ESTOP;
-    }
-    if (status->fault_code != ARM_FAULT_NONE) {
-        return MOTIONFAULT_TIMEOUT;
-    }
-    if (status->tool_error_code != 0u) {
-        return MOTIONFAULT_TIMEOUT;
-    }
-    return MOTIONFAULT_NONE;
+    float ratio = ArmUsbZMapRatioForX(x_mm);
+
+    return ARM_USB_MOVE_Z_AT_X_MIN_MM + ratio *
+        (ARM_USB_MOVE_Z_AT_X_MAX_MM - ARM_USB_MOVE_Z_AT_X_MIN_MM);
 }
 
-static void ArmUsbFillCurrentFromHost(const Arm_Host_Status_s *host)
+static float ArmUsbGripperZForX(float x_mm)
 {
-    float current_yaw_deg;
+    float ratio = ArmUsbZMapRatioForX(x_mm);
 
-    if (host == NULL) {
-        return;
-    }
-    current_yaw_deg = host->tool_yaw_target_deg;
-    g_arm_usb_debug.current_x_mm = host->tool_tip_mm.x_mm;
-    g_arm_usb_debug.current_y_mm = host->tool_tip_mm.y_mm;
-    g_arm_usb_debug.current_z_mm = host->tool_tip_mm.z_mm;
-    g_arm_usb_debug.current_yaw_deg = current_yaw_deg;
-    g_arm_usb_debug.target_yaw_servo_deg = host->servo_target_deg[1];
-    g_arm_usb_debug.target_yaw_pos = host->servo_target_pos[1];
-    g_arm_usb_debug.magnet_on = host->magnet_on;
-
-    g_arm_usb_comm_debug.current_x_mm = host->tool_tip_mm.x_mm;
-    g_arm_usb_comm_debug.current_y_mm = host->tool_tip_mm.y_mm;
-    g_arm_usb_comm_debug.current_z_mm = host->tool_tip_mm.z_mm;
-    g_arm_usb_comm_debug.current_yaw_deg = current_yaw_deg;
-    g_arm_usb_comm_debug.magnet_on = host->magnet_on;
+    return ARM_USB_GRIPPER_Z_AT_X_MIN_MM + ratio *
+        (ARM_USB_GRIPPER_Z_AT_X_MAX_MM -
+         ARM_USB_GRIPPER_Z_AT_X_MIN_MM);
 }
 
-static void ArmUsbSendMotionStatus(MotionState state, MotionFault fault)
+static MotionFault ArmUsbMotionFaultFromResult(Arm_Command_Result_e result)
 {
-    Packet_MotionStatus status;
-    Arm_Host_Status_s host;
-
-    memset(&status, 0, sizeof(status));
-    status.state = (uint8_t)state;
-    status.fault = (uint8_t)fault;
-    if (ArmGetHostStatus(&host)) {
-        ArmUsbFillCurrentFromHost(&host);
-        status.x_mm = host.tool_tip_mm.x_mm;
-        status.y_mm = host.tool_tip_mm.y_mm;
-        status.yaw_deg = host.tool_yaw_target_deg;
+    if (result == ARM_COMMAND_PREFLIGHT_FAILED) {
+        return MOTIONFAULT_IK_UNREACHABLE;
     }
-    if (state != last_motion_state || fault != last_motion_fault) {
-        (void)protocol_send_motion_status(&status);
-        last_motion_state = (uint8_t)state;
-        last_motion_fault = (uint8_t)fault;
+    if (result == ARM_COMMAND_INVALID ||
+        result == ARM_COMMAND_UNSUPPORTED ||
+        result == ARM_COMMAND_DUPLICATE) {
+        return MOTIONFAULT_COLLISION;
     }
-    g_arm_usb_debug.motion_state = (uint8_t)state;
-    g_arm_usb_debug.motion_fault = (uint8_t)fault;
+    if (result == ARM_COMMAND_OK) {
+        return MOTIONFAULT_NONE;
+    }
+    return MOTIONFAULT_TIMEOUT;
 }
 
-static void ArmUsbSendCallbackStatus(uint8_t callback_id, uint8_t status)
+static ToolFault ArmUsbToolFaultFromResult(Arm_Command_Result_e result)
 {
-    Packet_CallbackStatus packet;
-
-    packet.callback_id = callback_id;
-    packet.callback_status = status;
-    (void)protocol_send_callback_status(&packet);
+    if (result == ARM_COMMAND_PREFLIGHT_FAILED) {
+        return TOOLFAULT_PITCH_LIMIT;
+    }
+    if (result == ARM_COMMAND_BUSY || result == ARM_COMMAND_DUPLICATE) {
+        return TOOLFAULT_BUSY;
+    }
+    if (result == ARM_COMMAND_NOT_READY ||
+        result == ARM_COMMAND_MODE_DENIED) {
+        return TOOLFAULT_NOT_READY;
+    }
+    if (result == ARM_COMMAND_TIMEOUT) {
+        return TOOLFAULT_TIMEOUT;
+    }
+    if (result != ARM_COMMAND_OK) {
+        return TOOLFAULT_INVALID_COMMAND;
+    }
+    return TOOLFAULT_NONE;
 }
 
-uint8_t ArmUsbBridgeRequestTaskStartFromKey(uint8_t task_id)
+static ToolFault ArmUsbToolFaultFromHost(const Arm_Host_Status_s *host)
 {
-    Packet_CallbackStatus packet;
-
-    if (task_id < 1u || task_id > 4u) {
-        return 0u;
+    if (host == NULL || host->servo_online[0] == 0u ||
+        host->servo_online[1] == 0u) {
+        return TOOLFAULT_SERVO_OFFLINE;
     }
-
-    packet.callback_id = task_id;
-    packet.callback_status = STATUS_START;
-    return protocol_send_callback_status(&packet) != 0 ? 1u : 0u;
-}
-
-static uint8_t ArmUsbBusinessCallbackId(void)
-{
-    if (active_business == ARM_USB_BUSINESS_HOME) {
-        return 0u;
+    if (host->gripper_state == ARM_GRIPPER_JAMMED) {
+        return TOOLFAULT_JAMMED;
     }
-    if (active_business == ARM_USB_BUSINESS_MAGNET_ON) {
-        return 5u;
+    if (host->tool_error_code == ARM_TOOL_ERROR_SERVO_TIMEOUT) {
+        return TOOLFAULT_TIMEOUT;
     }
-    if (active_business == ARM_USB_BUSINESS_MAGNET_OFF) {
-        return 6u;
+    if (host->tool_error_code != ARM_TOOL_ERROR_NONE ||
+        host->gripper_state == ARM_GRIPPER_FAULT) {
+        return TOOLFAULT_NOT_READY;
     }
-    return 255u;
+    return TOOLFAULT_NONE;
 }
 
 static void ArmUsbSetState(Arm_Usb_Action_State_e state, uint32_t now_ms)
 {
     g_arm_usb_debug.action_state = (uint8_t)state;
-    state_tick = now_ms;
     g_arm_usb_debug.state_tick = now_ms;
-    g_arm_usb_debug.dwell_elapsed_ms = 0u;
-    if (state == ARM_USB_MAGNET_ON_DWELL ||
-        state == ARM_USB_MAGNET_OFF_DWELL) {
-        magnet_action_done = 0u;
-    }
-    if (state == ARM_USB_MAGNET_OFF_RAISING) {
-        magnet_off_reset_done = 0u;
-        magnet_off_reset_tick = 0u;
-    }
 }
 
 static void ArmUsbSetBusiness(Arm_Usb_Business_e business)
@@ -267,21 +142,94 @@ static void ArmUsbSetBusiness(Arm_Usb_Business_e business)
     g_arm_usb_debug.active_business = active_business;
 }
 
-static Arm_Command_Result_e ArmUsbSubmitTipMove(float x_mm, float y_mm,
-                                                float z_mm,
-                                                float speed_mm_s,
-                                                uint8_t yaw_valid,
-                                                float yaw_deg)
+static void ArmUsbUpdateCurrent(const Arm_Host_Status_s *host)
+{
+    if (host == NULL) {
+        return;
+    }
+    g_arm_usb_debug.current_x_mm = host->tool_tip_mm.x_mm;
+    g_arm_usb_debug.current_y_mm = host->tool_tip_mm.y_mm;
+    g_arm_usb_debug.current_z_mm = host->tool_tip_mm.z_mm;
+    g_arm_usb_debug.current_pitch_deg = host->tool_pitch_feedback_deg;
+    g_arm_usb_debug.gripper_state = host->gripper_state;
+    g_arm_usb_debug.gripper_feedback_pos = host->gripper_feedback_pos;
+    g_arm_usb_comm_debug.current_x_mm = host->tool_tip_mm.x_mm;
+    g_arm_usb_comm_debug.current_y_mm = host->tool_tip_mm.y_mm;
+    g_arm_usb_comm_debug.current_z_mm = host->tool_tip_mm.z_mm;
+    g_arm_usb_comm_debug.current_pitch_deg =
+        host->tool_pitch_feedback_deg;
+    g_arm_usb_comm_debug.gripper_state = host->gripper_state;
+}
+
+static void ArmUsbSendCallback(uint8_t callback_id, uint8_t status)
+{
+    Packet_CallbackStatus packet;
+
+    packet.callback_id = callback_id;
+    packet.callback_status = status;
+    (void)protocol_send_callback_status(&packet);
+}
+
+static void ArmUsbSendMotion(MotionState state, MotionFault fault)
+{
+    Packet_MotionStatus packet;
+    Arm_Host_Status_s host;
+
+    memset(&packet, 0, sizeof(packet));
+    packet.state = (uint8_t)state;
+    packet.fault = (uint8_t)fault;
+    if (ArmGetHostStatus(&host) != 0u) {
+        ArmUsbUpdateCurrent(&host);
+        packet.x_mm = host.tool_tip_mm.x_mm;
+        packet.y_mm = host.tool_tip_mm.y_mm;
+        packet.pitch_deg = host.tool_pitch_feedback_deg;
+    }
+    if ((uint8_t)state != last_motion_state ||
+        (uint8_t)fault != last_motion_fault) {
+        (void)protocol_send_motion_status(&packet);
+        last_motion_state = (uint8_t)state;
+        last_motion_fault = (uint8_t)fault;
+    }
+    g_arm_usb_debug.motion_state = (uint8_t)state;
+    g_arm_usb_debug.motion_fault = (uint8_t)fault;
+}
+
+static void ArmUsbSendTool(uint32_t command_id, ToolState state,
+                           ToolFault fault)
+{
+    Packet_ToolStatus packet;
+    Arm_Host_Status_s host;
+
+    memset(&packet, 0, sizeof(packet));
+    packet.command_id = command_id;
+    packet.state = (uint8_t)state;
+    packet.fault = (uint8_t)fault;
+    if (ArmGetHostStatus(&host) != 0u) {
+        ArmUsbUpdateCurrent(&host);
+        packet.pitch_deg = host.tool_pitch_feedback_deg;
+        packet.gripper_state = host.gripper_state;
+    }
+    (void)protocol_send_tool_status(&packet);
+    if (last_tool_command_id == 0u ||
+        (int32_t)(command_id - last_tool_command_id) >= 0) {
+        last_tool_command_id = command_id;
+        last_tool_state = (uint8_t)state;
+        last_tool_fault = (uint8_t)fault;
+        g_arm_usb_debug.last_tool_command_id = command_id;
+        g_arm_usb_debug.last_tool_state = (uint8_t)state;
+        g_arm_usb_debug.last_tool_fault = (uint8_t)fault;
+    }
+}
+
+static Arm_Command_Result_e ArmUsbSubmitMove(float x_mm, float y_mm,
+                                             float z_mm,
+                                             float speed_mm_s,
+                                             uint8_t pitch_valid,
+                                             float pitch_deg)
 {
     Arm_Command_s command;
 
     memset(&command, 0, sizeof(command));
-    active_target_x_mm = x_mm;
-    active_target_y_mm = y_mm;
-    active_target_z_mm = z_mm;
-    if (yaw_valid != 0u) {
-        active_target_yaw_deg = yaw_deg;
-    }
     active_arm_command_id = ArmUsbNextInternalCommandId();
     command.command_id = active_arm_command_id;
     command.type = ARM_COMMAND_TYPE_CARTESIAN;
@@ -291,37 +239,21 @@ static Arm_Command_Result_e ArmUsbSubmitTipMove(float x_mm, float y_mm,
     command.payload.cartesian.target_mm.y_mm = y_mm;
     command.payload.cartesian.target_mm.z_mm = z_mm;
     command.payload.cartesian.max_speed_mm_s = speed_mm_s;
-    command.payload.cartesian.tool_pitch_valid = 0u;
-    command.payload.cartesian.tool_yaw_valid = yaw_valid;
-    command.payload.cartesian.tool_yaw_deg = yaw_deg;
+    command.payload.cartesian.tool_pitch_valid = pitch_valid;
+    command.payload.cartesian.tool_pitch_deg = pitch_deg;
+    command.payload.cartesian.tool_yaw_valid = 0u;
     g_arm_usb_debug.internal_arm_command_id = active_arm_command_id;
-    g_arm_usb_debug.commanded_z_mm = z_mm;
+    g_arm_usb_debug.target_x_mm = x_mm;
+    g_arm_usb_debug.target_y_mm = y_mm;
+    g_arm_usb_debug.target_z_mm = z_mm;
+    if (pitch_valid != 0u) {
+        g_arm_usb_debug.target_pitch_deg = pitch_deg;
+    }
     return ArmSubmitCommand(&command);
 }
 
-static Arm_Command_Result_e ArmUsbSubmitTargetMoveLift(
-    const Arm_Host_Status_s *host)
-{
-    if (host == NULL) {
-        return ARM_COMMAND_INVALID;
-    }
-    return ArmUsbSubmitTipMove(host->tool_tip_mm.x_mm,
-                               host->tool_tip_mm.y_mm,
-                               ArmUsbDefaultZForX(
-                                   host->tool_tip_mm.x_mm),
-                               ARM_USB_MAGNET_Z_SPEED_MM_S,
-                               0u, 0.0f);
-}
-
-static Arm_Command_Result_e ArmUsbSubmitTargetMoveFinal(void)
-{
-    return ArmUsbSubmitTipMove(pending_target_x_mm, pending_target_y_mm,
-                               ArmUsbDefaultZForX(pending_target_x_mm),
-                               ARM_USB_MOVE_SPEED_MM_S,
-                               1u, pending_target_yaw_deg);
-}
-
-static Arm_Command_Result_e ArmUsbSubmitServo2Reset(void)
+static Arm_Command_Result_e ArmUsbSubmitToolAction(
+    Arm_Tool_Action_e action, float pitch_deg)
 {
     Arm_Command_s command;
 
@@ -329,16 +261,13 @@ static Arm_Command_Result_e ArmUsbSubmitServo2Reset(void)
     active_arm_command_id = ArmUsbNextInternalCommandId();
     command.command_id = active_arm_command_id;
     command.type = ARM_COMMAND_TYPE_TOOL;
-    command.payload.tool.action = ARM_TOOL_ACTION_SERVO2_WORLD_YAW;
-    command.payload.tool.servo2_deg = 0.0f;
+    command.payload.tool.action = action;
+    command.payload.tool.pitch_deg = pitch_deg;
     g_arm_usb_debug.internal_arm_command_id = active_arm_command_id;
-    g_arm_usb_debug.target_yaw_servo_deg = ARM_TOOL_SERVO2_FIXED_DEG;
-    g_arm_usb_debug.target_yaw_pos = ARM_TOOL_SERVO2_NEUTRAL_POS;
-    g_arm_usb_debug.target_yaw_result = ARM_COMMAND_BUSY;
     return ArmSubmitCommand(&command);
 }
 
-static Arm_Command_Result_e ArmUsbSubmitCancelMotion(void)
+static Arm_Command_Result_e ArmUsbSubmitCancel(void)
 {
     Arm_Command_s command;
 
@@ -350,154 +279,58 @@ static Arm_Command_Result_e ArmUsbSubmitCancelMotion(void)
     return ArmSubmitCommand(&command);
 }
 
-static Arm_Command_Result_e ArmUsbSubmitStopHome(void)
+static uint8_t ArmUsbCommandCompleted(const Arm_Host_Status_s *host)
 {
-    return ArmUsbSubmitTipMove(ARM_USB_HOME_X_MM, ARM_USB_HOME_Y_MM,
-                               ARM_USB_HOME_Z_MM,
-                               ARM_USB_HOME_SPEED_MM_S,
-                               1u, 0.0f);
+    return host != NULL && host->last_command_id == active_arm_command_id &&
+           host->last_command_state == ARM_COMMAND_STATE_COMPLETED;
 }
 
-static uint8_t ArmUsbHostReadyAndIdle(const Arm_Host_Status_s *status)
+static uint8_t ArmUsbCommandFailed(const Arm_Host_Status_s *host)
 {
-    return status != NULL && status->ready != 0u && status->busy == 0u &&
-           status->fault_code == ARM_FAULT_NONE;
+    return host != NULL && host->last_command_id == active_arm_command_id &&
+           (host->last_command_state == ARM_COMMAND_STATE_REJECTED ||
+            host->last_command_state == ARM_COMMAND_STATE_CANCELLED ||
+            host->last_command_state == ARM_COMMAND_STATE_FAULTED);
 }
 
-static uint8_t ArmUsbCommandCompleted(const Arm_Host_Status_s *status)
+static void ArmUsbClearBusiness(uint32_t now_ms)
 {
-    return status != NULL &&
-           status->last_command_id == active_arm_command_id &&
-           status->last_command_state == ARM_COMMAND_STATE_COMPLETED;
-}
-
-static uint8_t ArmUsbCommandRejected(const Arm_Host_Status_s *status)
-{
-    return status != NULL &&
-           status->last_command_id == active_arm_command_id &&
-           status->last_command_state == ARM_COMMAND_STATE_REJECTED;
-}
-
-static uint8_t ArmUsbCommandFailed(const Arm_Host_Status_s *status)
-{
-    return status != NULL &&
-           status->last_command_id == active_arm_command_id &&
-           (status->last_command_state == ARM_COMMAND_STATE_CANCELLED ||
-            status->last_command_state == ARM_COMMAND_STATE_FAULTED);
-}
-
-static uint8_t ArmUsbCommandSettlingTimedOut(
-    const Arm_Host_Status_s *status)
-{
-    return ArmUsbCommandFailed(status) &&
-           status->last_command_result == ARM_COMMAND_TIMEOUT;
-}
-
-static void ArmUsbClearActiveTracking(void)
-{
+    active_arm_command_id = 0u;
     target_move_phase = 0u;
-    target_yaw_pending = 0u;
-    target_yaw_waiting = 0u;
-    target_yaw_complete_tick = 0u;
-    active_arm_command_id = 0u;
-    g_arm_usb_debug.target_move_phase = 0u;
-    g_arm_usb_debug.target_yaw_pending = 0u;
-    g_arm_usb_debug.target_yaw_waiting = 0u;
     g_arm_usb_debug.internal_arm_command_id = 0u;
-}
-
-/*
- * REJECTED表示IK/路径预检没有启动任何物理运动，不能再发送取消命令。
- * 失败状态回传后立即释放USB业务锁，让下一条合法指令可以直接进入。
- */
-static void ArmUsbRejectActive(MotionFault fault, uint8_t release_magnet,
-                               uint32_t now_ms)
-{
-    uint8_t rejected_business = active_business;
-    uint8_t callback_id = ArmUsbBusinessCallbackId();
-
-    if (release_magnet != 0u) {
-        ArmToolSetMagnet(0u);
-    }
-    if (rejected_business == ARM_USB_BUSINESS_TARGET_MOVE) {
-        ArmUsbSendMotionStatus(MOTIONSTATE_FAILED, fault);
-    } else if (rejected_business == ARM_USB_BUSINESS_HOME ||
-               rejected_business == ARM_USB_BUSINESS_MAGNET_ON ||
-               rejected_business == ARM_USB_BUSINESS_MAGNET_OFF) {
-        ArmUsbSendCallbackStatus(callback_id, STATUS_FAULT_RETRY);
-    }
-    last_action_failed = 1u;
-    ArmUsbClearActiveTracking();
+    g_arm_usb_debug.target_move_phase = 0u;
     ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
     ArmUsbSetState(ARM_USB_ACTION_IDLE, now_ms);
 }
 
-static void ArmUsbFailActive(MotionFault fault, uint8_t release_magnet,
-                             uint8_t preserve_final_target)
+static void ArmUsbFailBusiness(MotionFault fault, uint32_t now_ms)
 {
-    Arm_Command_s cancel_command;
-    uint8_t failed_business = active_business;
-    uint8_t callback_id = ArmUsbBusinessCallbackId();
+    if (active_business == ARM_USB_BUSINESS_TARGET_MOVE) {
+        ArmUsbSendMotion(MOTIONSTATE_FAILED, fault);
+    } else if (active_business == ARM_USB_BUSINESS_TOOL) {
+        Arm_Host_Status_s host;
+        ToolFault tool_fault = TOOLFAULT_NOT_READY;
 
-    ArmUsbClearActiveTracking();
-    if (release_magnet != 0u) {
-        ArmToolSetMagnet(0u);
-    }
-    if (preserve_final_target == 0u) {
-        memset(&cancel_command, 0, sizeof(cancel_command));
-        cancel_command.command_id = ArmUsbNextInternalCommandId();
-        cancel_command.type = ARM_COMMAND_TYPE_CANCEL_MOTION;
-        (void)ArmSubmitCommand(&cancel_command);
-    }
-    if (failed_business == ARM_USB_BUSINESS_TARGET_MOVE) {
-        ArmUsbSendMotionStatus(MOTIONSTATE_FAILED, fault);
+        if (ArmGetHostStatus(&host) != 0u) {
+            tool_fault = ArmUsbToolFaultFromHost(&host);
+        }
+        ArmUsbSendTool(active_tool_command_id, TOOLSTATE_FAILED,
+                       tool_fault);
     } else {
-        ArmUsbSendCallbackStatus(callback_id, STATUS_FAULT_RETRY);
+        uint8_t callback_id = active_business == ARM_USB_BUSINESS_HOME ?
+            0u : (active_business == ARM_USB_BUSINESS_TASK5_GRIP ? 5u :
+                  (active_business == ARM_USB_BUSINESS_TASK6_RELEASE ?
+                   6u : stop_task_id));
+        ArmUsbSendCallback(callback_id, STATUS_FAULT_RETRY);
     }
     last_action_failed = 1u;
-    if (preserve_final_target != 0u) {
-        /*
-         * 实际到位收敛超时只结束本次USB业务，不再提交CANCEL_MOTION。
-         * 达妙继续保持原最终目标，避免把尚差少量距离的反馈位置固化
-         * 成新目标；同时立即释放业务锁，允许上位机发送下一条命令。
-         */
-        ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
-        ArmUsbSetState(ARM_USB_ACTION_IDLE, HAL_GetTick());
-    } else {
-        ArmUsbSetState(ARM_USB_ACTION_FAILED, HAL_GetTick());
-    }
+    ArmUsbClearBusiness(now_ms);
 }
 
-static void ArmUsbStartBusiness(Arm_Usb_Business_e business, uint32_t now_ms)
+static uint8_t ArmUsbHostReadyAndIdle(const Arm_Host_Status_s *host)
 {
-    ArmUsbSetBusiness(business);
-    last_motion_state = 0u;
-    last_motion_fault = 0u;
-    if (business == ARM_USB_BUSINESS_TARGET_MOVE) {
-        ArmUsbSendMotionStatus(MOTIONSTATE_ACCEPTED, MOTIONFAULT_NONE);
-        ArmUsbSendMotionStatus(MOTIONSTATE_RUNNING, MOTIONFAULT_NONE);
-        ArmUsbSetState(ARM_USB_TARGET_MOVE_RUNNING, now_ms);
-    } else {
-        ArmUsbSetState(ARM_USB_ACTION_IDLE, now_ms);
-    }
-}
-
-static void ArmUsbCompleteActive(uint32_t now_ms)
-{
-    uint8_t finished_business = active_business;
-
-    ArmUsbClearActiveTracking();
-    if (finished_business == ARM_USB_BUSINESS_TARGET_MOVE) {
-        ArmUsbSendMotionStatus(MOTIONSTATE_COMPLETED, MOTIONFAULT_NONE);
-    } else if (finished_business == ARM_USB_BUSINESS_HOME ||
-               finished_business == ARM_USB_BUSINESS_MAGNET_ON ||
-               finished_business == ARM_USB_BUSINESS_MAGNET_OFF) {
-        ArmUsbSendCallbackStatus(ArmUsbBusinessCallbackId(), STATUS_END);
-    }
-    last_action_failed = 0u;
-    active_arm_command_id = 0u;
-    ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
-    ArmUsbSetState(ARM_USB_ACTION_IDLE, now_ms);
+    return host != NULL && host->ready != 0u && host->busy == 0u &&
+           host->fault_code == ARM_FAULT_NONE;
 }
 
 void ArmUsbBridgeInit(void)
@@ -506,31 +339,38 @@ void ArmUsbBridgeInit(void)
     memset(&g_arm_usb_comm_debug, 0, sizeof(g_arm_usb_comm_debug));
     next_internal_command_id = 1u;
     active_arm_command_id = 0u;
+    active_tool_command_id = 0u;
+    last_tool_command_id = 0u;
+    last_tool_state = 0u;
+    last_tool_fault = 0u;
+    pending_tool_gripper_action = TOOL_GRIPPER_HOLD;
     active_task_id = 0u;
     active_business = ARM_USB_BUSINESS_IDLE;
-    last_motion_state = 0u;
-    last_motion_fault = 0u;
     pending_task_end = 0u;
     last_action_failed = 0u;
-    action_x_mm = 0.0f;
-    action_y_mm = 0.0f;
-    active_target_x_mm = 0.0f;
-    active_target_y_mm = 0.0f;
-    active_target_z_mm = 0.0f;
-    active_target_yaw_deg = 0.0f;
-    pending_target_x_mm = 0.0f;
-    pending_target_y_mm = 0.0f;
-    pending_target_yaw_deg = 0.0f;
-    target_move_phase = 0u;
-    target_yaw_pending = 0u;
-    target_yaw_waiting = 0u;
-    target_yaw_complete_tick = 0u;
-    magnet_action_done = 0u;
-    magnet_off_reset_done = 0u;
-    magnet_off_reset_tick = 0u;
     stop_task_id = 0u;
     stop_safe_latched = 0u;
-    ArmUsbSetState(ARM_USB_ACTION_IDLE, 0u);
+    target_move_phase = 0u;
+    last_motion_state = 0u;
+    last_motion_fault = 0u;
+    action_x_mm = 0.0f;
+    action_y_mm = 0.0f;
+    pending_target_x_mm = 0.0f;
+    pending_target_y_mm = 0.0f;
+    pending_target_pitch_deg = 0.0f;
+    ArmUsbSetState(ARM_USB_ACTION_IDLE, HAL_GetTick());
+}
+
+uint8_t ArmUsbBridgeRequestTaskStartFromKey(uint8_t task_id)
+{
+    Packet_CallbackStatus packet;
+
+    if (task_id < 1u || task_id > 4u) {
+        return 0u;
+    }
+    packet.callback_id = task_id;
+    packet.callback_status = STATUS_START;
+    return protocol_send_callback_status(&packet) != 0 ? 1u : 0u;
 }
 
 void ArmUsbBridgeOnTaskStatus(const Packet_TaskStatus *pkt)
@@ -549,183 +389,92 @@ void ArmUsbBridgeOnTaskStatus(const Packet_TaskStatus *pkt)
     if (pkt->task_status == STATUS_STOP) {
         stop_task_id = pkt->task_id;
         pending_task_end = 0u;
-        last_action_failed = 0u;
-        g_arm_usb_debug.pending_task_end = 0u;
-        g_arm_usb_debug.last_action_failed = 0u;
-        g_arm_usb_debug.stop_task_id = stop_task_id;
-
-        /* 已安全STOP后再次收到新序号STOP，只重发完成回调。 */
         if (stop_safe_latched != 0u &&
             active_business == ARM_USB_BUSINESS_IDLE) {
-            ArmToolSetMagnet(0u);
-            ArmUsbSendCallbackStatus(stop_task_id, STATUS_STOP);
+            ArmUsbSendCallback(stop_task_id, STATUS_STOP);
             return;
         }
-        /* 同一次STOP流程已经在运行，可靠层ACK即可，避免重复运动。 */
         if (active_business == ARM_USB_BUSINESS_STOP) {
             return;
         }
-        if (!ArmGetHostStatus(&host) ||
+        if (ArmGetHostStatus(&host) == 0u ||
             host.fault_code != ARM_FAULT_NONE) {
-            ArmUsbSendCallbackStatus(stop_task_id, STATUS_FAULT_RETRY);
+            ArmUsbSendCallback(stop_task_id, STATUS_FAULT_RETRY);
             return;
         }
-
         stop_safe_latched = 0u;
-        g_arm_usb_debug.stop_safe_latched = 0u;
-        ArmUsbClearActiveTracking();
         ArmUsbSetBusiness(ARM_USB_BUSINESS_STOP);
-
-        if (host.busy != 0u ||
-            g_arm_usb_debug.action_state != ARM_USB_ACTION_IDLE) {
-            result = ArmUsbSubmitCancelMotion();
-            if (result == ARM_COMMAND_OK) {
-                ArmUsbSetState(ARM_USB_STOP_CANCEL_PENDING, now_ms);
-            } else {
-                ArmUsbSendCallbackStatus(stop_task_id,
-                                         STATUS_FAULT_RETRY);
-                ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
-                ArmUsbSetState(ARM_USB_ACTION_IDLE, now_ms);
-            }
-            return;
-        }
-
-        result = ArmUsbSubmitStopHome();
-        if (result == ARM_COMMAND_OK) {
-            ArmUsbSetState(ARM_USB_STOP_HOME_RUNNING, now_ms);
+        result = host.busy != 0u ? ArmUsbSubmitCancel() :
+            ArmUsbSubmitMove(ARM_USB_HOME_X_MM, ARM_USB_HOME_Y_MM,
+                             ARM_USB_HOME_Z_MM, ARM_USB_HOME_SPEED_MM_S,
+                             0u, 0.0f);
+        if (result != ARM_COMMAND_OK) {
+            ArmUsbFailBusiness(ArmUsbMotionFaultFromResult(result), now_ms);
         } else {
-            ArmUsbSendCallbackStatus(stop_task_id, STATUS_FAULT_RETRY);
-            ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
-            ArmUsbSetState(ARM_USB_ACTION_IDLE, now_ms);
+            ArmUsbSetState(host.busy != 0u ?
+                ARM_USB_STOP_CANCEL_PENDING :
+                ARM_USB_STOP_HOME_RUNNING, now_ms);
         }
         return;
     }
 
     if (pkt->task_status == STATUS_FAULT_RETRY) {
-        if (!ArmGetHostStatus(&host) ||
-            host.fault_code != ARM_FAULT_NONE) {
-            ArmUsbSendCallbackStatus(pkt->task_id, STATUS_FAULT_RETRY);
-            return;
-        }
-        pending_task_end = 0u;
-        last_action_failed = 0u;
-        if (host.busy != 0u) {
-            Arm_Command_s cancel_command;
-
-            memset(&cancel_command, 0, sizeof(cancel_command));
-            cancel_command.command_id = ArmUsbNextInternalCommandId();
-            cancel_command.type = ARM_COMMAND_TYPE_CANCEL_MOTION;
-            if (ArmSubmitCommand(&cancel_command) != ARM_COMMAND_OK) {
-                ArmUsbSendCallbackStatus(pkt->task_id,
-                                         STATUS_FAULT_RETRY);
-                return;
-            }
+        if (ArmGetHostStatus(&host) != 0u && host.busy != 0u) {
+            (void)ArmUsbSubmitCancel();
             ArmUsbSetState(ARM_USB_ACTION_FAILED, now_ms);
-            return;
+        } else {
+            ArmUsbClearBusiness(now_ms);
         }
-        ArmUsbClearActiveTracking();
-        ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
-        ArmUsbSetState(ARM_USB_ACTION_IDLE, now_ms);
         return;
     }
 
     if (pkt->task_status == STATUS_END) {
         if (pkt->task_id >= 1u && pkt->task_id <= 4u) {
             active_task_id = pkt->task_id;
-            g_arm_usb_debug.active_task_id = active_task_id;
-            /*
-             * END是上位机对当前任务的新结束决定，不能被更早命令遗留的
-             * last_action_failed永久阻挡。若END之后仍在执行的动作失败，
-             * 失败路径会再次置位该标志，因此依然不会误报任务完成。
-             */
-            last_action_failed = 0u;
             pending_task_end = 1u;
-            g_arm_usb_debug.last_action_failed = last_action_failed;
-            g_arm_usb_debug.pending_task_end = pending_task_end;
-            if (active_business == ARM_USB_BUSINESS_IDLE ||
-                active_business == ARM_USB_BUSINESS_TASK_START_RECORD ||
-                active_business == ARM_USB_BUSINESS_TASK_END_RECORD) {
-                ArmUsbSetBusiness(ARM_USB_BUSINESS_TASK_END_RECORD);
-            }
+            last_action_failed = 0u;
         }
         return;
     }
-
     if (pkt->task_status != STATUS_START) {
         return;
     }
 
     active_task_id = pkt->task_id;
-    g_arm_usb_debug.active_task_id = active_task_id;
     pending_task_end = 0u;
     last_action_failed = 0u;
-
-    if (active_business != ARM_USB_BUSINESS_IDLE &&
-        active_business != ARM_USB_BUSINESS_TASK_START_RECORD &&
-        active_business != ARM_USB_BUSINESS_TASK_END_RECORD) {
-        ArmUsbSendCallbackStatus(pkt->task_id, STATUS_FAULT_RETRY);
-        return;
-    }
-
     if (pkt->task_id >= 1u && pkt->task_id <= 4u) {
-        stop_safe_latched = 0u;
-        g_arm_usb_debug.stop_safe_latched = 0u;
-        ArmUsbSetBusiness(ARM_USB_BUSINESS_TASK_START_RECORD);
-        /* 任务号已保存，仅记录动作不能长期占用运动业务锁。 */
-        ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
+        return;
+    }
+    if (active_business != ARM_USB_BUSINESS_IDLE ||
+        ArmGetHostStatus(&host) == 0u ||
+        !ArmUsbHostReadyAndIdle(&host)) {
+        ArmUsbSendCallback(pkt->task_id, STATUS_FAULT_RETRY);
         return;
     }
 
-    if (!ArmGetHostStatus(&host)) {
-        ArmUsbSendCallbackStatus(pkt->task_id, STATUS_FAULT_RETRY);
-        return;
-    }
-    if (!ArmUsbHostReadyAndIdle(&host)) {
-        ArmUsbSendCallbackStatus(pkt->task_id, STATUS_FAULT_RETRY);
-        return;
-    }
-
-    stop_safe_latched = 0u;
-    g_arm_usb_debug.stop_safe_latched = 0u;
     action_x_mm = host.tool_tip_mm.x_mm;
     action_y_mm = host.tool_tip_mm.y_mm;
-
     if (pkt->task_id == 0u) {
-        ArmUsbStartBusiness(ARM_USB_BUSINESS_HOME, now_ms);
-        result = ArmUsbSubmitTipMove(ARM_USB_HOME_X_MM, ARM_USB_HOME_Y_MM,
-                                     ARM_USB_HOME_Z_MM,
-                                     ARM_USB_HOME_SPEED_MM_S,
-                                     1u, 0.0f);
-        if (result == ARM_COMMAND_OK) {
-            ArmUsbSetState(ARM_USB_HOME_RUNNING, now_ms);
-        } else {
-            ArmUsbRejectActive(ArmUsbFaultFromCommandResult(result), 0u,
-                               now_ms);
-        }
+        ArmUsbSetBusiness(ARM_USB_BUSINESS_HOME);
+        result = ArmUsbSubmitMove(ARM_USB_HOME_X_MM, ARM_USB_HOME_Y_MM,
+            ARM_USB_HOME_Z_MM, ARM_USB_HOME_SPEED_MM_S, 0u, 0.0f);
+        ArmUsbSetState(ARM_USB_HOME_RUNNING, now_ms);
     } else if (pkt->task_id == 5u) {
-        ArmUsbStartBusiness(ARM_USB_BUSINESS_MAGNET_ON, now_ms);
-        result = ArmUsbSubmitTipMove(action_x_mm, action_y_mm,
-                                     ArmUsbMagnetActionZForX(action_x_mm),
-                                     ARM_USB_MAGNET_Z_SPEED_MM_S,
-                                     0u, 0.0f);
-        if (result == ARM_COMMAND_OK) {
-            ArmUsbSetState(ARM_USB_MAGNET_ON_DESCENDING, now_ms);
-        } else {
-            ArmUsbRejectActive(ArmUsbFaultFromCommandResult(result), 1u,
-                               now_ms);
-        }
+        ArmUsbSetBusiness(ARM_USB_BUSINESS_TASK5_GRIP);
+        result = ArmUsbSubmitToolAction(ARM_TOOL_ACTION_GRIPPER_OPEN, 0.0f);
+        ArmUsbSetState(ARM_USB_TASK5_OPENING, now_ms);
     } else if (pkt->task_id == 6u) {
-        ArmUsbStartBusiness(ARM_USB_BUSINESS_MAGNET_OFF, now_ms);
-        result = ArmUsbSubmitTipMove(action_x_mm, action_y_mm,
-                                     ArmUsbMagnetActionZForX(action_x_mm),
-                                     ARM_USB_MAGNET_Z_SPEED_MM_S,
-                                     0u, 0.0f);
-        if (result == ARM_COMMAND_OK) {
-            ArmUsbSetState(ARM_USB_MAGNET_OFF_DESCENDING, now_ms);
-        } else {
-            ArmUsbRejectActive(ArmUsbFaultFromCommandResult(result), 0u,
-                               now_ms);
-        }
+        ArmUsbSetBusiness(ARM_USB_BUSINESS_TASK6_RELEASE);
+        result = ArmUsbSubmitMove(action_x_mm, action_y_mm,
+            ArmUsbGripperZForX(action_x_mm), ARM_USB_GRIPPER_Z_SPEED_MM_S,
+            0u, 0.0f);
+        ArmUsbSetState(ARM_USB_TASK6_DESCENDING, now_ms);
+    } else {
+        result = ARM_COMMAND_INVALID;
+    }
+    if (result != ARM_COMMAND_OK) {
+        ArmUsbFailBusiness(ArmUsbMotionFaultFromResult(result), now_ms);
     }
 }
 
@@ -733,77 +482,114 @@ void ArmUsbBridgeOnTargetControl(const Packet_TargetControl *pkt)
 {
     Arm_Host_Status_s host;
     Arm_Command_Result_e result;
-    MotionFault fault;
     uint32_t now_ms = HAL_GetTick();
 
     if (pkt == NULL) {
         return;
     }
-    /* 每个非重复TargetControl都必须产生自己的状态生命周期。 */
     last_motion_state = 0u;
     last_motion_fault = 0u;
     g_arm_usb_comm_debug.rx_packet_id = PACKET_ID_TARGETCONTROL;
     g_arm_usb_debug.requested_x_mm = pkt->x_mm;
     g_arm_usb_debug.requested_y_mm = pkt->y_mm;
-    g_arm_usb_debug.requested_yaw_deg = pkt->yaw_deg;
-
-    if (g_arm_usb_debug.action_state != ARM_USB_ACTION_IDLE ||
-        active_business != ARM_USB_BUSINESS_IDLE) {
-        ArmUsbSendMotionStatus(MOTIONSTATE_FAILED, MOTIONFAULT_TIMEOUT);
-        return;
-    }
-    if (!ArmUsbFinite3(pkt->x_mm, pkt->y_mm, pkt->yaw_deg) ||
-        pkt->yaw_deg < ARM_USB_YAW_MIN_DEG ||
-        pkt->yaw_deg > ARM_USB_YAW_MAX_DEG) {
-        ArmUsbSendMotionStatus(MOTIONSTATE_FAILED, MOTIONFAULT_COLLISION);
-        return;
-    }
-    if (!ArmGetHostStatus(&host)) {
-        ArmUsbSendMotionStatus(MOTIONSTATE_FAILED, MOTIONFAULT_TIMEOUT);
-        return;
-    }
-    if (!ArmUsbHostReadyAndIdle(&host)) {
-        ArmUsbSendMotionStatus(MOTIONSTATE_FAILED, MOTIONFAULT_TIMEOUT);
+    g_arm_usb_debug.requested_pitch_deg = pkt->pitch_deg;
+    if (!isfinite(pkt->x_mm) || !isfinite(pkt->y_mm) ||
+        !isfinite(pkt->pitch_deg) ||
+        pkt->pitch_deg < ARM_USB_TOOL_PITCH_MIN_DEG ||
+        pkt->pitch_deg > ARM_USB_TOOL_PITCH_MAX_DEG ||
+        active_business != ARM_USB_BUSINESS_IDLE ||
+        ArmGetHostStatus(&host) == 0u ||
+        !ArmUsbHostReadyAndIdle(&host)) {
+        ArmUsbSendMotion(MOTIONSTATE_FAILED, MOTIONFAULT_COLLISION);
         return;
     }
 
-    stop_safe_latched = 0u;
-    g_arm_usb_debug.stop_safe_latched = 0u;
-    ArmUsbStartBusiness(ARM_USB_BUSINESS_TARGET_MOVE, now_ms);
     pending_target_x_mm = pkt->x_mm;
     pending_target_y_mm = pkt->y_mm;
-    pending_target_yaw_deg = pkt->yaw_deg;
-    active_target_yaw_deg = pkt->yaw_deg;
-    g_arm_usb_debug.target_yaw_servo_deg =
-        ARM_USB_YAW_NEUTRAL_DEG +
-        ARM_TOOL_SERVO2_APPLY_HOST_YAW_GAIN(pkt->yaw_deg);
-    g_arm_usb_debug.target_yaw_pos = ArmUsbYawToServo2Position(pkt->yaw_deg);
-    g_arm_usb_debug.target_yaw_result = ARM_COMMAND_BUSY;
-    /*
-     * 只有电磁铁吸住工件后移动XY时，才强制先抬到安全Z高度。
-     * 空载普通移动直接去目标点，避免HOME等低位姿态后“当前XY抬Z”
-     * 这一段先被IK/限位拒绝，导致motion看起来完全不执行。
-     */
-    target_move_phase = host.magnet_on != 0u ? 1u : 2u;
-    g_arm_usb_debug.target_move_phase = target_move_phase;
-    result = target_move_phase == 1u ?
-        ArmUsbSubmitTargetMoveLift(&host) : ArmUsbSubmitTargetMoveFinal();
-    if (result == ARM_COMMAND_OK) {
-        ArmUsbSetState(ARM_USB_TARGET_MOVE_RUNNING, now_ms);
+    pending_target_pitch_deg = pkt->pitch_deg;
+    stop_safe_latched = 0u;
+    ArmUsbSetBusiness(ARM_USB_BUSINESS_TARGET_MOVE);
+    ArmUsbSendMotion(MOTIONSTATE_ACCEPTED, MOTIONFAULT_NONE);
+    ArmUsbSendMotion(MOTIONSTATE_RUNNING, MOTIONFAULT_NONE);
+    if (host.gripper_state == ARM_GRIPPER_HELD_CONTACT ||
+        host.gripper_state == ARM_GRIPPER_CLOSED_EMPTY) {
+        target_move_phase = 1u;
+        result = ArmUsbSubmitMove(host.tool_tip_mm.x_mm,
+            host.tool_tip_mm.y_mm, ArmUsbTravelZForX(host.tool_tip_mm.x_mm),
+            ARM_USB_GRIPPER_Z_SPEED_MM_S, 0u, 0.0f);
+        ArmUsbSetState(ARM_USB_TARGET_LIFT, now_ms);
     } else {
-        fault = ArmUsbFaultFromCommandResult(result);
-        ArmUsbRejectActive(fault, 0u, now_ms);
+        target_move_phase = 2u;
+        result = ArmUsbSubmitMove(pkt->x_mm, pkt->y_mm,
+            ArmUsbTravelZForX(pkt->x_mm), ARM_USB_MOVE_SPEED_MM_S,
+            1u, pkt->pitch_deg);
+        ArmUsbSetState(ARM_USB_TARGET_MOVE, now_ms);
+    }
+    g_arm_usb_debug.target_move_phase = target_move_phase;
+    if (result != ARM_COMMAND_OK) {
+        ArmUsbFailBusiness(ArmUsbMotionFaultFromResult(result), now_ms);
     }
 }
 
-void ArmUsbBridgeTask(uint32_t now_ms)
+void ArmUsbBridgeOnToolControl(const Packet_ToolControl *pkt)
 {
-    Arm_Host_Status_s host;
-    const Protocol_Debug_s *protocol_debug = protocol_get_debug();
     Arm_Command_Result_e result;
+    ToolFault fault;
+    uint32_t now_ms = HAL_GetTick();
 
+    if (pkt == NULL) {
+        return;
+    }
+    if (pkt->command_id == last_tool_command_id &&
+        last_tool_command_id != 0u) {
+        g_arm_usb_debug.tool_duplicate_count++;
+        ArmUsbSendTool(pkt->command_id, (ToolState)last_tool_state,
+                       (ToolFault)last_tool_fault);
+        return;
+    }
+    if (pkt->command_id == 0u ||
+        (last_tool_command_id != 0u &&
+         (int32_t)(pkt->command_id - last_tool_command_id) <= 0) ||
+        !isfinite(pkt->pitch_deg) ||
+        pkt->pitch_deg < ARM_USB_TOOL_PITCH_MIN_DEG ||
+        pkt->pitch_deg > ARM_USB_TOOL_PITCH_MAX_DEG ||
+        pkt->gripper_action > TOOL_GRIPPER_CLOSE) {
+        ArmUsbSendTool(pkt->command_id, TOOLSTATE_FAILED,
+                       TOOLFAULT_INVALID_COMMAND);
+        return;
+    }
+    if (active_business != ARM_USB_BUSINESS_IDLE) {
+        ArmUsbSendTool(pkt->command_id, TOOLSTATE_FAILED, TOOLFAULT_BUSY);
+        return;
+    }
+
+    active_tool_command_id = pkt->command_id;
+    pending_tool_gripper_action = pkt->gripper_action;
+    ArmUsbSetBusiness(ARM_USB_BUSINESS_TOOL);
+    ArmUsbSendTool(pkt->command_id, TOOLSTATE_ACCEPTED, TOOLFAULT_NONE);
+    result = ArmUsbSubmitToolAction(ARM_TOOL_ACTION_SET_PITCH,
+                                    pkt->pitch_deg);
+    if (result == ARM_COMMAND_OK) {
+        ArmUsbSendTool(pkt->command_id, TOOLSTATE_RUNNING, TOOLFAULT_NONE);
+        ArmUsbSetState(ARM_USB_TOOL_PITCH_RUNNING, now_ms);
+        return;
+    }
+    fault = ArmUsbToolFaultFromResult(result);
+    ArmUsbSendTool(pkt->command_id, TOOLSTATE_FAILED, fault);
+    ArmUsbClearBusiness(now_ms);
+}
+
+static void ArmUsbUpdateDebug(uint32_t now_ms,
+                              const Protocol_Debug_s *protocol_debug)
+{
     g_arm_usb_debug.connection_ready = protocol_connection_ready();
     g_arm_usb_debug.link_online = protocol_link_is_online();
+    g_arm_usb_debug.active_task_id = active_task_id;
+    g_arm_usb_debug.pending_task_end = pending_task_end;
+    g_arm_usb_debug.last_action_failed = last_action_failed;
+    g_arm_usb_debug.stop_task_id = stop_task_id;
+    g_arm_usb_debug.stop_safe_latched = stop_safe_latched;
+    g_arm_usb_debug.active_tool_command_id = active_tool_command_id;
     g_arm_usb_debug.rx_frame_count = protocol_debug->rx_frame_count;
     g_arm_usb_debug.crc_fail_count = protocol_debug->crc_fail_count;
     g_arm_usb_debug.duplicate_count = protocol_debug->duplicate_count;
@@ -814,325 +600,296 @@ void ArmUsbBridgeTask(uint32_t now_ms)
         g_usb_tx_debug.high_queue_count;
     g_arm_usb_debug.usb_tx_normal_queue_count =
         g_usb_tx_debug.normal_queue_count;
-    g_arm_usb_debug.usb_tx_timeout_count =
-        g_usb_tx_debug.timeout_count;
+    g_arm_usb_debug.usb_tx_timeout_count = g_usb_tx_debug.timeout_count;
     g_arm_usb_debug.usb_tx_reset_count = g_usb_tx_debug.reset_count;
-    g_arm_usb_debug.state_tick = state_tick;
-    g_arm_usb_debug.pending_task_end = pending_task_end;
-    g_arm_usb_debug.last_action_failed = last_action_failed;
-    g_arm_usb_debug.stop_task_id = stop_task_id;
-    g_arm_usb_debug.stop_safe_latched = stop_safe_latched;
 
     g_arm_usb_comm_debug.usb_task_alive = 1u;
     g_arm_usb_comm_debug.connection_ready =
         g_arm_usb_debug.connection_ready;
     g_arm_usb_comm_debug.rx_task_id = protocol_debug->last_task_id;
-    g_arm_usb_comm_debug.rx_task_status =
-        protocol_debug->last_task_status;
+    g_arm_usb_comm_debug.rx_task_status = protocol_debug->last_task_status;
     g_arm_usb_comm_debug.rx_x_mm = protocol_debug->last_target_x_mm;
     g_arm_usb_comm_debug.rx_y_mm = protocol_debug->last_target_y_mm;
-    g_arm_usb_comm_debug.rx_yaw_deg =
-        protocol_debug->last_target_yaw_deg;
+    g_arm_usb_comm_debug.rx_pitch_deg =
+        protocol_debug->last_target_pitch_deg;
     g_arm_usb_comm_debug.active_task_id = active_task_id;
     g_arm_usb_comm_debug.active_business = active_business;
     g_arm_usb_comm_debug.action_state = g_arm_usb_debug.action_state;
     g_arm_usb_comm_debug.motion_state = g_arm_usb_debug.motion_state;
     g_arm_usb_comm_debug.motion_fault = g_arm_usb_debug.motion_fault;
-    g_arm_usb_comm_debug.target_x_mm = active_target_x_mm;
-    g_arm_usb_comm_debug.target_y_mm = active_target_y_mm;
-    g_arm_usb_comm_debug.target_z_mm = active_target_z_mm;
-    g_arm_usb_comm_debug.target_yaw_deg = active_target_yaw_deg;
+    g_arm_usb_comm_debug.target_x_mm = g_arm_usb_debug.target_x_mm;
+    g_arm_usb_comm_debug.target_y_mm = g_arm_usb_debug.target_y_mm;
+    g_arm_usb_comm_debug.target_z_mm = g_arm_usb_debug.target_z_mm;
+    g_arm_usb_comm_debug.target_pitch_deg =
+        g_arm_usb_debug.target_pitch_deg;
     g_arm_usb_comm_debug.task_tick = now_ms;
     g_arm_usb_comm_debug.rx_frame_count = protocol_debug->rx_frame_count;
     g_arm_usb_comm_debug.crc_fail_count = protocol_debug->crc_fail_count;
-    g_arm_usb_comm_debug.duplicate_count =
-        protocol_debug->duplicate_count + g_arm_usb_debug.duplicate_count;
+    g_arm_usb_comm_debug.duplicate_count = protocol_debug->duplicate_count;
     g_arm_usb_comm_debug.ack_tx_count = protocol_debug->ack_tx_count;
     g_arm_usb_comm_debug.ack_rx_count = protocol_debug->ack_rx_count;
     g_arm_usb_comm_debug.motion_status_tx_count =
         protocol_debug->motion_status_tx_count;
     g_arm_usb_comm_debug.callback_status_tx_count =
         protocol_debug->callback_status_tx_count;
-    g_arm_usb_comm_debug.usb_rx_overflow_count =
-        g_usb_rx_overflow_count;
-    g_arm_usb_comm_debug.usb_tx_fail_count = g_usb_tx_fail_count;
-    g_arm_usb_comm_debug.usb_tx_busy = g_usb_tx_debug.busy;
-    g_arm_usb_comm_debug.usb_tx_high_queue_count =
-        g_usb_tx_debug.high_queue_count;
-    g_arm_usb_comm_debug.usb_tx_normal_queue_count =
-        g_usb_tx_debug.normal_queue_count;
-    g_arm_usb_comm_debug.usb_tx_timeout_count =
-        g_usb_tx_debug.timeout_count;
-    g_arm_usb_comm_debug.usb_tx_reset_count =
-        g_usb_tx_debug.reset_count;
+    g_arm_usb_comm_debug.tool_status_tx_count =
+        protocol_debug->tool_status_tx_count;
+}
 
-    if (!ArmGetHostStatus(&host)) {
+void ArmUsbBridgeTask(uint32_t now_ms)
+{
+    Arm_Host_Status_s host;
+    Arm_Command_Result_e result;
+    const Protocol_Debug_s *protocol_debug = protocol_get_debug();
+
+    ArmUsbUpdateDebug(now_ms, protocol_debug);
+    if (ArmGetHostStatus(&host) == 0u) {
         return;
     }
-    ArmUsbFillCurrentFromHost(&host);
+    ArmUsbUpdateCurrent(&host);
 
     if (host.fault_code != ARM_FAULT_NONE &&
-        g_arm_usb_debug.action_state != ARM_USB_ACTION_IDLE &&
-        g_arm_usb_debug.action_state != ARM_USB_ACTION_FAILED) {
-        if (active_business == ARM_USB_BUSINESS_STOP) {
-            ArmUsbSendCallbackStatus(stop_task_id, STATUS_FAULT_RETRY);
-            last_action_failed = 1u;
-            ArmUsbClearActiveTracking();
-            ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
-            ArmUsbSetState(ARM_USB_ACTION_IDLE, now_ms);
-            return;
-        }
-        ArmUsbFailActive(ArmUsbFaultFromHost(&host), 0u, 0u);
+        active_business != ARM_USB_BUSINESS_IDLE) {
+        ArmUsbFailBusiness(host.fault_code == ARM_FAULT_EMERGENCY_STOP ?
+            MOTIONFAULT_ESTOP : MOTIONFAULT_TIMEOUT, now_ms);
         return;
     }
 
     switch ((Arm_Usb_Action_State_e)g_arm_usb_debug.action_state) {
-        case ARM_USB_TARGET_MOVE_RUNNING:
+        case ARM_USB_TARGET_LIFT:
             if (ArmUsbCommandCompleted(&host)) {
-                if (target_move_phase == 1u) {
-                    result = ArmUsbSubmitTargetMoveFinal();
-                    if (result == ARM_COMMAND_OK) {
-                        target_move_phase = 2u;
-                        g_arm_usb_debug.target_move_phase =
-                            target_move_phase;
-                    } else {
-                        ArmUsbRejectActive(
-                            ArmUsbFaultFromCommandResult(result), 0u,
-                            now_ms);
-                    }
+                target_move_phase = 2u;
+                result = ArmUsbSubmitMove(pending_target_x_mm,
+                    pending_target_y_mm,
+                    ArmUsbTravelZForX(pending_target_x_mm),
+                    ARM_USB_MOVE_SPEED_MM_S, 1u,
+                    pending_target_pitch_deg);
+                if (result == ARM_COMMAND_OK) {
+                    ArmUsbSetState(ARM_USB_TARGET_MOVE, now_ms);
                 } else {
-                    if (target_yaw_pending != 0u ||
-                        target_yaw_waiting != 0u) {
-                        break;
-                    }
-                    g_arm_usb_debug.target_yaw_result = ARM_COMMAND_OK;
-                    g_arm_usb_debug.target_yaw_pos =
-                        host.servo_target_pos[1];
-                    target_move_phase = 0u;
-                    g_arm_usb_debug.target_move_phase = target_move_phase;
-                    ArmUsbCompleteActive(now_ms);
+                    ArmUsbFailBusiness(
+                        ArmUsbMotionFaultFromResult(result), now_ms);
                 }
-            } else if (ArmUsbCommandRejected(&host)) {
-                ArmUsbRejectActive(
-                    ArmUsbFaultFromCommandResult(host.last_command_result),
-                    0u, now_ms);
             } else if (ArmUsbCommandFailed(&host)) {
-                ArmUsbFailActive(
-                    ArmUsbFaultFromCommandResult(host.last_command_result),
-                    0u, ArmUsbCommandSettlingTimedOut(&host));
-                last_action_failed = 1u;
+                ArmUsbFailBusiness(ArmUsbMotionFaultFromResult(
+                    host.last_command_result), now_ms);
+            }
+            break;
+
+        case ARM_USB_TARGET_MOVE:
+            if (ArmUsbCommandCompleted(&host)) {
+                ArmUsbSendMotion(MOTIONSTATE_COMPLETED, MOTIONFAULT_NONE);
+                last_action_failed = 0u;
+                ArmUsbClearBusiness(now_ms);
+            } else if (ArmUsbCommandFailed(&host)) {
+                ArmUsbFailBusiness(ArmUsbMotionFaultFromResult(
+                    host.last_command_result), now_ms);
             }
             break;
 
         case ARM_USB_HOME_RUNNING:
             if (ArmUsbCommandCompleted(&host)) {
-                ArmUsbCompleteActive(now_ms);
-            } else if (ArmUsbCommandRejected(&host)) {
-                ArmUsbRejectActive(
-                    ArmUsbFaultFromCommandResult(host.last_command_result),
-                    0u, now_ms);
+                ArmUsbSendCallback(0u, STATUS_END);
+                ArmUsbClearBusiness(now_ms);
             } else if (ArmUsbCommandFailed(&host)) {
-                ArmUsbFailActive(
-                    ArmUsbFaultFromCommandResult(host.last_command_result),
-                    0u, ArmUsbCommandSettlingTimedOut(&host));
-                last_action_failed = 1u;
+                ArmUsbFailBusiness(ArmUsbMotionFaultFromResult(
+                    host.last_command_result), now_ms);
+            }
+            break;
+
+        case ARM_USB_TASK5_OPENING:
+            if (ArmUsbCommandCompleted(&host)) {
+                result = ArmUsbSubmitMove(action_x_mm, action_y_mm,
+                    ArmUsbGripperZForX(action_x_mm),
+                    ARM_USB_GRIPPER_Z_SPEED_MM_S, 0u, 0.0f);
+                if (result == ARM_COMMAND_OK) {
+                    ArmUsbSetState(ARM_USB_TASK5_DESCENDING, now_ms);
+                } else {
+                    ArmUsbFailBusiness(
+                        ArmUsbMotionFaultFromResult(result), now_ms);
+                }
+            } else if (ArmUsbCommandFailed(&host)) {
+                ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
+            }
+            break;
+
+        case ARM_USB_TASK5_DESCENDING:
+            if (ArmUsbCommandCompleted(&host)) {
+                result = ArmUsbSubmitToolAction(
+                    ARM_TOOL_ACTION_GRIPPER_CLOSE, 0.0f);
+                if (result == ARM_COMMAND_OK) {
+                    ArmUsbSetState(ARM_USB_TASK5_CLOSING, now_ms);
+                } else {
+                    ArmUsbFailBusiness(
+                        ArmUsbMotionFaultFromResult(result), now_ms);
+                }
+            } else if (ArmUsbCommandFailed(&host)) {
+                ArmUsbFailBusiness(MOTIONFAULT_IK_UNREACHABLE, now_ms);
+            }
+            break;
+
+        case ARM_USB_TASK5_CLOSING:
+            if (ArmUsbCommandCompleted(&host)) {
+                result = ArmUsbSubmitMove(action_x_mm, action_y_mm,
+                    ArmUsbTravelZForX(action_x_mm),
+                    ARM_USB_GRIPPER_Z_SPEED_MM_S, 0u, 0.0f);
+                if (result == ARM_COMMAND_OK) {
+                    ArmUsbSetState(ARM_USB_TASK5_RAISING, now_ms);
+                } else {
+                    ArmUsbFailBusiness(
+                        ArmUsbMotionFaultFromResult(result), now_ms);
+                }
+            } else if (ArmUsbCommandFailed(&host)) {
+                ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
+            }
+            break;
+
+        case ARM_USB_TASK5_RAISING:
+            if (ArmUsbCommandCompleted(&host)) {
+                ArmUsbSendCallback(5u, STATUS_END);
+                ArmUsbClearBusiness(now_ms);
+            } else if (ArmUsbCommandFailed(&host)) {
+                ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
+            }
+            break;
+
+        case ARM_USB_TASK6_DESCENDING:
+            if (ArmUsbCommandCompleted(&host)) {
+                result = ArmUsbSubmitToolAction(
+                    ARM_TOOL_ACTION_GRIPPER_OPEN, 0.0f);
+                if (result == ARM_COMMAND_OK) {
+                    ArmUsbSetState(ARM_USB_TASK6_OPENING, now_ms);
+                } else {
+                    ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
+                }
+            } else if (ArmUsbCommandFailed(&host)) {
+                ArmUsbFailBusiness(MOTIONFAULT_IK_UNREACHABLE, now_ms);
+            }
+            break;
+
+        case ARM_USB_TASK6_OPENING:
+            if (ArmUsbCommandCompleted(&host)) {
+                result = ArmUsbSubmitMove(action_x_mm, action_y_mm,
+                    ArmUsbTravelZForX(action_x_mm),
+                    ARM_USB_GRIPPER_Z_SPEED_MM_S, 0u, 0.0f);
+                if (result == ARM_COMMAND_OK) {
+                    ArmUsbSetState(ARM_USB_TASK6_RAISING, now_ms);
+                } else {
+                    ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
+                }
+            } else if (ArmUsbCommandFailed(&host)) {
+                ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
+            }
+            break;
+
+        case ARM_USB_TASK6_RAISING:
+            if (ArmUsbCommandCompleted(&host)) {
+                result = ArmUsbSubmitToolAction(
+                    ARM_TOOL_ACTION_GRIPPER_READY, 0.0f);
+                if (result == ARM_COMMAND_OK) {
+                    ArmUsbSetState(ARM_USB_TASK6_READYING, now_ms);
+                } else {
+                    ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
+                }
+            } else if (ArmUsbCommandFailed(&host)) {
+                ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
+            }
+            break;
+
+        case ARM_USB_TASK6_READYING:
+            if (ArmUsbCommandCompleted(&host)) {
+                ArmUsbSendCallback(6u, STATUS_END);
+                ArmUsbClearBusiness(now_ms);
+            } else if (ArmUsbCommandFailed(&host)) {
+                ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
             }
             break;
 
         case ARM_USB_STOP_CANCEL_PENDING:
             if (ArmUsbCommandCompleted(&host)) {
-                result = ArmUsbSubmitStopHome();
+                result = ArmUsbSubmitMove(ARM_USB_HOME_X_MM,
+                    ARM_USB_HOME_Y_MM, ARM_USB_HOME_Z_MM,
+                    ARM_USB_HOME_SPEED_MM_S, 0u, 0.0f);
                 if (result == ARM_COMMAND_OK) {
                     ArmUsbSetState(ARM_USB_STOP_HOME_RUNNING, now_ms);
                 } else {
-                    ArmUsbSendCallbackStatus(stop_task_id,
-                                             STATUS_FAULT_RETRY);
-                    ArmUsbClearActiveTracking();
-                    ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
-                    ArmUsbSetState(ARM_USB_ACTION_IDLE, now_ms);
+                    ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
                 }
-            } else if (ArmUsbCommandRejected(&host) ||
-                       ArmUsbCommandFailed(&host)) {
-                ArmUsbSendCallbackStatus(stop_task_id,
-                                         STATUS_FAULT_RETRY);
-                ArmUsbClearActiveTracking();
-                ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
-                ArmUsbSetState(ARM_USB_ACTION_IDLE, now_ms);
+            } else if (ArmUsbCommandFailed(&host)) {
+                ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
             }
             break;
 
         case ARM_USB_STOP_HOME_RUNNING:
             if (ArmUsbCommandCompleted(&host)) {
-                /* STOP要求先安全回HOME，再关闭电磁铁并通知上位机。 */
-                ArmToolSetMagnet(0u);
-                ArmUsbSendCallbackStatus(stop_task_id, STATUS_STOP);
+                result = ArmUsbSubmitToolAction(
+                    ARM_TOOL_ACTION_GRIPPER_OPEN, 0.0f);
+                if (result == ARM_COMMAND_OK) {
+                    ArmUsbSetState(ARM_USB_STOP_OPENING, now_ms);
+                } else {
+                    ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
+                }
+            } else if (ArmUsbCommandFailed(&host)) {
+                ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
+            }
+            break;
+
+        case ARM_USB_STOP_OPENING:
+            if (ArmUsbCommandCompleted(&host)) {
+                ArmUsbSendCallback(stop_task_id, STATUS_STOP);
                 active_task_id = 0u;
-                pending_task_end = 0u;
-                last_action_failed = 0u;
                 stop_safe_latched = 1u;
-                g_arm_usb_debug.active_task_id = 0u;
-                g_arm_usb_debug.pending_task_end = 0u;
-                g_arm_usb_debug.last_action_failed = 0u;
-                g_arm_usb_debug.stop_safe_latched = 1u;
-                ArmUsbClearActiveTracking();
-                ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
-                ArmUsbSetState(ARM_USB_ACTION_IDLE, now_ms);
-            } else if (ArmUsbCommandRejected(&host) ||
-                       ArmUsbCommandFailed(&host)) {
-                /* HOME失败时保持磁铁原状态，不误报STOP完成。 */
-                ArmUsbSendCallbackStatus(stop_task_id,
-                                         STATUS_FAULT_RETRY);
-                last_action_failed = 1u;
-                ArmUsbClearActiveTracking();
-                ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
-                ArmUsbSetState(ARM_USB_ACTION_IDLE, now_ms);
-            }
-            break;
-
-        case ARM_USB_MAGNET_ON_DESCENDING:
-            if (ArmUsbCommandCompleted(&host)) {
-                ArmUsbSetState(ARM_USB_MAGNET_ON_DWELL, now_ms);
-            } else if (ArmUsbCommandRejected(&host)) {
-                ArmUsbRejectActive(MOTIONFAULT_IK_UNREACHABLE, 1u,
-                                   now_ms);
+                ArmUsbClearBusiness(now_ms);
             } else if (ArmUsbCommandFailed(&host)) {
-                ArmUsbFailActive(
-                    ArmUsbFaultFromCommandResult(host.last_command_result),
-                    1u, ArmUsbCommandSettlingTimedOut(&host));
+                ArmUsbFailBusiness(MOTIONFAULT_TIMEOUT, now_ms);
             }
             break;
 
-        case ARM_USB_MAGNET_ON_DWELL:
-            g_arm_usb_debug.dwell_elapsed_ms = now_ms - state_tick;
-            if (g_arm_usb_debug.dwell_elapsed_ms <
-                ARM_USB_MAGNET_ACTION_DELAY_MS) {
-                break;
-            }
-            if (magnet_action_done == 0u && host.magnet_on == 0u) {
-                ArmToolSetMagnet(1u);
-                magnet_action_done = 1u;
-            }
-            if ((uint32_t)(now_ms - state_tick) >=
-                ARM_USB_MAGNET_ACTION_DELAY_MS +
-                ARM_USB_MAGNET_DWELL_MS) {
-                result = ArmUsbSubmitTipMove(action_x_mm, action_y_mm,
-                    ArmUsbDefaultZForX(action_x_mm),
-                    ARM_USB_MAGNET_Z_SPEED_MM_S,
-                    0u, 0.0f);
-                if (result == ARM_COMMAND_OK) {
-                    ArmUsbSetState(ARM_USB_MAGNET_ON_RAISING, now_ms);
+        case ARM_USB_TOOL_PITCH_RUNNING:
+            if (ArmUsbCommandCompleted(&host)) {
+                if (pending_tool_gripper_action == TOOL_GRIPPER_HOLD) {
+                    ArmUsbSendTool(active_tool_command_id,
+                        TOOLSTATE_COMPLETED, TOOLFAULT_NONE);
+                    ArmUsbClearBusiness(now_ms);
                 } else {
-                    ArmUsbRejectActive(
-                        ArmUsbFaultFromCommandResult(result), 1u,
-                        now_ms);
-                }
-            }
-            break;
+                    Arm_Tool_Action_e action =
+                        pending_tool_gripper_action == TOOL_GRIPPER_OPEN ?
+                        ARM_TOOL_ACTION_GRIPPER_OPEN :
+                        ARM_TOOL_ACTION_GRIPPER_CLOSE;
 
-        case ARM_USB_MAGNET_ON_RAISING:
-            if (ArmUsbCommandCompleted(&host)) {
-                ArmUsbCompleteActive(now_ms);
-            } else if (ArmUsbCommandRejected(&host)) {
-                ArmUsbRejectActive(MOTIONFAULT_IK_UNREACHABLE, 1u,
-                                   now_ms);
-            } else if (ArmUsbCommandFailed(&host)) {
-                ArmUsbFailActive(
-                    ArmUsbFaultFromCommandResult(host.last_command_result),
-                    1u, ArmUsbCommandSettlingTimedOut(&host));
-            }
-            break;
-
-        case ARM_USB_MAGNET_OFF_DESCENDING:
-            if (ArmUsbCommandCompleted(&host)) {
-                ArmUsbSetState(ARM_USB_MAGNET_OFF_DWELL, now_ms);
-            } else if (ArmUsbCommandRejected(&host)) {
-                ArmUsbRejectActive(MOTIONFAULT_IK_UNREACHABLE, 0u,
-                                   now_ms);
-            } else if (ArmUsbCommandFailed(&host)) {
-                ArmUsbFailActive(
-                    ArmUsbFaultFromCommandResult(host.last_command_result),
-                    0u, ArmUsbCommandSettlingTimedOut(&host));
-            }
-            break;
-
-        case ARM_USB_MAGNET_OFF_DWELL:
-            g_arm_usb_debug.dwell_elapsed_ms = now_ms - state_tick;
-            if (magnet_action_done == 0u) {
-                if (g_arm_usb_debug.dwell_elapsed_ms <
-                    ARM_USB_MAGNET_ACTION_DELAY_MS) {
-                    break;
-                }
-                ArmToolSetMagnet(0u);
-                magnet_action_done = 1u;
-                state_tick = now_ms;
-                g_arm_usb_debug.state_tick = now_ms;
-                g_arm_usb_debug.dwell_elapsed_ms = 0u;
-                break;
-            }
-            if ((uint32_t)(now_ms - state_tick) >=
-                ARM_USB_MAGNET_DWELL_MS) {
-                result = ArmUsbSubmitTipMove(action_x_mm, action_y_mm,
-                    ArmUsbDefaultZForX(action_x_mm),
-                    ARM_USB_MAGNET_Z_SPEED_MM_S,
-                    0u, 0.0f);
-                if (result == ARM_COMMAND_OK) {
-                    ArmUsbSetState(ARM_USB_MAGNET_OFF_RAISING, now_ms);
-                } else {
-                    ArmUsbRejectActive(
-                        ArmUsbFaultFromCommandResult(result), 0u,
-                        now_ms);
-                }
-            }
-            break;
-
-        case ARM_USB_MAGNET_OFF_RAISING:
-            if (magnet_off_reset_done == 0u) {
-                if (ArmUsbCommandCompleted(&host)) {
-                    result = ArmUsbSubmitServo2Reset();
-                    if (result == ARM_COMMAND_BUSY) {
-                        break;
-                    }
-                    if (result != ARM_COMMAND_OK) {
-                        ArmUsbRejectActive(
-                            ArmUsbFaultFromCommandResult(result), 0u,
-                            now_ms);
-                        break;
-                    }
-                    magnet_off_reset_done = 1u;
-                    magnet_off_reset_tick = now_ms;
-                    break;
-                }
-                if (ArmUsbCommandRejected(&host)) {
-                    ArmUsbRejectActive(MOTIONFAULT_IK_UNREACHABLE, 0u,
+                    result = ArmUsbSubmitToolAction(action, 0.0f);
+                    if (result == ARM_COMMAND_OK) {
+                        ArmUsbSetState(ARM_USB_TOOL_GRIPPER_RUNNING,
                                        now_ms);
-                } else if (ArmUsbCommandFailed(&host)) {
-                    ArmUsbFailActive(
-                        ArmUsbFaultFromCommandResult(
-                            host.last_command_result), 0u,
-                        ArmUsbCommandSettlingTimedOut(&host));
+                    } else {
+                        ArmUsbSendTool(active_tool_command_id,
+                            TOOLSTATE_FAILED,
+                            ArmUsbToolFaultFromResult(result));
+                        ArmUsbClearBusiness(now_ms);
+                    }
                 }
-            } else if (ArmUsbCommandCompleted(&host)) {
-                if ((uint32_t)(now_ms - magnet_off_reset_tick) <
-                    ARM_USB_YAW_MOVE_TIME_MS + ARM_USB_YAW_SETTLE_MS) {
-                    break;
-                }
-                g_arm_usb_debug.target_yaw_result = ARM_COMMAND_OK;
-                ArmUsbCompleteActive(now_ms);
-            } else if (ArmUsbCommandRejected(&host)) {
-                ArmUsbRejectActive(MOTIONFAULT_IK_UNREACHABLE, 0u,
-                                   now_ms);
             } else if (ArmUsbCommandFailed(&host)) {
-                ArmUsbFailActive(
-                    ArmUsbFaultFromCommandResult(host.last_command_result),
-                    0u, ArmUsbCommandSettlingTimedOut(&host));
+                ArmUsbSendTool(active_tool_command_id, TOOLSTATE_FAILED,
+                    ArmUsbToolFaultFromResult(host.last_command_result));
+                ArmUsbClearBusiness(now_ms);
+            }
+            break;
+
+        case ARM_USB_TOOL_GRIPPER_RUNNING:
+            if (ArmUsbCommandCompleted(&host)) {
+                ArmUsbSendTool(active_tool_command_id,
+                    TOOLSTATE_COMPLETED, TOOLFAULT_NONE);
+                ArmUsbClearBusiness(now_ms);
+            } else if (ArmUsbCommandFailed(&host)) {
+                ArmUsbSendTool(active_tool_command_id, TOOLSTATE_FAILED,
+                    ArmUsbToolFaultFromHost(&host));
+                ArmUsbClearBusiness(now_ms);
             }
             break;
 
         case ARM_USB_ACTION_FAILED:
             if (host.busy == 0u) {
-                active_arm_command_id = 0u;
-                ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
-                ArmUsbSetState(ARM_USB_ACTION_IDLE, now_ms);
+                ArmUsbClearBusiness(now_ms);
             }
             break;
 
@@ -1142,8 +899,6 @@ void ArmUsbBridgeTask(uint32_t now_ms)
                 host.fault_code == ARM_FAULT_NONE &&
                 last_action_failed == 0u) {
                 pending_task_end = 0u;
-                g_arm_usb_debug.pending_task_end = pending_task_end;
-                ArmUsbSetBusiness(ARM_USB_BUSINESS_IDLE);
                 (void)BuzzerStart(3000u);
             }
             break;
@@ -1158,4 +913,9 @@ void on_receive_TaskStatus(const Packet_TaskStatus *pkt)
 void on_receive_TargetControl(const Packet_TargetControl *pkt)
 {
     ArmUsbBridgeOnTargetControl(pkt);
+}
+
+void on_receive_ToolControl(const Packet_ToolControl *pkt)
+{
+    ArmUsbBridgeOnToolControl(pkt);
 }

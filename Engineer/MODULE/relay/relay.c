@@ -1,9 +1,5 @@
 #include "relay.h"
 #include "string.h"
-/* 用于保存所有的daemon instance */
-static Relay_Instance *relay_instances[RELAY_MAX_NUM];
-static uint8_t idx; // 用于记录当前注册的daemon数量
-
 Relay_Instance *RelayInit(Relay_Init_Config_s *relay){
 	Relay_Instance *config = (Relay_Instance *)malloc(sizeof(Relay_Instance));
 	memset(config,0,sizeof(Relay_Instance));

@@ -11,6 +11,7 @@
 
 typedef enum {
     ARM_CONTROL_POINT_WRIST_CENTER = 0,
+    /* 兼容保留名称；当前与WRIST_CENTER都表示ID1俯仰舵机轴心。 */
     ARM_CONTROL_POINT_TOOL_TIP
 } Arm_Control_Point_e;
 
@@ -76,12 +77,12 @@ typedef struct {
 typedef struct {
     Arm_Control_Point_e control_point;
     Arm_Move_Type_e move_type;
-    Arm_Position_s target_mm;
+    Arm_Position_s target_mm;  /* ID1俯仰舵机轴心目标，单位mm。 */
     float max_speed_mm_s;
-    uint8_t tool_pitch_valid;
-    float tool_pitch_deg;
-    uint8_t tool_yaw_valid;
-    float tool_yaw_deg;
+    uint8_t tool_pitch_valid; /* 0：锁存并保持当前绝对俯仰；非0：使用下字段。 */
+    float tool_pitch_deg;     /* 夹爪中心线的世界绝对俯仰角，单位deg。 */
+    uint8_t tool_yaw_valid;   /* 兼容保留；当前必须为0，否则返回UNSUPPORTED。 */
+    float tool_yaw_deg;       /* 兼容保留，不再控制ID2。 */
 } Arm_Command_Cartesian_s;
 
 typedef struct {
@@ -96,19 +97,18 @@ typedef struct {
 } Arm_Command_Realtime_s;
 
 typedef enum {
-    ARM_TOOL_ACTION_NONE = 0,
-    ARM_TOOL_ACTION_MAGNET_ON,
-    ARM_TOOL_ACTION_MAGNET_OFF,
-    ARM_TOOL_ACTION_SERVO1_ANGLE,
-    ARM_TOOL_ACTION_SERVO2_ANGLE,
-    ARM_TOOL_ACTION_SERVO2_WORLD_YAW,
-    ARM_TOOL_ACTION_RESET_DEFAULT
+    ARM_TOOL_ACTION_NONE = 0,       /* 不执行工具动作。 */
+    ARM_TOOL_ACTION_SET_PITCH,      /* 只调整ID1绝对俯仰。 */
+    ARM_TOOL_ACTION_GRIPPER_READY,  /* ID2回到默认位置550。 */
+    ARM_TOOL_ACTION_GRIPPER_OPEN,   /* ID2回到默认张开位置550。 */
+    ARM_TOOL_ACTION_GRIPPER_CLOSE,  /* ID2到630并启用堵转检测。 */
+    ARM_TOOL_ACTION_RESET_SAFE      /* 清除可恢复工具故障并回安全状态。 */
 } Arm_Tool_Action_e;
 
 typedef struct {
     Arm_Tool_Action_e action;
-    float servo1_deg;
-    float servo2_deg;
+    float pitch_deg;
+    uint8_t gripper_command;
 } Arm_Command_Tool_s;
 
 typedef union {
@@ -152,18 +152,24 @@ typedef struct {
 
     float q_feedback_deg[3];
     float q_target_deg[3];
-    Arm_Position_s position_mm;
-    Arm_Position_s target_position_mm;
+    Arm_Position_s position_mm;        /* 当前ID1舵机轴心坐标。 */
+    Arm_Position_s target_position_mm; /* 目标ID1舵机轴心坐标。 */
     uint8_t tool_ready;
-    uint8_t magnet_on;
     uint8_t servo_online[2];
-    float servo_target_deg[2];
     uint16_t servo_target_pos[2];
-    uint8_t tool_yaw_active;
-    float tool_yaw_target_deg;
-    Arm_Position_s wrist_center_mm;
+    float tool_pitch_target_deg;
+    float tool_pitch_feedback_deg;
+    uint16_t tool_pitch_servo_pos;
+    uint8_t gripper_state;
+    uint8_t gripper_target_state;
+    uint16_t gripper_target_pos;
+    uint16_t gripper_feedback_pos;
+    int16_t gripper_position_error;
+    uint8_t gripper_stall_candidate;
+    uint8_t gripper_stall_latched;
+    Arm_Position_s wrist_center_mm; /* ID1俯仰舵机轴心。 */
+    /* 兼容保留字段名；当前线协议语义同样为ID1俯仰舵机轴心。 */
     Arm_Position_s tool_tip_mm;
-    uint8_t tool_vertical_down_enabled;
     uint32_t tool_error_code;
     float trajectory_progress;
     float mos_temperature_c[3];

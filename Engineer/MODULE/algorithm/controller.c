@@ -17,7 +17,7 @@
 static void f_Trapezoid_Intergral(PID_Instance *pid)
 {
     // 计算梯形的面积,(上底+下底)*高/2
-    pid->ITerm = pid->Ki * ((pid->Err + pid->Last_Err) / 2.0) * pid->dt;
+    pid->ITerm = pid->Ki * ((pid->Err + pid->Last_Err) / 2.0f) * pid->dt;
 }
 
 // 变速积分(误差小时积分作用更强)

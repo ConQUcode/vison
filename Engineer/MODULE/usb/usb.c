@@ -381,26 +381,6 @@ static uint8_t RingBuffer_Read(uint8_t *data)
 }
 
 /**
- * @brief 预览环形缓冲区中的数据（不移动tail指针）
- * @param offset 偏移量
- * @param data 输出指针
- * @return 1:成功, 0:越界
- */
-static uint8_t RingBuffer_Peek(uint32_t offset, uint8_t *data)
-{
-    uint32_t count = (rb_head >= rb_tail) ? (rb_head - rb_tail) : (RING_BUFFER_SIZE - rb_tail + rb_head);
-    
-    if (offset >= count)
-    {
-        return 0;
-    }
-    
-    uint32_t index = (rb_tail + offset) % RING_BUFFER_SIZE;
-    *data = ring_buffer[index];
-    return 1;
-}
-
-/**
  * @brief USB数据解析任务
  * @note 建议在主循环或任务中周期性调用
  */
