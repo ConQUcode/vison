@@ -30,8 +30,11 @@ Engineer/MDK-ARM/*build*.txt
 # Codex、PDF渲染和误创建的本地临时目录
 .codex-tmp/
 .codex_tmp/
+.planning/
 tmp/
 ~/
+undefined/
+%SystemDrive%/
 tools/arm_path_replay/*.exe
 tools/arm_path_replay/*.csv
 tools/arm_path_replay/_tmp/

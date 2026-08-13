@@ -215,6 +215,11 @@
           <WinNumber>1</WinNumber>
           <ItemText>g_arm_servo_angle_debug</ItemText>
         </Ww>
+        <Ww>
+          <count>12</count>
+          <WinNumber>1</WinNumber>
+          <ItemText>g_fruit_usb_debug,0x0A</ItemText>
+        </Ww>
       </WatchWindow1>
       <WatchWindow2>
         <Ww>

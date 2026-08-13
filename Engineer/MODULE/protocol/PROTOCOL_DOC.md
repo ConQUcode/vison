@@ -1,5 +1,4 @@
-> 生成时间：2026-08-10T06:25:01+08:00
-# MCU ↔ ROS 串口通信协议文档
+# MCU ↔ ROS 通信协议文档
 
 > **Auto-generated** — 由 `scripts/codegen.py` 根据 `config/protocol.yaml` 生成，请勿手动修改。
 
@@ -14,7 +13,7 @@
 | 帧头字节 2         | `0xa5`       |
 | 校验算法           | `CRC8`       |
 | 强制握手           | `是`         |
-| 协议哈希（握手用） | `0x923FFDD9` |
+| 协议哈希（握手用） | `0x0EBAB184` |
 | 严格心跳模式       | `是`         |
 | 心跳超时时间       | `3000 ms`    |
 | 可靠传输重试间隔   | `100 ms`     |
@@ -41,10 +40,8 @@
 
 ### `Ack` — ID `0xfd`
 
-- **ROS 话题**：`auto_serial_bridge/system/ack`
-- **ROS 消息类型**：`std_msgs/msg/Int32MultiArray`
 - **数据段字节数（Len）**：`2`
-- **注意事项**：Framework ACK. Do not change this system message.
+- **注意事项**：框架内置：可靠消息的确认包，由协议层自动收发。
 
 | 字节偏移 | 字段名     | C 类型    | 字节数 |
 | :------: | :--------- | :-------- | :----: |
@@ -54,10 +51,8 @@
 
 ### `Heartbeat` — ID `0xfe`
 
-- **ROS 话题**：`auto_serial_bridge/system/heartbeat`
-- **ROS 消息类型**：`std_msgs/msg/UInt32`
 - **数据段字节数（Len）**：`4`
-- **注意事项**：Framework heartbeat. The peer returns the same count.
+- **注意事项**：框架内置：心跳包，对端原样回传 count。
 
 | 字节偏移 | 字段名   | C 类型     | 字节数 |
 | :------: | :------- | :--------- | :----: |
@@ -66,10 +61,8 @@
 
 ### `Handshake` — ID `0xff`
 
-- **ROS 话题**：`auto_serial_bridge/system/handshake`
-- **ROS 消息类型**：`std_msgs/msg/UInt32`
 - **数据段字节数（Len）**：`4`
-- **注意事项**：Framework handshake carrying the protocol hash.
+- **注意事项**：框架内置：握手包，携带协议哈希。
 - **默认生成行为**：`on_receive_Handshake()` 在收到匹配 `PROTOCOL_HASH` 的握手包后会自动调用 `send_Handshake(pkt)` 回包。
 
 | 字节偏移 | 字段名          | C 类型     | 字节数 |
@@ -80,45 +73,6 @@
 ---
 
 ## ROS → 电控（电控被动接收）
-
-### `Ack` — ID `0xfd`
-
-- **ROS 话题**：`auto_serial_bridge/system/ack`
-- **ROS 消息类型**：`std_msgs/msg/Int32MultiArray`
-- **数据段字节数（Len）**：`2`
-- **注意事项**：Framework ACK. Do not change this system message.
-
-| 字节偏移 | 字段名     | C 类型    | 字节数 |
-| :------: | :--------- | :-------- | :----: |
-|    0     | `acked_id` | `uint8_t` |   1    |
-|    1     | `ack_seq`  | `uint8_t` |   1    |
-|  **2**   | *(CRC8)*   | `uint8_t` |   1    |
-
-### `Heartbeat` — ID `0xfe`
-
-- **ROS 话题**：`auto_serial_bridge/system/heartbeat`
-- **ROS 消息类型**：`std_msgs/msg/UInt32`
-- **数据段字节数（Len）**：`4`
-- **注意事项**：Framework heartbeat. The peer returns the same count.
-- **默认生成行为**：`on_receive_Heartbeat()` 会自动调用 `send_Heartbeat(pkt)`，按原样回同一个 `count` 作为 ACK。
-
-| 字节偏移 | 字段名   | C 类型     | 字节数 |
-| :------: | :------- | :--------- | :----: |
-|    0     | `count`  | `uint32_t` |   4    |
-|  **4**   | *(CRC8)* | `uint8_t`  |   1    |
-
-### `Handshake` — ID `0xff`
-
-- **ROS 话题**：`auto_serial_bridge/system/handshake`
-- **ROS 消息类型**：`std_msgs/msg/UInt32`
-- **数据段字节数（Len）**：`4`
-- **注意事项**：Framework handshake carrying the protocol hash.
-- **默认生成行为**：`on_receive_Handshake()` 在收到匹配 `PROTOCOL_HASH` 的握手包后会自动调用 `send_Handshake(pkt)` 回包。
-
-| 字节偏移 | 字段名          | C 类型     | 字节数 |
-| :------: | :-------------- | :--------- | :----: |
-|    0     | `protocol_hash` | `uint32_t` |   4    |
-|  **4**   | *(CRC8)*        | `uint8_t`  |   1    |
 
 ### `FruitDetection` — ID `0x10`
 
@@ -148,6 +102,39 @@
 |    0     | `fruit_id` | `uint8_t` |   1    |
 |    1     | `status`   | `uint8_t` |   1    |
 |  **2**   | *(CRC8)*   | `uint8_t` |   1    |
+
+### `Ack` — ID `0xfd`
+
+- **数据段字节数（Len）**：`2`
+- **注意事项**：框架内置：可靠消息的确认包，由协议层自动收发。
+
+| 字节偏移 | 字段名     | C 类型    | 字节数 |
+| :------: | :--------- | :-------- | :----: |
+|    0     | `acked_id` | `uint8_t` |   1    |
+|    1     | `ack_seq`  | `uint8_t` |   1    |
+|  **2**   | *(CRC8)*   | `uint8_t` |   1    |
+
+### `Heartbeat` — ID `0xfe`
+
+- **数据段字节数（Len）**：`4`
+- **注意事项**：框架内置：心跳包，对端原样回传 count。
+- **默认生成行为**：`on_receive_Heartbeat()` 会自动调用 `send_Heartbeat(pkt)`，按原样回同一个 `count` 作为 ACK。
+
+| 字节偏移 | 字段名   | C 类型     | 字节数 |
+| :------: | :------- | :--------- | :----: |
+|    0     | `count`  | `uint32_t` |   4    |
+|  **4**   | *(CRC8)* | `uint8_t`  |   1    |
+
+### `Handshake` — ID `0xff`
+
+- **数据段字节数（Len）**：`4`
+- **注意事项**：框架内置：握手包，携带协议哈希。
+- **默认生成行为**：`on_receive_Handshake()` 在收到匹配 `PROTOCOL_HASH` 的握手包后会自动调用 `send_Handshake(pkt)` 回包。
+
+| 字节偏移 | 字段名          | C 类型     | 字节数 |
+| :------: | :-------------- | :--------- | :----: |
+|    0     | `protocol_hash` | `uint32_t` |   4    |
+|  **4**   | *(CRC8)*        | `uint8_t`  |   1    |
 
 ---
 

@@ -391,6 +391,7 @@ static uint8_t AppArmFlowPlaceProfileValid(
         profile->release_pitch_wait_timeout_ms == 0u ||
         !AppArmFlowPoseValid(profile->safe_q_deg) ||
         !AppArmFlowPoseValid(profile->release_q_deg) ||
+        !AppArmFlowPoseValid(profile->release_clearance_q_deg) ||
         !AppArmFlowPoseValid(profile->restore_q_deg)) {
         return 0u;
     }
@@ -413,8 +414,10 @@ static uint8_t AppArmFlowPlaceProfileValid(
     }
     if (fabsf(profile->release_q_deg[ARM_JOINT_BASE_YAW] -
               profile->rotate_to_place_target_q1_deg) > 0.01f ||
+        fabsf(profile->release_clearance_q_deg[ARM_JOINT_BASE_YAW] -
+              profile->rotate_to_place_target_q1_deg) > 0.01f ||
         fabsf(profile->restore_q_deg[ARM_JOINT_BASE_YAW] -
-              profile->rotate_to_place_target_q1_deg) > 0.01f) {
+              profile->rotate_to_front_target_q1_deg) > 0.01f) {
         return 0u;
     }
     to_waypoint_delta = profile->rotate_to_place_waypoint_q1_deg -
@@ -422,7 +425,7 @@ static uint8_t AppArmFlowPlaceProfileValid(
     to_target_delta = profile->rotate_to_place_target_q1_deg -
         profile->rotate_to_place_waypoint_q1_deg;
     front_waypoint_delta = profile->rotate_to_front_waypoint_q1_deg -
-        profile->restore_q_deg[ARM_JOINT_BASE_YAW];
+        profile->release_clearance_q_deg[ARM_JOINT_BASE_YAW];
     front_target_delta = profile->rotate_to_front_target_q1_deg -
         profile->rotate_to_front_waypoint_q1_deg;
     return fabsf(to_waypoint_delta) > 0.01f &&
@@ -647,22 +650,26 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
         if (AppArmFlowCommandFinished(
                 host, g_app_arm_pick_place_test_debug.active_command_id,
                 now_ms)) {
-            /*
-             * 释放反馈一确认就在本周期提交准备归位姿态，不再经过单独的
-             * SUBMIT状态和额外调度等待；大臂、小臂仍保持同步运动。
-             */
-            if (AppArmFlowSubmitJoint(
-                    1u, app_place_profile.restore_q_deg[ARM_JOINT_BASE_YAW],
-                    1u, app_place_profile.restore_q_deg[ARM_JOINT_SHOULDER],
-                    1u, app_place_profile.restore_q_deg[ARM_JOINT_ELBOW],
-                    now_ms)) {
-                AppArmFlowSetPlaceStep(
-                    APP_ARM_PLACE_STEP_WAIT_RESTORE_TRANSFER, now_ms);
-            }
+            AppArmFlowSetPlaceStep(
+                APP_ARM_PLACE_STEP_SUBMIT_RELEASE_CLEARANCE, now_ms);
         }
         break;
 
-    case APP_ARM_PLACE_STEP_WAIT_RESTORE_TRANSFER:
+    case APP_ARM_PLACE_STEP_SUBMIT_RELEASE_CLEARANCE:
+        if (AppArmFlowSubmitJoint(
+                1u, app_place_profile.release_clearance_q_deg[
+                    ARM_JOINT_BASE_YAW],
+                1u, app_place_profile.release_clearance_q_deg[
+                    ARM_JOINT_SHOULDER],
+                1u, app_place_profile.release_clearance_q_deg[
+                    ARM_JOINT_ELBOW],
+                now_ms)) {
+            AppArmFlowSetPlaceStep(
+                APP_ARM_PLACE_STEP_WAIT_RELEASE_CLEARANCE, now_ms);
+        }
+        break;
+
+    case APP_ARM_PLACE_STEP_WAIT_RELEASE_CLEARANCE:
         if (AppArmFlowCommandFinished(
                 host, g_app_arm_pick_place_test_debug.active_command_id,
                 now_ms)) {
@@ -681,6 +688,26 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
         break;
 
     case APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_FRONT:
+        if (AppArmFlowCommandFinished(
+                host, g_app_arm_pick_place_test_debug.active_command_id,
+                now_ms)) {
+            AppArmFlowSetPlaceStep(
+                APP_ARM_PLACE_STEP_SUBMIT_RESTORE_TRANSFER, now_ms);
+        }
+        break;
+
+    case APP_ARM_PLACE_STEP_SUBMIT_RESTORE_TRANSFER:
+        if (AppArmFlowSubmitJoint(
+                1u, app_place_profile.restore_q_deg[ARM_JOINT_BASE_YAW],
+                1u, app_place_profile.restore_q_deg[ARM_JOINT_SHOULDER],
+                1u, app_place_profile.restore_q_deg[ARM_JOINT_ELBOW],
+                now_ms)) {
+            AppArmFlowSetPlaceStep(
+                APP_ARM_PLACE_STEP_WAIT_RESTORE_TRANSFER, now_ms);
+        }
+        break;
+
+    case APP_ARM_PLACE_STEP_WAIT_RESTORE_TRANSFER:
         if (AppArmFlowCommandFinished(
                 host, g_app_arm_pick_place_test_debug.active_command_id,
                 now_ms)) {

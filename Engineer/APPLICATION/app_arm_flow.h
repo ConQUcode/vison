@@ -10,7 +10,8 @@
  *   够水果（ID1相对约-41.5deg），绝对俯仰+坐标IK对该姿态不可达，
  *   故不走工具中心直线轨迹；工具中心坐标仅用于Watch误差显示。
  * - PlaceFlow：显式profile关节控制。转移姿态、底座引导旋转到后方、
- *   固定释放姿态、张开夹爪，再恢复姿态并转回前方。
+ *   固定释放姿态、张开夹爪、小臂上抬净空、底座回前方，最后恢复
+ *   前方转运姿态。
  *
  * 同一时刻只允许一个子流程活动；任一命令失败后锁存FAILED原位保持，
  * 不自动重试，与旧抓放测试行为一致。
@@ -71,10 +72,13 @@ typedef enum {
     APP_ARM_PLACE_STEP_WAIT_RELEASE_POSE,
     APP_ARM_PLACE_STEP_WAIT_RELEASE_PITCH,     /* 确认ID1反馈到位后才允许释放。 */
     APP_ARM_PLACE_STEP_SUBMIT_OPEN,            /* 夹爪张开释放。 */
-    APP_ARM_PLACE_STEP_WAIT_OPEN,              /* 完成当周期立即提交恢复姿态。 */
-    APP_ARM_PLACE_STEP_WAIT_RESTORE_TRANSFER,
+    APP_ARM_PLACE_STEP_WAIT_OPEN,
+    APP_ARM_PLACE_STEP_SUBMIT_RELEASE_CLEARANCE, /* ID2释放后小臂上抬。 */
+    APP_ARM_PLACE_STEP_WAIT_RELEASE_CLEARANCE,
     APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_FRONT, /* 沿本次抓取侧返回前方。 */
     APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_FRONT,
+    APP_ARM_PLACE_STEP_SUBMIT_RESTORE_TRANSFER,
+    APP_ARM_PLACE_STEP_WAIT_RESTORE_TRANSFER,
     APP_ARM_PLACE_STEP_DONE,
     APP_ARM_PLACE_STEP_FAILED
 } App_Arm_Place_Step_e;
@@ -101,7 +105,7 @@ typedef struct {
 } App_Arm_Pick_Target_s;
 
 /**
- * 单个已实测放置策略。三组q均为完整三轴关节位姿；两个waypoint显式
+ * 单个已实测放置策略。四组q均为完整三轴关节位姿；两个waypoint显式
  * 约束底座绕行方向。未实测区域必须保持configured=0，禁止复用A区。
  */
 typedef struct {
@@ -113,6 +117,7 @@ typedef struct {
     float release_q_deg[3];
     float release_tool_relative_pitch_deg;
     uint32_t release_pitch_wait_timeout_ms;
+    float release_clearance_q_deg[3];
     float restore_q_deg[3];
     float rotate_to_front_waypoint_q1_deg;
     float rotate_to_front_target_q1_deg;

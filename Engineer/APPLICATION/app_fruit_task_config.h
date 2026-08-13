@@ -39,6 +39,8 @@
 #define APP_FRUIT_A_TRANSFER_Q3_DEG                       (-100.0f)
 #define APP_FRUIT_A_RELEASE_Q2_DEG                         120.0f
 #define APP_FRUIT_A_RELEASE_Q3_DEG                        (-70.0f)
+/* ID2张开后保持大臂不动，小臂绝对俯仰由+10deg再上抬到+20deg。 */
+#define APP_FRUIT_A_RELEASE_CLEARANCE_Q3_DEG              (-80.0f)
 #define APP_FRUIT_A_RELEASE_TOOL_RELATIVE_PITCH_DEG       (-45.0f)
 #define APP_FRUIT_A_RELEASE_PITCH_WAIT_TIMEOUT_MS          1500u
 
