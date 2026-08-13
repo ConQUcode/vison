@@ -6,7 +6,7 @@
  * @author  modified by Bi Kaixiang
  * @version V1.2.0
  * @date    2022/3/8
- * @brief
+ * @brief Cortex-M DWT 周期计数、高精度时间差和延时接口。
  ******************************************************************************
  * @attention
  *

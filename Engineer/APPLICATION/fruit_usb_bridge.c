@@ -1,4 +1,11 @@
+/**
+ * @file fruit_usb_bridge.c
+ * @brief 保存上位机水果识别快照；当前只供 Watch 观察，不控制执行机构。
+ */
+
 #include "fruit_usb_bridge.h"
+
+#include "protocol_runtime.h"
 
 #include <string.h>
 
@@ -13,7 +20,8 @@ static void FruitUsbBridgeInvalidate(void)
     g_fruit_usb_debug.result_valid = 0u;
 }
 
-static void FruitUsbBridgeSyncSession(const Protocol_Debug_s *protocol)
+static void FruitUsbBridgeSyncSession(
+    const Protocol_Runtime_Debug_s *protocol)
 {
     if (protocol == NULL || protocol->session_count == last_protocol_session) {
         return;
@@ -32,7 +40,7 @@ void FruitUsbBridgeInit(void)
 
 void FruitUsbBridgeTask(uint32_t now_ms)
 {
-    const Protocol_Debug_s *protocol = protocol_get_debug();
+    const Protocol_Runtime_Debug_s *protocol = ProtocolRuntimeGetDebug();
 
     (void)now_ms;
     if (protocol == NULL) {
@@ -63,8 +71,8 @@ uint8_t FruitUsbBridgeGetLatest(Fruit_Detection_s *result)
     }
     *result = latest_detection;
     valid = latest_detection.valid != 0u &&
-        protocol_connection_ready() != 0u &&
-        protocol_link_is_online() != 0u;
+        ProtocolRuntimeConnectionReady() != 0u &&
+        ProtocolRuntimeLinkOnline() != 0u;
     if (valid == 0u) {
         result->valid = 0u;
     }
@@ -73,10 +81,12 @@ uint8_t FruitUsbBridgeGetLatest(Fruit_Detection_s *result)
 
 void FruitUsbBridgeOnDetection(const Packet_FruitDetection *packet)
 {
-    const Protocol_Debug_s *protocol = protocol_get_debug();
-    uint32_t now_ms = protocol_get_time_ms();
+    const Protocol_Runtime_Debug_s *protocol = ProtocolRuntimeGetDebug();
+    uint32_t now_ms = ProtocolRuntimeNowMs();
 
-    if (packet == NULL) {
+    if (packet == NULL ||
+        ProtocolRuntimeConnectionReady() == 0u ||
+        ProtocolRuntimeLinkOnline() == 0u) {
         g_fruit_usb_debug.invalid_count++;
         FruitUsbBridgeInvalidate();
         return;

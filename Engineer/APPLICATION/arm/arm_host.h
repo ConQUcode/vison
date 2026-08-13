@@ -1,3 +1,8 @@
+/**
+ * @file arm_host.h
+ * @brief 机械臂与上位机桥之间的稳定命令和状态数据结构。
+ */
+
 #ifndef __ARM_HOST_H__
 #define __ARM_HOST_H__
 
@@ -10,9 +15,10 @@
  */
 
 typedef enum {
-    ARM_CONTROL_POINT_WRIST_CENTER = 0,
-    /* 兼容保留名称；当前与WRIST_CENTER都表示ID1俯仰舵机轴心。 */
-    ARM_CONTROL_POINT_TOOL_TIP
+    ARM_CONTROL_POINT_WRIST_CENTER = 0, /* ID1俯仰舵机输出轴中心。 */
+    ARM_CONTROL_POINT_TOOL_CENTER,      /* 夹爪中心，正式业务控制点。 */
+    /* 兼容旧源码名称；线值与TOOL_CENTER相同，不新增协议语义。 */
+    ARM_CONTROL_POINT_TOOL_TIP = ARM_CONTROL_POINT_TOOL_CENTER
 } Arm_Control_Point_e;
 
 typedef enum {
@@ -72,12 +78,19 @@ typedef struct {
 typedef struct {
     Arm_Move_Type_e move_type;
     float q_deg[3];
+    /* 可选路径引导点；只改变经过方向，不在该点停车或重新提交命令。 */
+    uint8_t waypoint_valid;
+    float waypoint_q_deg[3];
+    /* 非0时，关节轨迹同步把ID1移动到相对小臂的指定角度。 */
+    uint8_t tool_relative_pitch_valid;
+    float tool_relative_pitch_deg;
 } Arm_Command_Joint_s;
 
 typedef struct {
     Arm_Control_Point_e control_point;
     Arm_Move_Type_e move_type;
-    Arm_Position_s target_mm;  /* ID1俯仰舵机轴心目标，单位mm。 */
+    /* 目标坐标单位mm；具体是ID1轴心或夹爪中心由control_point决定。 */
+    Arm_Position_s target_mm;
     float max_speed_mm_s;
     uint8_t tool_pitch_valid; /* 0：锁存并保持当前绝对俯仰；非0：使用下字段。 */
     float tool_pitch_deg;     /* 夹爪中心线的世界绝对俯仰角，单位deg。 */
@@ -101,7 +114,7 @@ typedef enum {
     ARM_TOOL_ACTION_SET_PITCH,      /* 只调整ID1绝对俯仰。 */
     ARM_TOOL_ACTION_GRIPPER_READY,  /* ID2回到默认位置550。 */
     ARM_TOOL_ACTION_GRIPPER_OPEN,   /* ID2回到默认张开位置550。 */
-    ARM_TOOL_ACTION_GRIPPER_CLOSE,  /* ID2到630并启用堵转检测。 */
+    ARM_TOOL_ACTION_GRIPPER_CLOSE,  /* ID2到660并启用堵转及分级卸力。 */
     ARM_TOOL_ACTION_RESET_SAFE      /* 清除可恢复工具故障并回安全状态。 */
 } Arm_Tool_Action_e;
 
@@ -153,7 +166,8 @@ typedef struct {
     float q_feedback_deg[3];
     float q_target_deg[3];
     Arm_Position_s position_mm;        /* 当前ID1舵机轴心坐标。 */
-    Arm_Position_s target_position_mm; /* 目标ID1舵机轴心坐标。 */
+    /* 当前运动目标；坐标语义由提交命令的control_point决定。 */
+    Arm_Position_s target_position_mm;
     uint8_t tool_ready;
     uint8_t servo_online[2];
     uint16_t servo_target_pos[2];
@@ -167,9 +181,8 @@ typedef struct {
     int16_t gripper_position_error;
     uint8_t gripper_stall_candidate;
     uint8_t gripper_stall_latched;
-    Arm_Position_s wrist_center_mm; /* ID1俯仰舵机轴心。 */
-    /* 兼容保留字段名；当前线协议语义同样为ID1俯仰舵机轴心。 */
-    Arm_Position_s tool_tip_mm;
+    Arm_Position_s wrist_center_mm; /* ID1俯仰舵机输出轴中心。 */
+    Arm_Position_s tool_tip_mm;     /* 按配置工具长度计算的夹爪中心。 */
     uint32_t tool_error_code;
     float trajectory_progress;
     float mos_temperature_c[3];

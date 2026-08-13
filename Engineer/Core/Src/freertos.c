@@ -25,20 +25,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "Test.h"
-#if HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY == 0u
-#include "usb.h"
-#include "daemon.h"
-#include "buzzer.h"
-#include "protocol.h"
-#endif
-#if CHASSIS_ONE_METER_TEST_ONLY != 0u
-#include "chassis.h"
-#include "ins_task.h"
-#endif
-#if APPLICATION_ARM_RUN_ENABLE != 0u
-#include "fruit_usb_bridge.h"
-#endif
+#include "app_runtime.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -63,7 +50,8 @@
 osThreadId ImuTaskHandle;
 osThreadId ChassisTaskHandle;
 osThreadId UsbTaskHandle;
-osThreadId Catch_TaskHandle;
+osThreadId ArmControlTaskHandle;
+osThreadId MotorControlTaskHandle;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -72,8 +60,9 @@ osThreadId Catch_TaskHandle;
 
 void ImuTask_f(void const * argument);
 void ChassisTask_f(void const * argument);
-void Usb_f(void const * argument);
-void Start_catch(void const * argument);
+void UsbTask_f(void const * argument);
+void ArmControlTask_f(void const * argument);
+void MotorControlTask_f(void const * argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -130,12 +119,16 @@ void MX_FREERTOS_Init(void) {
   ChassisTaskHandle = osThreadCreate(osThread(ChassisTask), NULL);
 
   /* definition and creation of UsbTask */
-  osThreadDef(UsbTask, Usb_f, osPriorityAboveNormal, 0, 512);
+  osThreadDef(UsbTask, UsbTask_f, osPriorityAboveNormal, 0, 512);
   UsbTaskHandle = osThreadCreate(osThread(UsbTask), NULL);
 
-  /* definition and creation of Catch_Task */
-  osThreadDef(Catch_Task, Start_catch, osPriorityIdle, 0, 1024);
-  Catch_TaskHandle = osThreadCreate(osThread(Catch_Task), NULL);
+  /* definition and creation of ArmControlTask */
+  osThreadDef(ArmControlTask, ArmControlTask_f, osPriorityAboveNormal, 0, 512);
+  ArmControlTaskHandle = osThreadCreate(osThread(ArmControlTask), NULL);
+
+  /* definition and creation of MotorControlTask */
+  osThreadDef(MotorControlTask, MotorControlTask_f, osPriorityHigh, 0, 256);
+  MotorControlTaskHandle = osThreadCreate(osThread(MotorControlTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -152,17 +145,11 @@ void MX_FREERTOS_Init(void) {
 /* USER CODE END Header_ImuTask_f */
 void ImuTask_f(void const * argument)
 {
-  /* init code for USB_DEVICE */
-  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN ImuTask_f */
   /* Infinite loop */
   for(;;)
   {
-#if CHASSIS_ONE_METER_TEST_ONLY != 0u
-    /* BMI088读取和EKF解算固定由本任务以1 kHz运行。 */
-    INS_Task();
-    ChassisNotifyImuUpdate(HAL_GetTick());
-#endif
+    AppImuTask(HAL_GetTick());
     osDelay(1);
   }
   /* USER CODE END ImuTask_f */
@@ -179,65 +166,73 @@ void ChassisTask_f(void const * argument)
 {
   /* USER CODE BEGIN ChassisTask_f */
   /* Infinite loop */
-  for(;;){
-//  { HAL_GPIO_WritePin(GPIOC,GPIO_PIN_8,GPIO_PIN_SET);
-		all_cmd_Task();
+  for(;;)
+  {
+    AppChassisTask(HAL_GetTick());
     osDelay(1);
   }
   /* USER CODE END ChassisTask_f */
 }
 
-/* USER CODE BEGIN Header_Usb_f */
+/* USER CODE BEGIN Header_UsbTask_f */
 /**
 * @brief Function implementing the UsbTask thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_Usb_f */
-void Usb_f(void const * argument)
+/* USER CODE END Header_UsbTask_f */
+void UsbTask_f(void const * argument)
 {
-  /* USER CODE BEGIN Usb_f */
-#if HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY == 0u
-  uint32_t last_daemon_tick = 0u;
-#endif
+  /* USER CODE BEGIN UsbTask_f */
+  /* USB设备只在通信任务中初始化一次，避免阻塞IMU任务启动。 */
+  MX_USB_DEVICE_Init();
   /* Infinite loop */
   for(;;)
   {
-#if HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY == 0u
-		uint32_t now_ms = HAL_GetTick();
-#if APPLICATION_ARM_RUN_ENABLE != 0u
-			USB_ProcessTask();
-			USB_TxTask();
-			protocol_tick(now_ms);
-			FruitUsbBridgeTask(now_ms);
-#endif
-			BuzzerTask(now_ms);
-		if ((uint32_t)(now_ms - last_daemon_tick) >= 10u) {
-			last_daemon_tick = now_ms;
-			DaemonTask();
-		}
-#endif
+    AppUsbTask(HAL_GetTick());
     osDelay(1);
   }
-  /* USER CODE END Usb_f */
+  /* USER CODE END UsbTask_f */
 }
 
-/* USER CODE BEGIN Header_Start_catch */
+/* USER CODE BEGIN Header_ArmControlTask_f */
 /**
-* @brief Function implementing the Catch_Task thread.
+* @brief Function implementing the ArmControlTask thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_Start_catch */
-void Start_catch(void const * argument)
+/* USER CODE END Header_ArmControlTask_f */
+void ArmControlTask_f(void const * argument)
 {
-  /* USER CODE BEGIN Start_catch */
+  /* USER CODE BEGIN ArmControlTask_f */
   /* Infinite loop */
   for(;;)
   {
+    AppArmTask(HAL_GetTick());
     osDelay(1);
   }
-  /* USER CODE END Start_catch */
+  /* USER CODE END ArmControlTask_f */
+}
+
+/* USER CODE BEGIN Header_MotorControlTask_f */
+/**
+* @brief Function implementing the MotorControlTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_MotorControlTask_f */
+void MotorControlTask_f(void const * argument)
+{
+  /* USER CODE BEGIN MotorControlTask_f */
+  TickType_t last_wake_tick = xTaskGetTickCount();
+
+  /* 达妙与DJI周期发送的唯一任务所有者，使用绝对延时保持1 kHz。 */
+  for(;;)
+  {
+    AppMotorControlTask(HAL_GetTick());
+    vTaskDelayUntil(&last_wake_tick, pdMS_TO_TICKS(1));
+  }
+  /* USER CODE END MotorControlTask_f */
 }
 
 /* Private application code --------------------------------------------------*/

@@ -1,3 +1,8 @@
+/**
+ * @file buzzer.c
+ * @brief 蜂鸣器非阻塞定时控制及 Watch 统计。
+ */
+
 #include "buzzer.h"
 
 #include "tim.h"

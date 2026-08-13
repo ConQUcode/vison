@@ -1,4 +1,11 @@
+/**
+ * @file arm_kinematics.c
+ * @brief 以 ID1 俯仰舵机轴心为末端点的三自由度机械臂 FK/IK。
+ */
+
 #include "arm_kinematics.h"
+
+#include "arm_tool.h"
 
 #include "math.h"
 #include "string.h"
@@ -7,6 +14,7 @@
 #define ARM_KIN_DEG_TO_RAD            (ARM_KIN_PI / 180.0f)
 #define ARM_KIN_RAD_TO_DEG            (180.0f / ARM_KIN_PI)
 #define ARM_KIN_EPSILON               0.0001f
+#define ARM_TOOL_IK_BASE_DIRECTION_TOLERANCE_DEG 0.5f
 #define ARM_KIN_LIMIT_EPSILON_DEG     0.001f
 
 /*
@@ -93,12 +101,16 @@ uint8_t ArmAutoPoseIsSafe(const float q_deg[3])
     if (!ArmJointPoseWithinSoftLimits(q_deg)) {
         return 0u;
     }
-    return q_deg[0] >= ARM_AUTO_Q1_MIN_DEG &&
-           q_deg[0] <= ARM_AUTO_Q1_MAX_DEG &&
-           q_deg[1] >= ARM_AUTO_Q2_MIN_DEG &&
-           q_deg[1] <= ARM_AUTO_Q2_MAX_DEG &&
-           q_deg[2] >= ARM_AUTO_Q3_MIN_DEG &&
-           q_deg[2] <= ARM_AUTO_Q3_MAX_DEG;
+    /*
+     * 自动区域与软限位必须使用同一数值容差。圆弧端点理论上为q1=90deg，
+     * 但float三角函数会产生约1e-5deg误差；无容差复查会把边界合法点误拒。
+     */
+    return q_deg[0] >= ARM_AUTO_Q1_MIN_DEG - ARM_LIMIT_TOLERANCE_DEG &&
+           q_deg[0] <= ARM_AUTO_Q1_MAX_DEG + ARM_LIMIT_TOLERANCE_DEG &&
+           q_deg[1] >= ARM_AUTO_Q2_MIN_DEG - ARM_LIMIT_TOLERANCE_DEG &&
+           q_deg[1] <= ARM_AUTO_Q2_MAX_DEG + ARM_LIMIT_TOLERANCE_DEG &&
+           q_deg[2] >= ARM_AUTO_Q3_MIN_DEG - ARM_LIMIT_TOLERANCE_DEG &&
+           q_deg[2] <= ARM_AUTO_Q3_MAX_DEG + ARM_LIMIT_TOLERANCE_DEG;
 }
 
 void ArmForwardKinematics3DOF(float q1_deg,
@@ -165,9 +177,21 @@ uint8_t ArmKinematicsSelfTest(float *error_mm)
     return isfinite(error) && error <= 0.01f;
 }
 
-Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
-                                         const float seed_q_deg[3],
-                                         Arm_IK_Result_s *result)
+/*
+ * 三自由度逆解的统一实现。
+ * 普通腕部轴心命令不限制底座方向；工具中心命令在反算117 mm偏移后，
+ * 必须把q1限制在同一工具径向方向，否则靠近底座轴线时可能选中相反
+ * 径向分支，导致一个实际可达的工具中心点被误判为逆解失败。
+ */
+static Arm_IK_Status_e ArmInverseKinematics3DOFInternal(
+    const Arm_Position_s *target,
+    const float seed_q_deg[3],
+    uint8_t base_direction_constraint_valid,
+    float required_base_direction_deg,
+    float base_direction_tolerance_deg,
+    float all_q_deg[ARM_TOOL_CENTER_IK_MAX_CANDIDATES][3],
+    uint8_t *all_count,
+    Arm_IK_Result_s *result)
 {
     float rho;
     float z_planar;
@@ -182,10 +206,17 @@ Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
         return ARM_IK_INVALID_ARGUMENT;
     }
     memset(result, 0, sizeof(*result));
+    if (all_count != NULL) {
+        *all_count = 0u;
+    }
     if (target == NULL || seed_q_deg == NULL ||
         !isfinite(target->x_mm) || !isfinite(target->y_mm) ||
         !isfinite(target->z_mm) || !isfinite(seed_q_deg[0]) ||
-        !isfinite(seed_q_deg[1]) || !isfinite(seed_q_deg[2])) {
+        !isfinite(seed_q_deg[1]) || !isfinite(seed_q_deg[2]) ||
+        (base_direction_constraint_valid != 0u &&
+         (!isfinite(required_base_direction_deg) ||
+          !isfinite(base_direction_tolerance_deg) ||
+          base_direction_tolerance_deg < 0.0f))) {
         result->status = ARM_IK_INVALID_ARGUMENT;
         return result->status;
     }
@@ -264,6 +295,18 @@ Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
             candidate[0] = q1_deg;
             candidate[1] = q2_rad * ARM_KIN_RAD_TO_DEG;
             candidate[2] = ArmElbowMathToMechanicalDeg(q3_math_deg);
+            /*
+             * 约束必须在候选枚举阶段执行，不能靠修改seed权重间接选择。
+             * 同一个腕部点的正/负径向分支相差约180deg；工具偏移使用哪
+             * 个方向反算，就只允许该方向对应的q1候选继续参与限位检查。
+             */
+            if (base_direction_constraint_valid != 0u &&
+                fabsf(ArmKinematicsAngleDifference(
+                    candidate[ARM_JOINT_BASE_YAW],
+                    required_base_direction_deg)) >
+                    base_direction_tolerance_deg) {
+                continue;
+            }
             if (!ArmJointPoseWithinSoftLimits(candidate)) {
                 continue;
             }
@@ -273,6 +316,12 @@ Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
             }
 
             result->candidate_count++;
+            if (all_q_deg != NULL && all_count != NULL &&
+                *all_count < ARM_TOOL_CENTER_IK_MAX_CANDIDATES) {
+                memcpy(all_q_deg[*all_count], candidate,
+                       sizeof(all_q_deg[*all_count]));
+                (*all_count)++;
+            }
             score = ArmKinematicsCandidateScore(candidate, seed_q_deg);
             if (!isfinite(score)) {
                 result->status = ARM_IK_NUMERICAL_ERROR;
@@ -310,6 +359,184 @@ Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
         result->status = ARM_IK_NUMERICAL_ERROR;
         return result->status;
     }
+    result->status = ARM_IK_OK;
+    return result->status;
+}
+
+Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
+                                         const float seed_q_deg[3],
+                                         Arm_IK_Result_s *result)
+{
+    return ArmInverseKinematics3DOFInternal(target, seed_q_deg,
+                                             0u, 0.0f, 0.0f,
+                                             NULL, NULL, result);
+}
+
+uint8_t ArmForwardKinematicsToolCenter(
+    const float q_deg[3], float tool_pitch_deg,
+    Arm_Position_s *tool_center_mm)
+{
+    Arm_Position_s wrist_center;
+
+    if (q_deg == NULL || tool_center_mm == NULL ||
+        !isfinite(q_deg[0]) || !isfinite(q_deg[1]) ||
+        !isfinite(q_deg[2]) || !isfinite(tool_pitch_deg)) {
+        return 0u;
+    }
+    ArmForwardKinematics3DOF(q_deg[0], q_deg[1], q_deg[2], &wrist_center);
+    return ArmToolGetCenterFromWrist(&wrist_center, q_deg[0],
+                                      tool_pitch_deg, tool_center_mm);
+}
+
+Arm_IK_Status_e ArmInverseKinematicsToolCenterAll(
+    const Arm_Position_s *target_center_mm,
+    float tool_pitch_deg,
+    const float seed_q_deg[3],
+    Arm_Tool_Center_IK_Candidate_s candidates[
+        ARM_TOOL_CENTER_IK_MAX_CANDIDATES],
+    uint8_t *candidate_count)
+{
+    float azimuth_deg;
+    uint8_t output_count = 0u;
+    Arm_IK_Status_e best_failure = ARM_IK_OUT_OF_REACH;
+
+    if (candidate_count == NULL) {
+        return ARM_IK_INVALID_ARGUMENT;
+    }
+    *candidate_count = 0u;
+    if (target_center_mm == NULL || seed_q_deg == NULL ||
+        candidates == NULL ||
+        !isfinite(target_center_mm->x_mm) ||
+        !isfinite(target_center_mm->y_mm) ||
+        !isfinite(target_center_mm->z_mm) ||
+        !isfinite(tool_pitch_deg) || !isfinite(seed_q_deg[0]) ||
+        !isfinite(seed_q_deg[1]) || !isfinite(seed_q_deg[2])) {
+        return ARM_IK_INVALID_ARGUMENT;
+    }
+
+    azimuth_deg = (fabsf(target_center_mm->x_mm) > ARM_KIN_EPSILON ||
+                   fabsf(target_center_mm->y_mm) > ARM_KIN_EPSILON) ?
+        atan2f(target_center_mm->y_mm, target_center_mm->x_mm) *
+            ARM_KIN_RAD_TO_DEG : seed_q_deg[0];
+
+    /*
+     * 夹爪中心可能位于主臂q1方向的正径向或负径向一侧。两个候选都先
+     * 反算ID1轴心，再交给基础IK；最终必须使用基础IK给出的真实q1重新
+     * 做工具FK，因此负X目标不会被atan2产生的180deg方位误导。
+     */
+    for (uint8_t direction = 0u; direction < 2u; ++direction) {
+        Arm_Position_s wrist_candidate;
+        Arm_IK_Result_s wrist_ik;
+        float wrist_q_deg[ARM_TOOL_CENTER_IK_MAX_CANDIDATES][3];
+        uint8_t wrist_count = 0u;
+        float direction_deg = ArmKinematicsWrapTo180(
+            azimuth_deg + (direction != 0u ? 180.0f : 0.0f));
+
+        memset(&wrist_ik, 0, sizeof(wrist_ik));
+        if (!ArmToolGetWristFromCenter(target_center_mm, direction_deg,
+                                      tool_pitch_deg, &wrist_candidate)) {
+            best_failure = ARM_IK_INVALID_ARGUMENT;
+            continue;
+        }
+        /*
+         * 117 mm工具偏移按direction_deg反算后，基础IK必须显式筛选同向
+         * q1分支。真实seed仍用于同一分支内的肘部解连续性评分。
+         */
+        if (ArmInverseKinematics3DOFInternal(
+                &wrist_candidate, seed_q_deg, 1u, direction_deg,
+                ARM_TOOL_IK_BASE_DIRECTION_TOLERANCE_DEG,
+                wrist_q_deg, &wrist_count,
+                &wrist_ik) != ARM_IK_OK) {
+            best_failure = wrist_ik.status;
+            continue;
+        }
+        /*
+         * 此处只求几何可达且满足关节软件限位的解。前方栏框限制依赖
+         * “普通前方运动”或“已规划的高位跨区运动”等路径意图，因此
+         * 统一由轨迹工作区安全层判断，不能在通用IK中提前过滤。
+         */
+        for (uint8_t i = 0u; i < wrist_count; ++i) {
+            Arm_Position_s center_check;
+            Arm_Position_s wrist_check;
+            float error_mm;
+
+            if (!ArmForwardKinematicsToolCenter(
+                    wrist_q_deg[i], tool_pitch_deg, &center_check)) {
+                best_failure = ARM_IK_NUMERICAL_ERROR;
+                continue;
+            }
+            ArmForwardKinematics3DOF(
+                wrist_q_deg[i][0], wrist_q_deg[i][1], wrist_q_deg[i][2],
+                &wrist_check);
+            error_mm = sqrtf(
+                (center_check.x_mm - target_center_mm->x_mm) *
+                    (center_check.x_mm - target_center_mm->x_mm) +
+                (center_check.y_mm - target_center_mm->y_mm) *
+                    (center_check.y_mm - target_center_mm->y_mm) +
+                (center_check.z_mm - target_center_mm->z_mm) *
+                    (center_check.z_mm - target_center_mm->z_mm));
+            if (!isfinite(error_mm) ||
+                error_mm > ARM_LINEAR_FK_ERROR_MAX_MM) {
+                best_failure = ARM_IK_NUMERICAL_ERROR;
+                continue;
+            }
+            if (output_count < ARM_TOOL_CENTER_IK_MAX_CANDIDATES) {
+                memcpy(candidates[output_count].q_deg, wrist_q_deg[i],
+                       sizeof(candidates[output_count].q_deg));
+                candidates[output_count].wrist_center_mm = wrist_check;
+                candidates[output_count].tool_center_mm = center_check;
+                candidates[output_count].position_error_mm = error_mm;
+                output_count++;
+            }
+        }
+    }
+    *candidate_count = output_count;
+    return output_count != 0u ? ARM_IK_OK : best_failure;
+}
+
+Arm_IK_Status_e ArmInverseKinematicsToolCenter(
+    const Arm_Position_s *target_center_mm,
+    float tool_pitch_deg,
+    const float seed_q_deg[3],
+    Arm_Tool_Center_IK_Result_s *result)
+{
+    Arm_Tool_Center_IK_Candidate_s candidates[
+        ARM_TOOL_CENTER_IK_MAX_CANDIDATES];
+    Arm_IK_Status_e status;
+    float best_score = 0.0f;
+    uint8_t candidate_count = 0u;
+    uint8_t best_index = 0u;
+
+    if (result == NULL) {
+        return ARM_IK_INVALID_ARGUMENT;
+    }
+    memset(result, 0, sizeof(*result));
+    memset(candidates, 0, sizeof(candidates));
+    status = ArmInverseKinematicsToolCenterAll(
+        target_center_mm, tool_pitch_deg, seed_q_deg,
+        candidates, &candidate_count);
+    result->status = status;
+    result->candidate_count = candidate_count;
+    if (status != ARM_IK_OK) {
+        return status;
+    }
+    for (uint8_t i = 0u; i < candidate_count; ++i) {
+        float score = ArmKinematicsCandidateScore(candidates[i].q_deg,
+                                                   seed_q_deg);
+        if (!isfinite(score)) {
+            result->status = ARM_IK_NUMERICAL_ERROR;
+            return result->status;
+        }
+        if (i == 0u || score < best_score) {
+            best_score = score;
+            best_index = i;
+        }
+    }
+    memcpy(result->q_deg, candidates[best_index].q_deg,
+           sizeof(result->q_deg));
+    result->wrist_center_mm = candidates[best_index].wrist_center_mm;
+    result->tool_center_mm = candidates[best_index].tool_center_mm;
+    result->position_error_mm = candidates[best_index].position_error_mm;
     result->status = ARM_IK_OK;
     return result->status;
 }

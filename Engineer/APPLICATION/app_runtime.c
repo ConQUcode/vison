@@ -1,144 +1,321 @@
-#include "Test.h"
+/**
+ * @file app_runtime.c
+ * @brief 根据 app_config.h 选择运行链，并隔离机械臂、底盘和舵机台架任务。
+ */
 
-#include "stm32f4xx_hal.h"
-
-#if CHASSIS_ONE_METER_TEST_ONLY != 0u
-#include "DJI_motor.h"
-#include "buzzer.h"
-#include "chassis.h"
-#include "ins_task.h"
-#include "protocol.h"
-#include "usb.h"
-#elif HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY != 0u
-#include "hsl_servo.h"
-#else
-#include "DJI_motor.h"
-#include "arm.h"
-#include "buzzer.h"
-#include "dmmotor.h"
-#include "fruit_usb_bridge.h"
-#include "protocol.h"
-#include "usb.h"
-#endif
+#include "app_runtime.h"
 
 #include <math.h>
 #include <string.h>
 
-#define HUANER_SERVO1_ID                     1u
-#define HUANER_SERVO2_ID                     2u
-#define HUANER_SERVO_QUERY_INTERVAL_MS       25u
-#define HUANER_SERVO_POSITION_TO_DEG      0.24f
+#include "bsp_dwt.h"
+#include "buzzer.h"
+#include "daemon.h"
+#include "protocol_runtime.h"
+#include "usb.h"
 
-Huaner_Dual_Servo_Debug_s g_huaner_dual_servo_debug;
+#include "DJI_motor.h"
+#include "dmmotor.h"
 
-#if CHASSIS_ONE_METER_TEST_ONLY != 0u
-/* INS_Init()返回的共享姿态快照，只由底盘读取，不在底盘任务内重复解算。 */
-static attitude_t *chassis_test_imu;
+#if APP_CHASSIS_ONE_METER_ENABLED
+#include "chassis.h"
+#include "ins_task.h"
+#elif APP_ARM_CORE_ENABLED
+#include "arm.h"
+#include "arm_kinematics.h"
+#include "arm_tool.h"
+#if APP_ARM_ENABLED
+#include "fruit_usb_bridge.h"
+#endif
+#elif APP_HUANER_FEEDBACK_ENABLED
+#include "huaner_servo.h"
 #endif
 
-#if HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY != 0u
-static uint8_t huaner_next_query_id;
-static uint32_t huaner_next_query_tick;
+App_Arm_Teach_Debug_s g_app_arm_teach_debug;
 
-static void HuanerDualServoFeedbackTask(void)
+#if APP_CHASSIS_ONE_METER_ENABLED
+/* INS_Init 返回的姿态快照只由 INS 写、底盘读。 */
+static attitude_t *app_chassis_imu;
+#endif
+
+#if APP_HUANER_FEEDBACK_ENABLED
+static uint8_t app_huaner_next_id;
+static uint32_t app_huaner_next_tick;
+#endif
+
+#if APP_ARM_ENABLED && APP_ARM_TOOL_CENTER_TEST_ENABLE
+/*
+ * 抓放循环调度器。两条控制链的实现都在 app_arm_flow.c：
+ * - 坐标抓取PickFlow：工具中心IK直线轨迹到参数化目标点后闭合夹爪。
+ * - 固定角度放置PlaceFlow：写死关节角的转移、后方释放和恢复序列。
+ * 本调度器只负责串联两个子流程；后续"底盘+双打点"任务层同样只需
+ * 在这里按顺序启动子流程，不必修改子流程内部。
+ */
+typedef enum {
+    APP_ARM_SCHED_WAIT_READY = 0, /* 等HOME完成、主机ready。 */
+    APP_ARM_SCHED_PICK,           /* 坐标抓取子流程运行中。 */
+    APP_ARM_SCHED_PLACE,          /* 固定角度放置子流程运行中。 */
+    APP_ARM_SCHED_FAILED          /* 任一子流程失败后原位保持。 */
+} App_Arm_Sched_State_e;
+
+static App_Arm_Sched_State_e app_arm_sched_state;
+static uint8_t app_arm_pick_point_index;
+
+/* 左右两个教导点交替抓取，首次从点1开始。 */
+static const App_Arm_Pick_Target_s app_arm_pick_points[2] = {
+    {
+        { APP_ARM_PICK_POINT_1_Q1_DEG,
+          APP_ARM_PICK_POINT_1_Q2_DEG,
+          APP_ARM_PICK_POINT_1_Q3_DEG },
+        APP_ARM_PICK_TOOL_RELATIVE_PITCH_DEG,
+        APP_ARM_PICK_POINT_1_X_MM,
+        APP_ARM_PICK_POINT_1_Y_MM,
+        APP_ARM_PICK_POINT_1_Z_MM,
+    },
+    {
+        { APP_ARM_PICK_POINT_2_Q1_DEG,
+          APP_ARM_PICK_POINT_2_Q2_DEG,
+          APP_ARM_PICK_POINT_2_Q3_DEG },
+        APP_ARM_PICK_TOOL_RELATIVE_PITCH_DEG,
+        APP_ARM_PICK_POINT_2_X_MM,
+        APP_ARM_PICK_POINT_2_Y_MM,
+        APP_ARM_PICK_POINT_2_Z_MM,
+    },
+};
+
+/** READY后循环"点1抓放 -> 点2抓放"；失败即锁存停止。 */
+static void AppArmPickPlaceTestTask(uint32_t now_ms)
 {
-    HSLServo_Status_s servo1_status;
-    HSLServo_Status_s servo2_status;
-    uint32_t now_ms = HAL_GetTick();
+    App_Arm_Flow_Status_e status = AppArmFlowPoll(now_ms);
+    Arm_Host_Status_s host;
 
-    memset(&servo1_status, 0, sizeof(servo1_status));
-    memset(&servo2_status, 0, sizeof(servo2_status));
-    HSLServoTask(now_ms);
+    if (status == APP_ARM_FLOW_FAILED) {
+        app_arm_sched_state = APP_ARM_SCHED_FAILED;
+    }
+    switch (app_arm_sched_state) {
+    case APP_ARM_SCHED_WAIT_READY:
+        if (ArmGetHostStatus(&host) == 0u || host.ready == 0u) {
+            break;
+        }
+        if (AppArmFlowStartPick(
+                &app_arm_pick_points[app_arm_pick_point_index], now_ms) != 0u) {
+            app_arm_sched_state = APP_ARM_SCHED_PICK;
+        }
+        break;
 
-    /*
-     * 两个ID交替单独查询，避免一台断线时双ID合并应答校验失败，
-     * 从而把另一台实际在线的舵机也显示为通信失败。
-     */
-    if ((int32_t)(now_ms - huaner_next_query_tick) >= 0 &&
-        HSLServoRequestPosition(huaner_next_query_id) ==
-            HSL_SERVO_RESULT_OK) {
-        huaner_next_query_id =
-            huaner_next_query_id == HUANER_SERVO1_ID ?
-            HUANER_SERVO2_ID : HUANER_SERVO1_ID;
-        huaner_next_query_tick = now_ms +
-            HUANER_SERVO_QUERY_INTERVAL_MS;
+    case APP_ARM_SCHED_PICK:
+        if (status == APP_ARM_FLOW_DONE &&
+            AppArmFlowStartPlace(now_ms) != 0u) {
+            app_arm_sched_state = APP_ARM_SCHED_PLACE;
+        }
+        break;
+
+    case APP_ARM_SCHED_PLACE: {
+        uint8_t next_pick_point_index =
+            (uint8_t)(app_arm_pick_point_index ^ 1u);
+        if (status == APP_ARM_FLOW_DONE &&
+            AppArmFlowStartPick(
+                &app_arm_pick_points[next_pick_point_index], now_ms) != 0u) {
+            app_arm_pick_point_index = next_pick_point_index;
+            g_app_arm_pick_place_test_debug.cycle_count++;
+            app_arm_sched_state = APP_ARM_SCHED_PICK;
+        }
+        break;
     }
 
-    (void)HSLServoGetStatus(HUANER_SERVO1_ID, &servo1_status);
-    (void)HSLServoGetStatus(HUANER_SERVO2_ID, &servo2_status);
-
-    g_huaner_dual_servo_debug.servo1_communication_ok =
-        servo1_status.online != 0u &&
-        servo1_status.feedback_valid != 0u;
-    g_huaner_dual_servo_debug.servo2_communication_ok =
-        servo2_status.online != 0u &&
-        servo2_status.feedback_valid != 0u;
-
-    if (g_huaner_dual_servo_debug.servo1_communication_ok != 0u) {
-        g_huaner_dual_servo_debug.servo1_position =
-            servo1_status.feedback_position;
-        g_huaner_dual_servo_debug.servo1_angle_deg =
-            (float)servo1_status.feedback_position *
-            HUANER_SERVO_POSITION_TO_DEG;
-    } else {
-        g_huaner_dual_servo_debug.servo1_angle_deg = NAN;
-    }
-    if (g_huaner_dual_servo_debug.servo2_communication_ok != 0u) {
-        g_huaner_dual_servo_debug.servo2_position =
-            servo2_status.feedback_position;
-        g_huaner_dual_servo_debug.servo2_angle_deg =
-            (float)servo2_status.feedback_position *
-            HUANER_SERVO_POSITION_TO_DEG;
-    } else {
-        g_huaner_dual_servo_debug.servo2_angle_deg = NAN;
+    case APP_ARM_SCHED_FAILED:
+    default:
+        break;
     }
 }
 #endif
 
-void all_init_Task(void)
+#if APP_ARM_TEACH_POINT_ENABLED
+/** 汇总被动反馈和FK结果；只读状态，不提交任何电机或舵机动作。 */
+static void AppArmTeachPointUpdate(void)
 {
-    memset(&g_huaner_dual_servo_debug, 0,
-           sizeof(g_huaner_dual_servo_debug));
-    g_huaner_dual_servo_debug.servo1_angle_deg = NAN;
-    g_huaner_dual_servo_debug.servo2_angle_deg = NAN;
-#if HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY != 0u
-    if (HSLServoInit() != 0u) {
-        huaner_next_query_id = HUANER_SERVO1_ID;
-        huaner_next_query_tick = HAL_GetTick();
-        g_huaner_dual_servo_debug.driver_initialized = 1u;
+    const Arm_State_s *arm = ArmGetState();
+    const Arm_Tool_State_s *tool = ArmToolGetState();
+    uint8_t all_ready = 1u;
+    uint8_t all_disabled = 1u;
+
+    if (arm == NULL || tool == NULL) {
+        return;
     }
-#elif CHASSIS_ONE_METER_TEST_ONLY != 0u
-    /*
-     * 底盘1 m测试初始化：不注册机械臂、达妙电机或USART6工具舵机。
-     * INS初始化包含BMI088启动与初始姿态计算，必须在调度器启动前只调用一次。
-     */
+    for (uint8_t axis = 0u; axis < 3u; ++axis) {
+        g_app_arm_teach_debug.dm_online[axis] = arm->motor_online[axis];
+        g_app_arm_teach_debug.dm_enabled[axis] = arm->motor_enabled[axis];
+        g_app_arm_teach_debug.dm_joint_deg[axis] =
+            arm->q_feedback_deg[axis];
+        g_app_arm_teach_debug.dm_feedback_age_ms[axis] =
+            g_arm_dm_debug.axis[axis].feedback_age_ms;
+        if (arm->motor_online[axis] == 0u) {
+            all_ready = 0u;
+        }
+        if (arm->motor_enabled[axis] != 0u) {
+            all_disabled = 0u;
+        }
+    }
+    for (uint8_t servo = 0u; servo < 2u; ++servo) {
+        g_app_arm_teach_debug.servo_online[servo] =
+            tool->servo_online[servo] != 0u &&
+            tool->servo_feedback_valid[servo] != 0u;
+        g_app_arm_teach_debug.servo_position[servo] =
+            tool->servo_feedback_pos[servo];
+        g_app_arm_teach_debug.servo_angle_deg[servo] =
+            g_app_arm_teach_debug.servo_online[servo] != 0u ?
+                (float)tool->servo_feedback_pos[servo] * 0.24f : NAN;
+        if (g_app_arm_teach_debug.servo_online[servo] == 0u) {
+            all_ready = 0u;
+        }
+    }
+    g_app_arm_teach_debug.servo_unload_requested =
+        tool->servo_unload_requested;
+    g_app_arm_teach_debug.servo_unload_done = tool->servo_unload_done;
+    g_app_arm_teach_debug.servo_unload_count = tool->servo_unload_count;
+    g_app_arm_teach_debug.servo_unload_fail_count =
+        tool->servo_unload_fail_count;
+    if (tool->servo_unload_done == 0u) {
+        all_ready = 0u;
+    }
+    g_app_arm_teach_debug.tool_pitch_deg = tool->tool_pitch_feedback_deg;
+    g_app_arm_teach_debug.wrist_center_valid =
+        arm->kinematics_valid != 0u &&
+        arm->motor_online[0] != 0u && arm->motor_online[1] != 0u &&
+        arm->motor_online[2] != 0u;
+    g_app_arm_teach_debug.wrist_center_mm[0] = arm->wrist_center.x_mm;
+    g_app_arm_teach_debug.wrist_center_mm[1] = arm->wrist_center.y_mm;
+    g_app_arm_teach_debug.wrist_center_mm[2] = arm->wrist_center.z_mm;
+    g_app_arm_teach_debug.tool_center_valid =
+        g_app_arm_teach_debug.wrist_center_valid != 0u &&
+        g_app_arm_teach_debug.servo_online[0] != 0u &&
+        isfinite(tool->tool_pitch_feedback_deg);
+    if (g_app_arm_teach_debug.tool_center_valid != 0u) {
+        g_app_arm_teach_debug.tool_center_mm[0] = arm->tool_tip.x_mm;
+        g_app_arm_teach_debug.tool_center_mm[1] = arm->tool_tip.y_mm;
+        g_app_arm_teach_debug.tool_center_mm[2] = arm->tool_tip.z_mm;
+    } else {
+        g_app_arm_teach_debug.tool_center_mm[0] = NAN;
+        g_app_arm_teach_debug.tool_center_mm[1] = NAN;
+        g_app_arm_teach_debug.tool_center_mm[2] = NAN;
+    }
+    g_app_arm_teach_debug.feedback_ready = all_ready;
+    g_app_arm_teach_debug.dm_all_disabled = all_disabled;
+    g_app_arm_teach_debug.update_count++;
+}
+#endif
+
+void AppInit(void)
+{
+    /* DWT 是 INS 和各控制模块的统一高精度时间基准，只初始化一次。 */
+    DWT_Init(168u);
+
+#if APP_CHASSIS_ONE_METER_ENABLED
     USB_Init();
-    protocol_init();
+    ProtocolRuntimeInit();
     BuzzerInit();
-    chassis_test_imu = INS_Init();
-    (void)ChassisInit(chassis_test_imu);
-#else
+    app_chassis_imu = INS_Init();
+    (void)ChassisInit(app_chassis_imu);
+#elif APP_ARM_ENABLED
     USB_Init();
-    protocol_init();
+    ProtocolRuntimeInit();
     FruitUsbBridgeInit();
     BuzzerInit();
+    ArmInit();
+#if APP_ARM_TOOL_CENTER_TEST_ENABLE
+    AppArmFlowInit();
+    app_arm_sched_state = APP_ARM_SCHED_WAIT_READY;
+    app_arm_pick_point_index = 0u;
+#endif
+#elif APP_HUANER_FEEDBACK_ENABLED
+    if (HuanerServoInit() != 0u) {
+        app_huaner_next_id = 1u;
+        app_huaner_next_tick = 0u;
+    }
+#elif APP_ARM_TEACH_POINT_ENABLED
+    memset(&g_app_arm_teach_debug, 0, sizeof(g_app_arm_teach_debug));
     ArmInit();
 #endif
 }
 
-void all_cmd_Task(void)
+void AppImuTask(uint32_t now_ms)
 {
-#if HUANER_SERVO_DUAL_FEEDBACK_TEST_ONLY != 0u
-    HuanerDualServoFeedbackTask();
-#elif CHASSIS_ONE_METER_TEST_ONLY != 0u
-    uint32_t now_ms = HAL_GetTick();
-
-    /* ChassisTask内部按5 ms运行；DJI电机电流环保持1 kHz服务。 */
-    ChassisTask(now_ms);
-    DJIMotorControl();
+#if APP_CHASSIS_ONE_METER_ENABLED
+    INS_Task();
+    ChassisNotifyImuUpdate(now_ms);
 #else
+    (void)now_ms;
+#endif
+}
+
+void AppChassisTask(uint32_t now_ms)
+{
+#if APP_CHASSIS_ONE_METER_ENABLED
+    ChassisTask(now_ms);
+#else
+    (void)now_ms;
+#endif
+}
+
+void AppArmTask(uint32_t now_ms)
+{
+#if APP_ARM_CORE_ENABLED
     ArmTask();
-    DMMotorControl(HAL_GetTick());
+    /* ArmTask内可能执行较长路径预检，后续应用状态机和电机发送使用新时间。 */
+    now_ms = HAL_GetTick();
+#if APP_ARM_ENABLED
+#if APP_ARM_TOOL_CENTER_TEST_ENABLE
+    AppArmPickPlaceTestTask(now_ms);
+#endif
+#elif APP_ARM_TEACH_POINT_ENABLED
+    (void)now_ms;
+    AppArmTeachPointUpdate();
+#endif
+#else
+    (void)now_ms;
+#endif
+}
+
+void AppMotorControlTask(uint32_t now_ms)
+{
+    /* 两个驱动在零实例时均为空操作；集中调用可保持唯一任务所有权。 */
+#if !APP_ARM_TEACH_POINT_ENABLED
+    DMMotorControl(now_ms);
+#else
+    /*
+     * 打点模式禁止达妙周期控制帧，三轴保持无力；达妙不主动上报反馈，
+     * 改用低频失能查询帧维持角度反馈和在线判定。
+     */
+    ArmTeachPointFeedbackPoll(now_ms);
+#endif
     DJIMotorControl();
+}
+
+void AppUsbTask(uint32_t now_ms)
+{
+#if APP_ARM_ENABLED || APP_CHASSIS_ONE_METER_ENABLED
+    static uint32_t last_daemon_tick;
+
+    USB_ProcessTask();
+    USB_TxTask();
+    ProtocolRuntimeTask(now_ms);
+#if APP_ARM_ENABLED
+    FruitUsbBridgeTask(now_ms);
+#endif
+    BuzzerTask(now_ms);
+    if ((uint32_t)(now_ms - last_daemon_tick) >= 10u) {
+        last_daemon_tick = now_ms;
+        DaemonTask();
+    }
+#elif APP_HUANER_FEEDBACK_ENABLED
+    HuanerServoTask(now_ms);
+    if ((int32_t)(now_ms - app_huaner_next_tick) >= 0 &&
+        HuanerServoRequestPosition(app_huaner_next_id) ==
+            HUANER_SERVO_RESULT_OK) {
+        app_huaner_next_id = app_huaner_next_id == 1u ? 2u : 1u;
+        app_huaner_next_tick = now_ms + 25u;
+    }
+#else
+    (void)now_ms;
 #endif
 }

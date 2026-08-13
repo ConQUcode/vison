@@ -1,7 +1,7 @@
 /**
- * @file bsp_uart.h
+ * @file bsp_usart.h
  * @author Bi Kaixiang (wexhicy@gmail.com)
- * @brief   UART
+ * @brief 通用 USART 实例和独立 DMA 状态机的 HAL 回调分发接口。
  * @version 0.1
  * @date 2024-01-02
  *
@@ -17,7 +17,7 @@
 
 #define USART_DEVICE_MAX_NUM 3    // 支持的最大USART设备数量
 #define USART_RXBUFF_LIMIT   255u // 如果协议需要更大的buff,请修改这里
-#define USART_ASYNC_CALLBACK_MAX_NUM 3u
+#define USART_ASYNC_CALLBACK_MAX_NUM 3u // 最多允许三个模块注册独立异步回调
 
 // 模块回调函数,用于解析协议
 typedef void (*usart_module_callback)();
@@ -96,8 +96,9 @@ void USARTSend(USART_Instance *_instance, uint8_t *send_buf, uint16_t send_size,
 uint8_t USARTIsReady(USART_Instance *_instance);
 
 /*
- * 为自行管理DMA缓冲区和事务状态机的模块注册HAL回调分发。
+ * 为自行管理 DMA 缓冲区和事务状态机的模块注册 HAL 回调分发。
  * 此接口不自动启动接收，也不占用USART_Instance的Receive-to-Idle缓冲区。
+ * 当前幻儿驱动使用该入口接收 RX-to-idle、TX完成和UART错误事件。
  */
 uint8_t USARTRegisterAsyncCallbacks(
     const USART_Async_Callback_Config_s *config);

@@ -5,7 +5,7 @@
  * @author  annotation and modification by NeoZeng
  * @version V2.0.0
  * @date    2022/2/23
- * @brief
+ * @brief BMI088 数据读取、EKF 姿态解算和连续 Yaw 输出接口。
  ******************************************************************************
  * @attention INS任务的初始化不要放入实时系统!应该由application拥有实例,随后在
  *            应用层调用初始化函数.
@@ -79,14 +79,13 @@ typedef struct
 } IMU_Param_t;
 
 /**
- * @brief 初始化惯导解算系统
- *
+ * @brief 初始化 BMI088、温控和 EKF；必须在调度器启动前只调用一次。
+ * @return 共享姿态快照指针，后续由 INS_Task 更新。
  */
 attitude_t *INS_Init(void);
 
 /**
- * @brief 此函数放入实时系统中,以1kHz频率运行
- *        p.s. osDelay(1);
+ * @brief 读取 IMU 并更新姿态，应由 ImuTask 以 1 kHz 调用。
  *
  */
 void INS_Task(void);

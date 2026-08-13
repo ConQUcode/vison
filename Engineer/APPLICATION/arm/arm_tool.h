@@ -1,3 +1,8 @@
+/**
+ * @file arm_tool.h
+ * @brief ID1 绝对俯仰、ID2 夹爪闭环、工具几何和堵转状态接口。
+ */
+
 #ifndef __ARM_TOOL_H__
 #define __ARM_TOOL_H__
 
@@ -12,7 +17,7 @@ typedef enum {
     ARM_TOOL_ERROR_SERVO_FEEDBACK,    /* 位置反馈无效或离线。 */
     ARM_TOOL_ERROR_SERVO_TIMEOUT,     /* 动作在截止时间内未完成。 */
     ARM_TOOL_ERROR_GRIPPER_STALL,     /* 夹爪卡死或抓取闭合受阻。 */
-    ARM_TOOL_ERROR_GEOMETRY           /* 30 mm工具中心换算参数无效。 */
+    ARM_TOOL_ERROR_GEOMETRY           /* 配置的轴心到夹爪中心长度无效。 */
 } Arm_Tool_Error_e;
 
 typedef enum {
@@ -32,12 +37,12 @@ typedef enum {
     ARM_GRIPPER_READY,             /* 已在默认位置550。 */
     ARM_GRIPPER_OPENING,           /* 正在打开到默认位置550。 */
     ARM_GRIPPER_OPEN,              /* 已在默认位置550。 */
-    ARM_GRIPPER_CLOSING,           /* 正在闭合到抓取位置630。 */
+    ARM_GRIPPER_CLOSING,           /* 正在闭合到探测抓取位置660。 */
     ARM_GRIPPER_CONTACT_SUSPECTED, /* 已检测到位置停滞，尚未完成卸力。 */
-    ARM_GRIPPER_RELIEVING,         /* 从停滞位置回退10个控制值。 */
+    ARM_GRIPPER_RELIEVING,         /* 分级卸力：每次回退10，最多5次。 */
     ARM_GRIPPER_HELD_CONTACT,      /* 受阻后卸力完成，不代表检测到夹持力。 */
-    ARM_GRIPPER_CLOSED_EMPTY,      /* 正常到达630，未检测到提前接触。 */
-    ARM_GRIPPER_JAMMED,            /* 行程不足20即停滞，判定机构异常。 */
+    ARM_GRIPPER_CLOSED_EMPTY,      /* 正常到达660，未检测到提前接触。 */
+    ARM_GRIPPER_JAMMED,            /* 5次分级回退后仍不能跟随目标。 */
     ARM_GRIPPER_FAULT              /* 反馈、发送、超时或初始化故障。 */
 } Arm_Gripper_State_e;
 
@@ -45,8 +50,17 @@ typedef enum {
     ARM_GRIPPER_COMMAND_HOLD = 0, /* 保持当前目标，不发送新动作。 */
     ARM_GRIPPER_COMMAND_READY,    /* 到550，等待抓取。 */
     ARM_GRIPPER_COMMAND_OPEN,     /* 到550，张开/释放。 */
-    ARM_GRIPPER_COMMAND_CLOSE     /* 到630，启用接触/卡死检测。 */
+    ARM_GRIPPER_COMMAND_CLOSE     /* 到660，启用接触/卡死检测。 */
 } Arm_Gripper_Command_e;
+
+/* ID2堵转专项Watch：角度按控制值0~1000线性映射到0~240deg。 */
+typedef struct {
+    uint8_t stall_detected; /* 本次动作是否已经正式判定停滞；下次动作清零。 */
+    uint8_t relief_attempt_count; /* 当前动作已经下发的分级回退次数，范围0..5。 */
+    uint8_t next_stage_ready; /* 1表示工具动作已完成，允许上层进入后续阶段。 */
+    float target_deg;       /* ID2当前目标角度。 */
+    float current_deg;      /* ID2反馈角度；反馈无效时为NAN。 */
+} Arm_Gripper_Stall_Debug_s;
 
 /* 两台240deg舵机的紧凑Watch变量，角度按控制值0~1000映射到0~240deg。 */
 typedef struct {
@@ -76,6 +90,11 @@ typedef struct {
     float servo_feedback_velocity_pos_s[2];
     uint32_t servo_last_feedback_tick[2];
     uint32_t servo_feedback_sequence[2];
+    uint8_t feedback_only_mode;       /* 1表示无力打点模式，只卸载并读取反馈。 */
+    uint8_t servo_unload_requested;   /* 0x14卸载帧已经进入异步发送状态机。 */
+    uint8_t servo_unload_done;        /* 卸载帧DMA发送完成，之后已启用位置轮询。 */
+    uint32_t servo_unload_count;      /* 成功提交0x14卸载帧的次数，正常应为1。 */
+    uint32_t servo_unload_fail_count; /* 卸载帧发送失败或事务异常次数。 */
 
     /* ID1绝对俯仰：世界绝对俯仰 = 小臂绝对俯仰 + ID1相对角。 */
     uint8_t tool_pitch_target_valid;
@@ -98,6 +117,8 @@ typedef struct {
     uint8_t gripper_boot_stall;
     uint16_t gripper_close_start_pos;
     uint16_t gripper_relief_target_pos;
+    uint16_t gripper_relief_start_pos;
+    uint8_t gripper_relief_attempt_count;
     uint16_t gripper_stall_window_min_pos;
     uint16_t gripper_stall_window_max_pos;
     uint32_t gripper_action_start_tick;
@@ -108,7 +129,7 @@ typedef struct {
     uint32_t gripper_jam_count;
     uint32_t gripper_timeout_count;
 
-    /* 非阻塞发送统计及30 mm工具中心调试值。 */
+    /* 非阻塞发送统计及配置工具长度对应的夹爪中心调试值。 */
     uint32_t error_code;
     uint32_t tx_count[2];
     uint32_t tx_fail_count[2];
@@ -126,8 +147,11 @@ typedef struct {
 
 extern Arm_Tool_State_s g_arm_tool_debug;
 extern Arm_Servo_Angle_Debug_s g_arm_servo_angle_debug;
+extern Arm_Gripper_Stall_Debug_s g_arm_gripper_stall_debug;
 
 void ArmToolInit(void);
+/** 打点模式初始化：只轮询ID1/ID2位置反馈，绝不发送舵机动作目标。 */
+void ArmToolInitFeedbackOnly(void);
 /* 1 ms周期服务：刷新反馈、发送一次性目标并推进夹爪状态机。 */
 void ArmToolTask(uint32_t now_ms);
 void ArmToolUpdateSmallLinkPitch(float small_link_pitch_deg);
@@ -157,7 +181,7 @@ float ArmToolSmallLinkPitchFromJoint(const float q_deg[3]);
 float ArmToolPitchFromFeedback(float small_link_pitch_deg,
                                uint16_t position);
 
-/* 腕部轴心与夹爪中心之间的30 mm正向/反向坐标换算。 */
+/* ID1输出轴中心与夹爪中心之间的正向/反向坐标换算，长度见arm_config.h。 */
 uint8_t ArmToolGetCenterFromWrist(const Arm_Position_s *wrist,
                                   float base_yaw_deg,
                                   float tool_pitch_deg,

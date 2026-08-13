@@ -1,3 +1,8 @@
+/**
+ * @file daemon.c
+ * @brief 模块在线监督实例的注册、喂狗和离线回调调度。
+ */
+
 #include "daemon.h"
 #include "bsp_dwt.h"
 #include "stdlib.h"

@@ -1,3 +1,8 @@
+/**
+ * @file DJI_motor.c
+ * @brief DJI M3508/M2006/GM6020 注册、反馈解码和分组 CAN 电流发送。
+ */
+
 #include "dji_motor.h"
 #include "general_def.h"
 #include "bsp_dwt.h"

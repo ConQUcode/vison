@@ -1,3 +1,8 @@
+/**
+ * @file fruit_usb_bridge.h
+ * @brief 水果识别结果的只读应用桥和紧凑 Watch 调试快照。
+ */
+
 #ifndef FRUIT_USB_BRIDGE_H
 #define FRUIT_USB_BRIDGE_H
 
@@ -33,9 +38,13 @@ typedef struct {
 
 extern Fruit_Usb_Debug_s g_fruit_usb_debug;
 
+/** 清空识别快照；不会初始化或控制机械臂。 */
 void FruitUsbBridgeInit(void);
+/** 同步协议会话状态，断线时只把旧识别结果标记为无效。 */
 void FruitUsbBridgeTask(uint32_t now_ms);
+/** 复制最新结果；返回 1 表示握手、心跳和结果均有效。 */
 uint8_t FruitUsbBridgeGetLatest(Fruit_Detection_s *result);
+/** 校验并保存一帧水果识别结果，不产生任何机械动作。 */
 void FruitUsbBridgeOnDetection(const Packet_FruitDetection *packet);
 
 #endif

@@ -1,3 +1,8 @@
+/**
+ * @file bsp_can.c
+ * @brief CAN 实例注册、发送和接收中断分发适配层。
+ */
+
 #include "bsp_can.h"
 #include "main.h"
 #include "string.h"

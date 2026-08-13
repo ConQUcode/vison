@@ -1,7 +1,12 @@
+/**
+ * @file chassis_config.h
+ * @brief 双轮底盘直行/右转循环测试的机械参数、方向、时序、PID 和安全边界。
+ */
+
 #ifndef __CHASSIS_CONFIG_H_
 #define __CHASSIS_CONFIG_H_
 
-/* 置1后上电自动执行一次1 m测试；完成或故障后不会自动重试。 */
+/* 置1后自动执行“1m-右转90度-1m”循环；故障锁存后不会自动重试。 */
 #define CHASSIS_AUTO_FORWARD_TEST_ENABLE       1u
 /* CAN2主动轮：左ID1、右ID2；以下命令/反馈符号必须架空实测确认。 */
 #define CHASSIS_LEFT_MOTOR_ID                  1u
@@ -14,33 +19,57 @@
 #define CHASSIS_WHEEL_RADIUS_M                 0.0475f
 #define CHASSIS_REDUCTION_RATIO               19.2032f
 #define CHASSIS_TRACK_WIDTH_M                  0.320f
-/* 实车确认BMI088航向正方向与底盘逻辑相反，统一翻转Yaw和Z轴角速度。 */
-#define CHASSIS_IMU_YAW_SIGN                 (-1.0f)
-/* 状态机与1 m测试时序。 */
+/* 当前实测方向：逆时针转动车体时逻辑Yaw应增加；若相反只修改此符号。 */
+#define CHASSIS_IMU_YAW_SIGN                 (1.0f)
+/* 状态机与循环测试时序。 */
 #define CHASSIS_CONTROL_PERIOD_MS              5u
 #define CHASSIS_TEST_START_DELAY_MS         3000u
 #define CHASSIS_IMU_STABLE_MS               1000u
 #define CHASSIS_ZERO_SETTLE_MS                300u
-#define CHASSIS_TEST_TIMEOUT_MS             15000u
+#define CHASSIS_STRAIGHT_TIMEOUT_MS         15000u
+#define CHASSIS_TURN_TIMEOUT_MS              6000u
 #define CHASSIS_STOP_STABLE_MS                300u
+#define CHASSIS_STOP_TIMEOUT_MS              2000u
+#define CHASSIS_ACTION_WAIT_MS               3000u
 #define CHASSIS_IMU_UPDATE_TIMEOUT_MS          20u
-/* 距离、速度、减速和加速度参数。 */
+/* 距离、速度、减速和加速度参数；首次落地不要提高最大速度。 */
 #define CHASSIS_TEST_DISTANCE_M                1.000f
 #define CHASSIS_TEST_MAX_SPEED_M_S             0.200f
 #define CHASSIS_TEST_MIN_SPEED_M_S             0.060f
 #define CHASSIS_TEST_DECEL_DISTANCE_M           0.250f
 #define CHASSIS_TEST_POSITION_KP                0.80f
 #define CHASSIS_MAX_LINEAR_ACCEL_M_S2           0.35f
-/* 1m直行测试限制修正量，即使IMU符号未标定也不让任一轮高速反转。 */
-#define CHASSIS_MAX_ANGULAR_RAD_S               0.25f
-#define CHASSIS_HEADING_KP_RAD_S_PER_DEG         0.025f
-#define CHASSIS_HEADING_KD                      0.08f
+/*
+ * 直行航向完整PID。误差单位deg，积分单位deg*s，输出单位rad/s。
+ * 积分只在小误差区工作并有限幅，避免启动或受阻时积累过大修正。
+ */
+#define CHASSIS_HEADING_KP_RAD_S_PER_DEG         0.150f
+#define CHASSIS_HEADING_KI_RAD_S_PER_DEG_S       0.020f
+#define CHASSIS_HEADING_KD                       0.150f
+#define CHASSIS_HEADING_INTEGRAL_ZONE_DEG        8.0f
+#define CHASSIS_HEADING_INTEGRAL_LIMIT_DEG_S    12.0f
+#define CHASSIS_HEADING_MAX_OUTPUT_RAD_S         1.00f
+/* 右转90度使用独立PID，避免直行高增益直接作用于90度大误差。 */
+#define CHASSIS_TURN_ANGLE_DEG                 (-90.0f)
+#define CHASSIS_TURN_KP_RAD_S_PER_DEG            0.035f
+#define CHASSIS_TURN_KI_RAD_S_PER_DEG_S          0.003f
+#define CHASSIS_TURN_KD                          0.180f
+#define CHASSIS_TURN_INTEGRAL_ZONE_DEG          15.0f
+#define CHASSIS_TURN_INTEGRAL_LIMIT_DEG_S       20.0f
+#define CHASSIS_TURN_MAX_RATE_RAD_S               0.80f
+#define CHASSIS_TURN_MAX_ACCEL_RAD_S2             1.50f
+#define CHASSIS_TURN_ERROR_TOLERANCE_DEG           1.50f
+#define CHASSIS_TURN_GYRO_TOLERANCE_RAD_S          0.0873f
+#define CHASSIS_TURN_STABLE_MS                    150u
+#define CHASSIS_TURN_DIRECTION_CHECK_MS           800u
+#define CHASSIS_TURN_DIRECTION_CHECK_DEG            5.0f
+#define CHASSIS_MAX_WHEEL_SPEED_M_S                 0.35f
 #define CHASSIS_DISTANCE_TOLERANCE_M             0.010f
 #define CHASSIS_STOP_SPEED_M_S                   0.020f
 #define CHASSIS_EXCESS_DISTANCE_M                1.300f
 #define CHASSIS_DIRECTION_CHECK_MS               800u
 #define CHASSIS_DIRECTION_CHECK_MIN_M             0.005f
-/* M3508速度环/电流环台架初值，电流输出限制为10000。 */
+/* M3508速度环/电流环台架初值；先架空确认方向，再调整增益或电流上限。 */
 #define CHASSIS_SPEED_PID_KP                     4.0f
 #define CHASSIS_SPEED_PID_KI                     0.20f
 #define CHASSIS_SPEED_PID_KD                     0.005f

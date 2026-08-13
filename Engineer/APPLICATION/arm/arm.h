@@ -1,3 +1,8 @@
+/**
+ * @file arm.h
+ * @brief 三自由度达妙机械臂的启动、运动、故障和 Watch 调试接口。
+ */
+
 #ifndef __ARM_H__
 #define __ARM_H__
 
@@ -95,8 +100,22 @@ typedef enum {
     ARM_REALTIME_REJECT_FK_ERROR,
     ARM_REALTIME_REJECT_SOFT_LIMIT,
     ARM_REALTIME_REJECT_AUTO_REGION,
-    ARM_REALTIME_REJECT_CONTINUITY
+    ARM_REALTIME_REJECT_CONTINUITY,
+    ARM_REALTIME_REJECT_WORKSPACE_SAFETY
 } Arm_Realtime_Reject_Reason_e;
+
+/** 夹爪中心工作区检查结果，Watch可据此直接定位拒绝原因。 */
+typedef enum {
+    ARM_WORKSPACE_SAFETY_OK = 0,
+    ARM_WORKSPACE_SAFETY_TARGET_REAR_TOO_LOW,
+    ARM_WORKSPACE_SAFETY_PATH_REAR_TOO_LOW,
+    ARM_WORKSPACE_SAFETY_CROSSING_TOO_LOW,
+    ARM_WORKSPACE_SAFETY_ESCAPE_ONLY,
+    ARM_WORKSPACE_SAFETY_PREFLIGHT_IK,
+    ARM_WORKSPACE_SAFETY_SAMPLE_CAPACITY,
+    ARM_WORKSPACE_SAFETY_RUNTIME_HEIGHT,
+    ARM_WORKSPACE_SAFETY_FRONT_SHOULDER_LIMIT
+} Arm_Workspace_Safety_Result_e;
 
 typedef enum {
     ARM_MOTION_IDLE = 0,
@@ -166,6 +185,25 @@ typedef struct {
     float position_error_mm;
 } Arm_IK_Result_s;
 
+/** 夹爪中心逆解结果；同时保留最终轴心、工具中心和往返误差。 */
+typedef struct {
+    Arm_IK_Status_e status;
+    uint8_t candidate_count;
+    float q_deg[3];
+    Arm_Position_s wrist_center_mm;
+    Arm_Position_s tool_center_mm;
+    float position_error_mm;
+} Arm_Tool_Center_IK_Result_s;
+
+/* 单个夹爪中心逆解候选；同一点最多有两种径向方向和两种肘部构型。 */
+#define ARM_TOOL_CENTER_IK_MAX_CANDIDATES 4u
+typedef struct {
+    float q_deg[3];
+    Arm_Position_s wrist_center_mm;
+    Arm_Position_s tool_center_mm;
+    float position_error_mm;
+} Arm_Tool_Center_IK_Candidate_s;
+
 typedef struct {
     uint32_t command_id;
     Arm_Control_Point_e control_point;
@@ -178,10 +216,26 @@ typedef struct {
     float tool_yaw_deg;
 } Arm_Cartesian_Command_s;
 
+/** 夹爪中心稳定命令；调用方无需再填写容易混淆的control_point。 */
+typedef struct {
+    uint32_t command_id;
+    Arm_Move_Type_e move_type;
+    Arm_Position_s target_center_mm;
+    float max_speed_mm_s;
+    uint8_t tool_pitch_valid;
+    float tool_pitch_deg;
+} Arm_Tool_Center_Command_s;
+
 typedef struct {
     uint32_t command_id;
     Arm_Move_Type_e move_type;
     float q_deg[3];
+    /* 可选连续路径引导点，轨迹经过该点但不会在该点进入到位等待。 */
+    uint8_t waypoint_valid;
+    float waypoint_q_deg[3];
+    /* 可选ID1相对俯仰，单位deg；用于与三台达妙同步完成关节动作。 */
+    uint8_t tool_relative_pitch_valid;
+    float tool_relative_pitch_deg;
 } Arm_Joint_Command_s;
 
 typedef struct {
@@ -279,6 +333,7 @@ typedef struct {
     Arm_Limit_Result_e limit_result;
     uint8_t hard_boundary_ok;
     uint32_t rx_count;
+    uint32_t feedback_age_ms; /* 距最新CAN反馈的时间；ISR反馈晚于快照时记0。 */
     uint32_t tx_count;
     uint32_t tx_fail_count;
     uint32_t mode_command_count;
@@ -346,7 +401,10 @@ typedef struct {
     uint8_t motor_enabled[3];
     float q_feedback_deg[3];
     float q_target_deg[3];
-    Arm_Position_s wrist_center_mm;
+    Arm_Position_s wrist_center_mm; /* 主臂FK输出：ID1舵机输出轴中心。 */
+    Arm_Position_s tool_center_mm;  /* 工具FK输出：当前夹爪中心。 */
+    float tool_axis_to_center_mm;   /* ID1轴心到夹爪中心的配置长度。 */
+    float tool_pitch_feedback_deg;  /* 夹爪中心线世界绝对俯仰角。 */
     float horizontal_radius_mm;
     float planar_reach_from_shoulder_mm;
     float wrist_height_from_shoulder_mm;
@@ -383,7 +441,22 @@ typedef struct {
     uint32_t trajectory_duration_ms;
     uint32_t trajectory_elapsed_ms;
     uint16_t path_sample_count;
+    uint32_t preflight_duration_ms; /* 最近一次完整路径预检耗时。 */
+    /* 兼容旧Watch；独立MotorControlTask启用后该值应保持0。 */
+    uint32_t preflight_motor_service_count;
+    /* 同步预检期间推进末端舵机非阻塞通信的次数。 */
+    uint32_t preflight_tool_service_count;
     float position_error_mm;
+    uint8_t safety_route_enabled;
+    uint8_t safety_route_segment_count;
+    uint8_t safety_route_active_segment;
+    Arm_Workspace_Safety_Result_e workspace_safety_result;
+    /* 路径预检失败定位：段号、段内采样号、工具中心和候选关节角。 */
+    uint8_t preflight_failed_segment;
+    uint16_t preflight_failed_sample;
+    uint32_t preflight_failed_check_mask;
+    Arm_Position_s preflight_failed_center_mm;
+    float preflight_failed_q_deg[3];
 } Arm_Motion_Debug_s;
 
 typedef struct {
@@ -420,14 +493,26 @@ extern Arm_Control_Debug_s g_arm_control_debug;
 extern Arm_Teach_Point_s g_arm_teach_point;
 extern Arm_Boot_Debug_s g_arm_boot_debug;
 
+/** 注册三台 CAN1 达妙电机和末端舵机，建立启动状态机。 */
 void ArmInit(void);
+/** 机械臂 1 kHz 非阻塞任务；仅由 ArmControlTask 调用。 */
 void ArmTask(void);
+/** 取消运动并停止当前控制输出。 */
 void ArmStop(void);
+/** 返回内部状态只读指针，调用方不得修改。 */
 const Arm_State_s *ArmGetState(void);
 const Arm_Motion_Debug_s *ArmGetMotionState(void);
 const Arm_Teach_Point_s *ArmGetTeachPoint(void);
+/**
+ * 打点模式达妙反馈轮询；周期重发失能命令触发反馈回复，无力矩影响。
+ * 由高优先级电机任务调用；非打点模式编译为空操作。
+ */
+void ArmTeachPointFeedbackPoll(uint32_t now_ms);
 Arm_Command_Result_e ArmSubmitCartesianCommand(
     const Arm_Cartesian_Command_s *command);
+/** 提交以夹爪中心为目标的运动，内部固定选择TOOL_CENTER。 */
+Arm_Command_Result_e ArmSubmitToolCenterCommand(
+    const Arm_Tool_Center_Command_s *command);
 Arm_Command_Result_e ArmSubmitJointCommand(
     const Arm_Joint_Command_s *command);
 Arm_Command_Result_e ArmSubmitRealtimeCartesianTarget(
@@ -448,5 +533,22 @@ void ArmForwardKinematics3DOF(float q1_deg,
 Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
                                          const float current_q_deg[3],
                                          Arm_IK_Result_s *result);
+/** 由三关节和绝对俯仰计算夹爪中心，成功返回1。 */
+uint8_t ArmForwardKinematicsToolCenter(
+    const float q_deg[3], float tool_pitch_deg,
+    Arm_Position_s *tool_center_mm);
+/** 对夹爪中心目标检查正/负径向候选并返回与seed最近的合法解。 */
+Arm_IK_Status_e ArmInverseKinematicsToolCenter(
+    const Arm_Position_s *target_center_mm,
+    float tool_pitch_deg,
+    const float seed_q_deg[3],
+    Arm_Tool_Center_IK_Result_s *result);
+Arm_IK_Status_e ArmInverseKinematicsToolCenterAll(
+    const Arm_Position_s *target_center_mm,
+    float tool_pitch_deg,
+    const float seed_q_deg[3],
+    Arm_Tool_Center_IK_Candidate_s candidates[
+        ARM_TOOL_CENTER_IK_MAX_CANDIDATES],
+    uint8_t *candidate_count);
 
 #endif

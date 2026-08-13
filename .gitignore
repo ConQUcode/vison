@@ -1,0 +1,42 @@
+# VS Code 本机索引数据库
+.vscode/BROWSE.VC.DB*
+Engineer/MDK-ARM/.vscode/
+
+# Keil 用户界面、日志和中间产物
+*.uvguix.*
+*.uvgui.*
+*.crf
+*.d
+*.o
+*.obj
+*.dep
+*.lnp
+*.map
+*.axf
+*.htm
+*.html
+*.lst
+*.iex
+*.log
+*.log.lock
+JLinkLog.txt
+JLinkSettings.ini
+Engineer/MDK-ARM/Engineer/
+Engineer/MDK-ARM/tmp/
+Engineer/MDK-ARM/tmp_*/
+Engineer/MDK-ARM/*_build.txt
+Engineer/MDK-ARM/*build*.txt
+
+# Codex、PDF渲染和误创建的本地临时目录
+.codex-tmp/
+.codex_tmp/
+tmp/
+~/
+tools/arm_path_replay/*.exe
+tools/arm_path_replay/*.csv
+tools/arm_path_replay/_tmp/
+
+# release 中的 HEX 是经过确认的归档，不受构建产物规则影响
+!release/
+!release/*.hex
+!release/SHA256SUMS.txt

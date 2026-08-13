@@ -1,5 +1,12 @@
+/**
+ * @file arm_config.h
+ * @brief 三轴达妙机械臂和双幻儿舵机工具端的几何、限位与时序参数。
+ */
+
 #ifndef __ARM_CONFIG_H__
 #define __ARM_CONFIG_H__
+
+#include "app_config.h"
 
 /* 坐标：+X车头、+Y车体左侧、+Z向上；长度mm、角度deg、时间ms。 */
 
@@ -16,7 +23,11 @@
 #define ARM_BOOT_MODE_DM_ENABLE_ONLY       3u
 #define ARM_BOOT_MODE_TOOL_SERVO_INIT_ONLY 4u
 #ifndef ARM_BOOT_MODE
+#if APP_ARM_TEACH_POINT_ENABLED
+#define ARM_BOOT_MODE ARM_BOOT_MODE_TEACH_POINT
+#else
 #define ARM_BOOT_MODE ARM_BOOT_MODE_FULL_INIT
+#endif
 #endif
 
 #define ARM_DM_TEST_NONE      0u
@@ -86,20 +97,24 @@
 #define ARM_SHOULDER_OFFSET_FORWARD_MM     0.0f
 #define ARM_SHOULDER_OFFSET_LEFT_MM        0.0f
 
-/* 正常软件限位及仅供启动脱困使用的硬边界。 */
+/* 关节命令软件限位；底座允许固定释放序列转到正后方。 */
 #define ARM_LIMIT_TOLERANCE_DEG             0.2f
-#define ARM_Q1_SOFT_MIN_DEG               (-90.0f)
-#define ARM_Q1_SOFT_MAX_DEG                 90.0f
-/* 临时放宽到35deg，用于验证(230,0,150)低位点；正式版按机构安全范围回收。 */
-#define ARM_Q2_SOFT_MIN_DEG                 35.0f
+#define ARM_Q1_SOFT_MIN_DEG              (-180.0f)
+#define ARM_Q1_SOFT_MAX_DEG                180.0f
+/*
+ * 肩关节正常运动下限。2026-08-13采摘教导位姿实测q2=28.5deg
+ * （大臂前倾够侧下方水果），由35放宽到25；脱困下限20不变。
+ */
+#define ARM_Q2_SOFT_MIN_DEG                 25.0f
 #define ARM_Q2_SOFT_MAX_DEG                180.0f
 /* q3采用机械定义：q3 = -两杆物理内夹角。
  * 正常物理夹角35deg~190deg，对应q3=-190deg~-35deg；
  * 上限小幅放宽，为当前HOME及近端低位运动保留解算余量。 */
 #define ARM_Q3_SOFT_MIN_DEG              (-190.0f)
 #define ARM_Q3_SOFT_MAX_DEG               (-35.0f)
-#define ARM_Q1_ESCAPE_MIN_DEG            (-110.0f)
-#define ARM_Q1_ESCAPE_MAX_DEG              110.0f
+/* 底座启动脱困/硬边界与关节命令范围一致；普通IK仍由ARM_AUTO_Q1限制。 */
+#define ARM_Q1_ESCAPE_MIN_DEG            (-180.0f)
+#define ARM_Q1_ESCAPE_MAX_DEG              180.0f
 #define ARM_Q2_ESCAPE_MIN_DEG               20.0f
 #define ARM_Q2_ESCAPE_MAX_DEG              200.0f
 /* 脱困物理夹角20deg~210deg，对应q3=-210deg~-20deg。 */
@@ -107,9 +122,10 @@
 #define ARM_Q3_ESCAPE_MAX_DEG              (-20.0f)
 
 /* IK/轨迹层只允许正常软件限位，不能使用脱困边界。 */
-#define ARM_AUTO_Q1_MIN_DEG ARM_Q1_SOFT_MIN_DEG
-#define ARM_AUTO_Q1_MAX_DEG ARM_Q1_SOFT_MAX_DEG
-/* 临时放宽到35deg，用于验证(230,0,150)低位点；实机确认后再固化正式下限。 */
+/* 普通FK/IK和笛卡尔轨迹仍限制在前方+/-90deg；后方180deg只供明确关节序列。 */
+#define ARM_AUTO_Q1_MIN_DEG                (-90.0f)
+#define ARM_AUTO_Q1_MAX_DEG                  90.0f
+/* 自动轨迹沿用正常肩关节下限，不允许使用启动脱困边界。 */
 #define ARM_AUTO_Q2_MIN_DEG                 35.0f
 #define ARM_AUTO_Q2_MAX_DEG ARM_Q2_SOFT_MAX_DEG
 #define ARM_AUTO_Q3_MIN_DEG ARM_Q3_SOFT_MIN_DEG
@@ -154,23 +170,50 @@
 #define ARM_DM_AUTO_INIT_ENABLE                  1u
 #define ARM_DM_AUTO_INIT_START_DELAY_MS       1000u
 #define ARM_DM_AUTO_INIT_STEP_TIMEOUT_MS     25000u
-#define ARM_DM_AUTO_INIT_SPEED_DEG_S            60.0f
+#define ARM_DM_AUTO_INIT_SPEED_DEG_S            30.0f
 
 /* 四点循环仅保留为台架测试；正式上位机接口版默认关闭。 */
 
 /* 达妙三轴第二档快速轨迹：700mm/s，短行程同时依靠更高加速度提速。 */
-#define ARM_JOINT_COMMAND_SPEED_DEG_S           420.0f
+#define ARM_JOINT_COMMAND_SPEED_DEG_S           150.0f
 #define ARM_LINEAR_DEFAULT_SPEED_MM_S           700.0f
 #define ARM_LINEAR_MAX_SPEED_MM_S               700.0f
 #define ARM_LINEAR_MAX_ACCEL_MM_S2             5000.0f
-#define ARM_LINEAR_Q1_MAX_SPEED_DEG_S            150.0f
-#define ARM_LINEAR_Q2_MAX_SPEED_DEG_S            250.0f
-#define ARM_LINEAR_Q3_MAX_SPEED_DEG_S            260.0f
-#define ARM_LINEAR_Q1_MAX_ACCEL_DEG_S2          1400.0f
-#define ARM_LINEAR_Q2_MAX_ACCEL_DEG_S2          1600.0f
-#define ARM_LINEAR_Q3_MAX_ACCEL_DEG_S2          1800.0f
+#define ARM_LINEAR_Q1_MAX_SPEED_DEG_S            120.0f
+#define ARM_LINEAR_Q2_MAX_SPEED_DEG_S            120.0f
+#define ARM_LINEAR_Q3_MAX_SPEED_DEG_S            120.0f
+#define ARM_LINEAR_Q1_MAX_ACCEL_DEG_S2           800.0f
+#define ARM_LINEAR_Q2_MAX_ACCEL_DEG_S2           800.0f
+#define ARM_LINEAR_Q3_MAX_ACCEL_DEG_S2           800.0f
 #define ARM_LINEAR_SAMPLE_SPACING_MM               1.0f
-#define ARM_LINEAR_MAX_SAMPLES                    384u
+#define ARM_LINEAR_MAX_SAMPLES                   1536u
+
+/*
+ * 夹爪中心工作区安全参数，单位均为mm。
+ * 负X区域位于后框一侧：目标及路径必须高于160；进入后区前先抬到210。
+ * X=0两侧各保留2mm死区，避免q1=+/-90deg时因浮点误差误判跨区。
+ * 205是开始水平跨区的实测放行线，200是运行时立即中止保护线。
+ */
+#define ARM_WORKSPACE_SAFETY_ENABLE                 1u
+#define ARM_REAR_ZONE_X_BOUNDARY_MM                 0.0f
+#define ARM_REAR_ZONE_X_MARGIN_MM                   2.0f
+#define ARM_REAR_ZONE_MIN_TOOL_Z_MM               160.0f
+/*
+ * 大臂从实机零点朝栏框方向最多允许到120deg。该限制是机械安全边界，
+ * 不因工具中心高度而豁免。仅当底座处于正前方扇区时应用这条限制；
+ * 底座已经转到后方后，仍由关节软限位和负X工具高度保护负责安全检查。
+ */
+#define ARM_FRONT_BARRIER_SHOULDER_Q2_MAX_DEG      120.0f
+/* 底座逻辑角绝对值不超过90deg时，认为机械臂仍面向前方栏框。 */
+#define ARM_FRONT_BARRIER_BASE_Q1_ABS_MAX_DEG       90.0f
+/* 浮点与反馈噪声容差：工具中心X>2mm才视为仍在正前方栏框区域。 */
+#define ARM_FRONT_BARRIER_TOOL_X_MARGIN_MM            2.0f
+#define ARM_REAR_CROSSING_TOOL_Z_MM               210.0f
+#define ARM_REAR_CROSSING_ACTUAL_GATE_Z_MM        205.0f
+#define ARM_REAR_CROSSING_ABORT_Z_MM              200.0f
+/* 正负X绕行包含抬升、两段15deg圆弧和侧向径向转换，最多预留16段。 */
+#define ARM_TRAJECTORY_MAX_ROUTE_SEGMENTS           16u
+#define ARM_REAR_BYPASS_ARC_STEP_DEG                15.0f
 #define ARM_LINEAR_FK_ERROR_MAX_MM                  0.5f
 #define ARM_LINEAR_HOLD_MS                        1500u
 #define ARM_LINEAR_IK_UPDATE_MS                      2u
@@ -180,17 +223,7 @@
 #define ARM_REALTIME_DEFAULT_ACCEL_MM_S2           80.0f
 #define ARM_TRACKING_ERROR_WARN_DEG                  5.0f
 
-/* 腕部PWM本轮不接管；末端工具由USART6总线舵机和PB12电磁铁管理。 */
-#define ARM_WRIST_ENABLE                            0u
-#define ARM_WRIST_PWM_MIN_US                      1000u
-#define ARM_WRIST_PWM_MID_US                      1500u
-#define ARM_WRIST_PWM_MAX_US                      2000u
-#define ARM_WRIST_MIN_ANGLE_DEG                  (-90.0f)
-#define ARM_WRIST_MAX_ANGLE_DEG                    90.0f
-#define ARM_WRIST_ZERO_OFFSET_DEG                   0.0f
-#define ARM_WRIST_DIRECTION                         1.0f
-
-/* 恢复USART6上的ID1俯仰舵机和ID2夹爪舵机闭环初始化及反馈轮询。 */
+/* 末端工具由 USART6 控制板上的 ID1 俯仰舵机和 ID2 夹爪舵机管理。 */
 #define ARM_TOOL_ENABLE                               1u
 #define ARM_TOOL_SERVO_RANGE_DEG                    240.0f
 #define ARM_TOOL_SERVO_POS_MIN                        0u
@@ -202,32 +235,49 @@
 #define ARM_TOOL_PITCH_SERVO_MAX_POS                875u
 #define ARM_TOOL_PITCH_RELATIVE_MIN_DEG            (-90.0f)
 #define ARM_TOOL_PITCH_RELATIVE_MAX_DEG              90.0f
-#define ARM_TOOL_PITCH_DIRECTION                      1.0f
-#define ARM_TOOL_PITCH_AXIS_TO_CENTER_MM             30.0f
+/*
+ * ID1实机安装方向：控制值增大时夹爪相对小臂向下转，因此绝对俯仰
+ * 增大必须使控制值减小。该符号同时用于目标换算和反馈反算，禁止只改一侧。
+ */
+#define ARM_TOOL_PITCH_DIRECTION                     (-1.0f)
+/* ID1输出轴中心到夹爪中心的实测距离；沿夹爪绝对俯仰方向参与工具坐标换算。 */
+#define ARM_TOOL_PITCH_AXIS_TO_CENTER_MM            117.0f
 #define ARM_TOOL_PITCH_UPDATE_PERIOD_MS              20u
 #define ARM_TOOL_PITCH_COMMAND_DEADBAND_POS            2u
 #define ARM_TOOL_PITCH_TRACK_TIME_MS                   0u
 
 #define ARM_GRIPPER_SERVO_ID                           2u
 #define ARM_GRIPPER_SERVO_MIN_POS                    550u
-#define ARM_GRIPPER_SERVO_MAX_POS                    630u
+#define ARM_GRIPPER_SERVO_MAX_POS                    660u
 /* ID2上电、等待抓取和释放均回到默认张开位置550。 */
 #define ARM_GRIPPER_DEFAULT_POS                      550u
 #define ARM_GRIPPER_BOOT_POS          ARM_GRIPPER_DEFAULT_POS
 #define ARM_GRIPPER_READY_POS         ARM_GRIPPER_DEFAULT_POS
 #define ARM_GRIPPER_OPEN_POS          ARM_GRIPPER_DEFAULT_POS
-/* 收到抓取命令后，ID2向控制值增大方向闭合到630。 */
-#define ARM_GRIPPER_CLOSE_POS                        630u
+/* 收到抓取命令后，ID2向控制值增大方向探测闭合到660。 */
+#define ARM_GRIPPER_CLOSE_POS                        660u
 #define ARM_GRIPPER_MOVE_TIME_MS                     500u
 #define ARM_GRIPPER_BOOT_MOVE_TIME_MS               1000u
-#define ARM_GRIPPER_RELIEF_POS                        10u
+/*
+ * ID2闭合使用独立的小到位窗口，避免通用舵机+/-15容差吞掉堵转判定。
+ * 误差0..5视为正常到位，误差>=6才允许进入停滞检测，两者无空档。
+ */
+#define ARM_GRIPPER_CLOSE_ARRIVAL_ERROR_POS            5u
+#define ARM_GRIPPER_CLOSE_ARRIVAL_STABLE_MS           120u
+#define ARM_GRIPPER_STALL_ERROR_POS                     6u
+/*
+ * 检测到接触后每次向张开方向回退10，最多回退5次（累计最多50）。
+ * 任一次回退到位并稳定后立即停止；5次均不能跟随才判定卡死。
+ */
+#define ARM_GRIPPER_RELIEF_STEP_POS                   10u
+#define ARM_GRIPPER_RELIEF_MAX_ATTEMPTS                5u
+#define ARM_GRIPPER_RELIEF_ARRIVAL_ERROR_POS            5u
 #define ARM_GRIPPER_RELIEF_MOVE_TIME_MS              150u
+#define ARM_GRIPPER_RELIEF_ATTEMPT_TIMEOUT_MS         400u
 #define ARM_GRIPPER_SETTLE_MS                        200u
 #define ARM_GRIPPER_STALL_START_IGNORE_MS            300u
-#define ARM_GRIPPER_STALL_ERROR_POS                   20u
 #define ARM_GRIPPER_STALL_WINDOW_MS                  300u
 #define ARM_GRIPPER_STALL_MAX_POSITION_SPAN            3u
-#define ARM_GRIPPER_STALL_MIN_CLOSE_TRAVEL_POS        20u
 #define ARM_GRIPPER_CLOSE_DEADLINE_MS               1500u
 #define ARM_GRIPPER_BOOT_DEADLINE_MS                2000u
 
@@ -254,7 +304,11 @@
 #define ARM_USB_TARGET_TRAVEL_Z_MM                   45.0f
 #define ARM_USB_MOVE_SPEED_MM_S                    700.0f
 #define ARM_USB_GRIPPER_Z_SPEED_MM_S                100.0f
-/* 上位机/HOME的XYZ均表示ID1俯仰舵机轴心，不包含轴外30mm夹爪长度。 */
+/*
+ * HOME继续使用ID1俯仰舵机输出轴轴心，便于机构重装后独立校准主臂。
+ * 夹爪中心命令必须显式选择ARM_CONTROL_POINT_TOOL_CENTER，固件会按
+ * ARM_TOOL_PITCH_AXIS_TO_CENTER_MM和绝对俯仰角反算ID1轴心目标。
+ */
 #define ARM_USB_HOME_X_MM                          225.1666f
 #define ARM_USB_HOME_Y_MM                            0.0f
 #define ARM_USB_HOME_Z_MM                          192.0f

@@ -1,116 +1,344 @@
-#ifndef PROTOCOL_H
-#define PROTOCOL_H
-
-#include <stddef.h>
+// Generated at: 2026-08-10T06:25:01+08:00
+#pragma once
 #include <stdint.h>
+#include <stddef.h>
 
-/* 新上位机线协议。USB CDC不使用生成文档中的物理串口波特率。 */
-#define PROTOCOL_HASH UINT32_C(0x923FFDD9)
-#define FRAME_HEADER1 90u
-#define FRAME_HEADER2 165u
-#define PROTOCOL_ENABLE_HEARTBEAT 1u
-#define PROTOCOL_STRICT_HEARTBEAT 1u
-#define PROTOCOL_REQUIRE_HANDSHAKE 1u
-#define PROTOCOL_HEARTBEAT_TIMEOUT_MS 3000u
-#define PROTOCOL_RETRY_INTERVAL_MS 100u
-#define PROTOCOL_MAX_RETRIES 3u
-#define PROTOCOL_RELIABLE_FIFO_DEPTH 4u
-#define PROTOCOL_MAX_PAYLOAD_LEN 32u
+/* USER CODE BEGIN Includes */
+/* USER CODE END Includes */
 
-typedef enum {
-    PACKET_ID_FRUITDETECTION = 0x10,
-    PACKET_ID_ACK = 0xFD,
-    PACKET_ID_HEARTBEAT = 0xFE,
-    PACKET_ID_HANDSHAKE = 0xFF,
+// 协议哈希校验码
+#define PROTOCOL_HASH 0x923FFDD9
+
+// 校验算法: CRC8
+#define CHECKSUM_ALGO_CRC8 1
+
+// 握手配置
+#define CFG_REQUIRE_HANDSHAKE 1
+#define CFG_IGNORE_VERSION_MISMATCH 0
+
+// 心跳配置
+#define CFG_ENABLE_HEARTBEAT 1
+#define CFG_STRICT_HEARTBEAT 1
+#define CFG_HEARTBEAT_TIMEOUT_MS 3000
+
+// 可靠传输配置
+#define CFG_RELIABLE_RETRY_INTERVAL_MS 100
+#define CFG_RELIABLE_MAX_RETRIES 3
+
+/* USER CODE BEGIN Private_Defines */
+/* USER CODE END Private_Defines */
+
+// 帧头定义
+#define FRAME_HEADER1 90
+#define FRAME_HEADER2 165
+
+// 数据包ID定义
+typedef enum
+{
+    PACKET_ID_ACK = 253,
+    PACKET_ID_HEARTBEAT = 254,
+    PACKET_ID_HANDSHAKE = 255,
+    PACKET_ID_FRUITDETECTION = 16,
 } PacketID;
 
-#pragma pack(push, 1)
-#define PROTOCOL_STATIC_ASSERT(name, cond) \
-    typedef char protocol_static_assert_##name[(cond) ? 1 : -1]
-
-typedef struct {
+#pragma pack(1)
+typedef struct
+{
     uint8_t acked_id;
     uint8_t ack_seq;
 } Packet_Ack;
 
-typedef struct {
+typedef struct
+{
     uint32_t count;
 } Packet_Heartbeat;
 
-typedef struct {
+typedef struct
+{
     uint32_t protocol_hash;
 } Packet_Handshake;
 
-/* D435i当前最高置信度识别结果；本阶段只观察，不触发机械臂动作。 */
-typedef struct {
-    uint8_t fruit_id; /* 0无目标，1..6对应协议文档中的六类水果。 */
-    uint8_t status;   /* 0未成熟，1成熟。 */
+typedef struct
+{
+    uint8_t fruit_id;
+    uint8_t status;
 } Packet_FruitDetection;
-#pragma pack(pop)
 
-typedef struct {
-    uint8_t connection_ready;       /* 已完成匹配哈希的握手。 */
-    uint8_t link_online;            /* 严格心跳仍在3000 ms有效期内。 */
-    uint8_t parse_state;
-    uint8_t current_rx_id;
-    uint8_t current_rx_len;
-    uint8_t current_rx_pos;
-    uint8_t last_rx_id;
-    uint8_t last_rx_len;
-    uint8_t last_tx_id;
-    uint8_t last_tx_len;
-    uint8_t last_ack_id;
-    uint8_t last_ack_seq;
-    uint8_t reliable_queue_count;
-    uint32_t session_count;         /* 每次匹配握手递增，供应用层失效旧数据。 */
-    uint32_t last_heartbeat_count;
-    uint32_t last_heartbeat_rx_ms;
-    uint32_t heartbeat_age_ms;
-    uint32_t rx_frame_count;
-    uint32_t crc_fail_count;
-    uint32_t length_fail_count;
-    uint32_t unknown_id_count;
-    uint32_t prehandshake_drop_count;
-    uint32_t handshake_ok_count;
-    uint32_t handshake_mismatch_count;
-    uint32_t heartbeat_tx_count;
-    uint32_t heartbeat_rx_count;
-    uint32_t heartbeat_timeout_count;
-    uint32_t ack_tx_count;
-    uint32_t ack_rx_count;
-    uint32_t reliable_tx_count;
-    uint32_t reliable_retry_count;
-    uint32_t reliable_drop_count;
-    uint32_t tx_fail_count;
-    uint32_t connection_reset_count;
-} Protocol_Debug_s;
+#pragma pack()
 
-PROTOCOL_STATIC_ASSERT(ack_size, sizeof(Packet_Ack) == 2);
-PROTOCOL_STATIC_ASSERT(heartbeat_size, sizeof(Packet_Heartbeat) == 4);
-PROTOCOL_STATIC_ASSERT(handshake_size, sizeof(Packet_Handshake) == 4);
-PROTOCOL_STATIC_ASSERT(fruit_detection_size,
-                       sizeof(Packet_FruitDetection) == 2);
-
-uint8_t protocol_crc8(const uint8_t *data, size_t len);
-void protocol_init(void);
-void protocol_reset_connection(void);
+// 协议辅助函数声明
+uint8_t calculate_checksum(const uint8_t *data, size_t len);
 void protocol_fsm_feed(uint8_t byte);
-void protocol_tick(uint32_t now_ms);
-uint8_t protocol_link_is_online(void);
-uint8_t protocol_connection_ready(void);
-uint32_t protocol_get_time_ms(void);
-const Protocol_Debug_s *protocol_get_debug(void);
 
-/* 通用可靠发送入口保留给后续业务包；当前FruitDetection不使用它。 */
-int protocol_send_reliable(uint8_t id, const void *payload, uint8_t size);
-int protocol_send_ack(uint8_t acked_id, uint8_t ack_seq);
-int protocol_send_heartbeat(const Packet_Heartbeat *packet);
-int protocol_send_handshake(const Packet_Handshake *packet);
-int protocol_send_fruit_detection(const Packet_FruitDetection *packet);
+// 用户可覆盖的接收回调与自动生成的发送函数声明
+void on_receive_Ack(const Packet_Ack *pkt);
+void send_Ack(const Packet_Ack *pkt);
+void on_receive_Heartbeat(const Packet_Heartbeat *pkt);
+void send_Heartbeat(const Packet_Heartbeat *pkt);
+void on_receive_Handshake(const Packet_Handshake *pkt);
+void send_Handshake(const Packet_Handshake *pkt);
+void on_receive_FruitDetection(const Packet_FruitDetection *pkt);
+void send_FruitDetection(const Packet_FruitDetection *pkt);
 
-uint8_t serial_write(const uint8_t *data, uint16_t len);
+/* USER CODE BEGIN User_Types */
+/* USER CODE END User_Types */
 
-/* 应用层覆盖该弱回调；协议层只完成帧校验和握手门控。 */
-void on_receive_FruitDetection(const Packet_FruitDetection *packet);
-
-#endif
+// CRC8查找表 (多项式 0x31)
+static const uint8_t CRC8_TABLE[256] = {
+    0x00,
+    0x31,
+    0x62,
+    0x53,
+    0xC4,
+    0xF5,
+    0xA6,
+    0x97,
+    0xB9,
+    0x88,
+    0xDB,
+    0xEA,
+    0x7D,
+    0x4C,
+    0x1F,
+    0x2E,
+    0x43,
+    0x72,
+    0x21,
+    0x10,
+    0x87,
+    0xB6,
+    0xE5,
+    0xD4,
+    0xFA,
+    0xCB,
+    0x98,
+    0xA9,
+    0x3E,
+    0x0F,
+    0x5C,
+    0x6D,
+    0x86,
+    0xB7,
+    0xE4,
+    0xD5,
+    0x42,
+    0x73,
+    0x20,
+    0x11,
+    0x3F,
+    0x0E,
+    0x5D,
+    0x6C,
+    0xFB,
+    0xCA,
+    0x99,
+    0xA8,
+    0xC5,
+    0xF4,
+    0xA7,
+    0x96,
+    0x01,
+    0x30,
+    0x63,
+    0x52,
+    0x7C,
+    0x4D,
+    0x1E,
+    0x2F,
+    0xB8,
+    0x89,
+    0xDA,
+    0xEB,
+    0x3D,
+    0x0C,
+    0x5F,
+    0x6E,
+    0xF9,
+    0xC8,
+    0x9B,
+    0xAA,
+    0x84,
+    0xB5,
+    0xE6,
+    0xD7,
+    0x40,
+    0x71,
+    0x22,
+    0x13,
+    0x7E,
+    0x4F,
+    0x1C,
+    0x2D,
+    0xBA,
+    0x8B,
+    0xD8,
+    0xE9,
+    0xC7,
+    0xF6,
+    0xA5,
+    0x94,
+    0x03,
+    0x32,
+    0x61,
+    0x50,
+    0xBB,
+    0x8A,
+    0xD9,
+    0xE8,
+    0x7F,
+    0x4E,
+    0x1D,
+    0x2C,
+    0x02,
+    0x33,
+    0x60,
+    0x51,
+    0xC6,
+    0xF7,
+    0xA4,
+    0x95,
+    0xF8,
+    0xC9,
+    0x9A,
+    0xAB,
+    0x3C,
+    0x0D,
+    0x5E,
+    0x6F,
+    0x41,
+    0x70,
+    0x23,
+    0x12,
+    0x85,
+    0xB4,
+    0xE7,
+    0xD6,
+    0x7A,
+    0x4B,
+    0x18,
+    0x29,
+    0xBE,
+    0x8F,
+    0xDC,
+    0xED,
+    0xC3,
+    0xF2,
+    0xA1,
+    0x90,
+    0x07,
+    0x36,
+    0x65,
+    0x54,
+    0x39,
+    0x08,
+    0x5B,
+    0x6A,
+    0xFD,
+    0xCC,
+    0x9F,
+    0xAE,
+    0x80,
+    0xB1,
+    0xE2,
+    0xD3,
+    0x44,
+    0x75,
+    0x26,
+    0x17,
+    0xFC,
+    0xCD,
+    0x9E,
+    0xAF,
+    0x38,
+    0x09,
+    0x5A,
+    0x6B,
+    0x45,
+    0x74,
+    0x27,
+    0x16,
+    0x81,
+    0xB0,
+    0xE3,
+    0xD2,
+    0xBF,
+    0x8E,
+    0xDD,
+    0xEC,
+    0x7B,
+    0x4A,
+    0x19,
+    0x28,
+    0x06,
+    0x37,
+    0x64,
+    0x55,
+    0xC2,
+    0xF3,
+    0xA0,
+    0x91,
+    0x47,
+    0x76,
+    0x25,
+    0x14,
+    0x83,
+    0xB2,
+    0xE1,
+    0xD0,
+    0xFE,
+    0xCF,
+    0x9C,
+    0xAD,
+    0x3A,
+    0x0B,
+    0x58,
+    0x69,
+    0x04,
+    0x35,
+    0x66,
+    0x57,
+    0xC0,
+    0xF1,
+    0xA2,
+    0x93,
+    0xBD,
+    0x8C,
+    0xDF,
+    0xEE,
+    0x79,
+    0x48,
+    0x1B,
+    0x2A,
+    0xC1,
+    0xF0,
+    0xA3,
+    0x92,
+    0x05,
+    0x34,
+    0x67,
+    0x56,
+    0x78,
+    0x49,
+    0x1A,
+    0x2B,
+    0xBC,
+    0x8D,
+    0xDE,
+    0xEF,
+    0x82,
+    0xB3,
+    0xE0,
+    0xD1,
+    0x46,
+    0x77,
+    0x24,
+    0x15,
+    0x3B,
+    0x0A,
+    0x59,
+    0x68,
+    0xFF,
+    0xCE,
+    0x9D,
+    0xAC,
+};

@@ -1,3 +1,8 @@
+/**
+ * @file general_def.h
+ * @brief 工程内通用角度、弧度和转速单位换算常量。
+ */
+
 #ifndef GENERAL_DEF_H
 #define GENERAL_DEF_H
 

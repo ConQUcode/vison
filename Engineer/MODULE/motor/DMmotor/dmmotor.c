@@ -1,3 +1,8 @@
+/**
+ * @file dmmotor.c
+ * @brief 解析达妙绝对位置反馈，并发送位置速度目标及模式特殊帧。
+ */
+
 #include "dmmotor.h"
 
 #include <math.h>
@@ -357,9 +362,22 @@ uint8_t DMMotorFeedbackValid(const DM_MotorInstance *motor)
 
 uint8_t DMMotorIsOnline(const DM_MotorInstance *motor, uint32_t now_ms)
 {
-    return DMMotorFeedbackValid(motor) &&
-           (uint32_t)(now_ms - motor->measure.last_feedback_tick) <=
-               DM_FEEDBACK_TIMEOUT_MS;
+    uint32_t last_feedback_tick;
+    uint32_t age_ms;
+
+    if (!DMMotorFeedbackValid(motor)) {
+        return 0u;
+    }
+    /*
+     * CAN反馈在中断中更新。调用方读取now_ms后若执行了较长预检，中断
+     * 可能把last_feedback_tick推进到now_ms之后；直接做无符号减法会
+     * 下溢成一个极大值，从而把持续在线的电机误判为反馈超时。
+     * 时间差小于半个uint32周期时，负的有符号差表示反馈比快照更新，
+     * 应直接视为在线；该写法同时保留HAL tick自然回绕语义。
+     */
+    last_feedback_tick = motor->measure.last_feedback_tick;
+    age_ms = now_ms - last_feedback_tick;
+    return (int32_t)age_ms < 0 || age_ms <= DM_FEEDBACK_TIMEOUT_MS;
 }
 
 uint8_t DMMotorModeConfirmed(const DM_MotorInstance *motor)

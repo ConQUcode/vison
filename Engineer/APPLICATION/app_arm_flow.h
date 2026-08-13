@@ -1,0 +1,167 @@
+/**
+ * @file app_arm_flow.h
+ * @brief 机械臂两条应用子流程：坐标抓取(PickFlow)和固定角度放置(PlaceFlow)。
+ *
+ * 工程内机械臂应用动作只有两类控制方式，本模块把它们各自封装成
+ * 独立子状态机，调用方通过 Start/Poll 串联，不再混在一个大状态机里：
+ * - PickFlow：教导位姿抓取。底座先关节空间对准目标方位（限幅在
+ *   +/-89.5deg内避免低位跨X=0），随后一条关节+ID1相对俯仰联合命令
+ *   直达教导关节角，最后夹爪闭合抓取。教导姿态夹爪从侧下方斜向上
+ *   够水果（ID1相对约-41.5deg），绝对俯仰+坐标IK对该姿态不可达，
+ *   故不走工具中心直线轨迹；工具中心坐标仅用于Watch误差显示。
+ * - PlaceFlow：写死关节角控制。转移姿态、底座引导旋转到后方、固定
+ *   释放姿态、张开夹爪，再恢复姿态并转回前方。所有角度为实机验证值。
+ *
+ * 同一时刻只允许一个子流程活动；任一命令失败后锁存FAILED原位保持，
+ * 不自动重试，与旧抓放测试行为一致。
+ */
+
+#ifndef APP_ARM_FLOW_H
+#define APP_ARM_FLOW_H
+
+#include <stdint.h>
+
+/** 当前活动的子流程；NONE表示空闲，可接受新的Start请求。 */
+typedef enum {
+    APP_ARM_FLOW_NONE = 0,
+    APP_ARM_FLOW_PICK,
+    APP_ARM_FLOW_PLACE
+} App_Arm_Flow_Active_e;
+
+/** 子流程总状态；DONE/FAILED为终态，FAILED后拒绝再次Start。 */
+typedef enum {
+    APP_ARM_FLOW_IDLE = 0,
+    APP_ARM_FLOW_RUNNING,
+    APP_ARM_FLOW_DONE,
+    APP_ARM_FLOW_FAILED
+} App_Arm_Flow_Status_e;
+
+/** 教导位姿抓取子流程步骤；顺序即执行顺序。 */
+typedef enum {
+    APP_ARM_PICK_STEP_IDLE = 0,
+    APP_ARM_PICK_STEP_SUBMIT_BASE_AIM,   /* 底座先关节转到目标方位。 */
+    APP_ARM_PICK_STEP_WAIT_BASE_AIM,
+    APP_ARM_PICK_STEP_SUBMIT_POSE,       /* 关节+ID1相对俯仰联合命令直达教导位姿。 */
+    APP_ARM_PICK_STEP_WAIT_POSE,
+    APP_ARM_PICK_STEP_WAIT_PITCH_STABLE, /* 等ID1反馈稳定在目标附近。 */
+    APP_ARM_PICK_STEP_PICK_DWELL,        /* 抓取前固定停留。 */
+    APP_ARM_PICK_STEP_SUBMIT_CLOSE,      /* 夹爪闭合，含堵转分级卸力。 */
+    APP_ARM_PICK_STEP_WAIT_CLOSE,
+    APP_ARM_PICK_STEP_POST_GRIP_DWELL,   /* 抓取后固定停留。 */
+    APP_ARM_PICK_STEP_DONE,
+    APP_ARM_PICK_STEP_FAILED
+} App_Arm_Pick_Step_e;
+
+/** 固定角度放置子流程步骤；角度值全部来自 app_config.h 实机验证参数。 */
+typedef enum {
+    APP_ARM_PLACE_STEP_IDLE = 0,
+    APP_ARM_PLACE_STEP_SUBMIT_TRANSFER,        /* 抓取侧大臂竖直、小臂上抬10deg。 */
+    APP_ARM_PLACE_STEP_WAIT_TRANSFER,
+    APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_PLACE, /* 左逆时针/右顺时针转到后方。 */
+    APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_PLACE,
+    APP_ARM_PLACE_STEP_SUBMIT_RELEASE_POSE,    /* 释放关节角+ID1相对俯仰联合命令。 */
+    APP_ARM_PLACE_STEP_WAIT_RELEASE_POSE,
+    APP_ARM_PLACE_STEP_WAIT_RELEASE_PITCH,     /* 确认ID1反馈到位后才允许释放。 */
+    APP_ARM_PLACE_STEP_SUBMIT_OPEN,            /* 夹爪张开释放。 */
+    APP_ARM_PLACE_STEP_WAIT_OPEN,              /* 完成当周期立即提交恢复姿态。 */
+    APP_ARM_PLACE_STEP_WAIT_RESTORE_TRANSFER,
+    APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_FRONT, /* 沿本次抓取侧返回前方。 */
+    APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_FRONT,
+    APP_ARM_PLACE_STEP_DONE,
+    APP_ARM_PLACE_STEP_FAILED
+} App_Arm_Place_Step_e;
+
+/** 失败来源分类，避免机械臂故障码与命令结果码数值重叠。 */
+typedef enum {
+    APP_ARM_PICK_PLACE_FAILURE_NONE = 0,
+    APP_ARM_PICK_PLACE_FAILURE_ARM,
+    APP_ARM_PICK_PLACE_FAILURE_COMMAND_SUBMIT,
+    APP_ARM_PICK_PLACE_FAILURE_COMMAND_EXECUTION
+} App_Arm_Pick_Place_Failure_Source_e;
+
+/**
+ * 教导位姿抓取目标。q_deg为教导关节角，tool_relative_pitch_deg为
+ * ID1相对小臂角；x/y/z为教导时的夹爪中心世界坐标，仅用于Watch
+ * 误差显示，不参与运动规划。
+ */
+typedef struct {
+    float q_deg[3];
+    float tool_relative_pitch_deg;
+    float x_mm;
+    float y_mm;
+    float z_mm;
+} App_Arm_Pick_Target_s;
+
+/**
+ * 抓放子流程的紧凑Watch变量；符号名沿用旧抓放测试，Watch配置不变。
+ * center和wrist单位mm，pitch/q单位deg；workspace_safety_result对应arm.h枚举。
+ */
+typedef struct {
+    uint8_t active_flow;  /* App_Arm_Flow_Active_e：当前活动子流程。 */
+    uint8_t flow_status;  /* App_Arm_Flow_Status_e：RUNNING/DONE/FAILED。 */
+    uint8_t pick_step;    /* App_Arm_Pick_Step_e：抓取子流程步骤。 */
+    uint8_t place_step;   /* App_Arm_Place_Step_e：放置子流程步骤。 */
+    uint32_t submit_result;
+    uint32_t fault; /* 兼容旧Watch；新代码应优先查看下面四个明确字段。 */
+    App_Arm_Pick_Place_Failure_Source_e failure_source;
+    uint32_t arm_fault_code;
+    uint32_t command_state;
+    uint32_t command_result;
+    uint32_t motion_state;
+    uint32_t motion_fault;
+    uint32_t tool_error_code;
+    uint32_t active_command_id;
+    uint32_t cycle_count;
+    uint32_t state_elapsed_ms; /* 当前步骤已持续时间ms。 */
+    uint8_t servo1_communication_ok;
+    uint8_t servo2_communication_ok;
+    uint8_t gripper_state;
+    float pitch_target_deg;
+    float pitch_feedback_deg;
+    float pitch_error_deg; /* 当前绝对俯仰目标减实际反馈，单位deg。 */
+    float target_center_mm[3];
+    float feedback_center_mm[3];
+    float center_error_mm[3];
+    float center_error_norm_mm;
+    float target_wrist_mm[3];
+    float target_q_deg[3];
+    uint8_t safety_route_enabled;
+    uint8_t safety_route_segment;
+    uint32_t workspace_safety_result;
+    uint32_t ik_status;
+    uint16_t path_sample_count;
+    uint32_t preflight_duration_ms;
+    uint32_t preflight_motor_service_count;
+    uint32_t preflight_tool_service_count;
+    uint8_t dm_online[3];       /* 底座、大臂、小臂达妙当前在线状态。 */
+    uint32_t dm_rx_count[3];    /* 三轴累计CAN反馈帧数。 */
+    uint32_t dm_feedback_age_ms[3]; /* 三轴最新反馈距当前任务时间。 */
+    uint8_t preflight_failed_segment;
+    uint16_t preflight_failed_sample;
+    uint32_t preflight_failed_check_mask;
+    float preflight_failed_center_mm[3];
+    float preflight_failed_q_deg[3];
+} App_Arm_Pick_Place_Test_Debug_s;
+
+extern App_Arm_Pick_Place_Test_Debug_s g_app_arm_pick_place_test_debug;
+
+/** 清零两个子流程和Watch状态；上电初始化时调用一次。 */
+void AppArmFlowInit(void);
+
+/**
+ * 启动教导位姿抓取子流程。返回1表示已受理；有子流程在运行、参数
+ * 无效或此前已锁存FAILED时返回0，不打断当前动作。
+ */
+uint8_t AppArmFlowStartPick(const App_Arm_Pick_Target_s *target,
+                            uint32_t now_ms);
+
+/** 启动固定角度放置子流程；受理条件与AppArmFlowStartPick相同。 */
+uint8_t AppArmFlowStartPlace(uint32_t now_ms);
+
+/**
+ * 周期推进当前子流程并刷新Watch；无活动流程时只刷新Watch。
+ * 返回值为当前子流程总状态；DONE后保持直到下一次Start。
+ */
+App_Arm_Flow_Status_e AppArmFlowPoll(uint32_t now_ms);
+
+#endif

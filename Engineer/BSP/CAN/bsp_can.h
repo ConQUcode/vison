@@ -1,7 +1,7 @@
 /**
  * @file bsp_can.h
  * @author Bi Kaixiang (wexhicy@gmail.com)
- * @brief  CAN的bsp层
+ * @brief CAN1/CAN2 统一注册、过滤器、回调派发和发送接口。
  * @version 0.1
  * @date 2024-01-07
  *
@@ -51,10 +51,9 @@ typedef struct
 } CAN_Init_Config_s;
 
 /**
- * @brief Register a module to CAN service,remember to call this before using a CAN device
- *        注册(初始化)一个can实例,需要传入初始化配置的指针.
- * @param config init config
- * @return CANInstance* can instance owned by module
+ * @brief 注册一个 CAN 实例；第一次注册时启动 CAN1/CAN2 和接收中断。
+ * @param config 收发 ID、句柄、回调和模块所有者配置。
+ * @return 成功返回实例指针；容量不足或参数错误返回 NULL。
  */
 CAN_Instance *CANRegister(CAN_Init_Config_s *config);
 
@@ -64,7 +63,7 @@ CAN_Instance *CANRegister(CAN_Init_Config_s *config);
  *
  * @attention 超时时间不应该超过调用此函数的任务的周期,否则会导致任务阻塞
  *
- * @param timeout 超时时间,单位为ms;后续改为us,获得更精确的控制
+ * @param timeout HAL 发送等待上限，单位 ms，必须小于调用任务周期。
  * @param _instance* can instance owned by module
  */
 uint8_t CANTransmit(CAN_Instance *_instance, float timeout);

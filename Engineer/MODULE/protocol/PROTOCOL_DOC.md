@@ -1,74 +1,154 @@
-# MCU <-> ROS USB CDC通信协议
+> 生成时间：2026-08-10T06:25:01+08:00
+# MCU ↔ ROS 串口通信协议文档
 
-本文件同步自上位机生成协议 `0x923FFDD9`。当前工程通过USB CDC传输，
-生成配置中的`115200`仅适用于物理串口，不改变USB CDC速率。
+> **Auto-generated** — 由 `scripts/codegen.py` 根据 `config/protocol.yaml` 生成，请勿手动修改。
+
+---
 
 ## 全局参数
 
-| 参数 | 值 |
-|---|---|
-| 帧头 | `5A A5` |
-| 字节序 | 小端 |
-| CRC | CRC8，多项式`0x31`，初值`0x00` |
-| CRC范围 | `ID + Len + Payload` |
-| 协议哈希 | `0x923FFDD9` |
-| 强制握手 | 是 |
-| 严格心跳 | 是，超时`3000 ms` |
-| 可靠重试基础参数 | `100 ms`，最多`3`次 |
+| 参数               | 值           |
+| :----------------- | :----------- |
+| 波特率             | `115200`     |
+| 帧头字节 1         | `0x5a`       |
+| 帧头字节 2         | `0xa5`       |
+| 校验算法           | `CRC8`       |
+| 强制握手           | `是`         |
+| 协议哈希（握手用） | `0x923FFDD9` |
+| 严格心跳模式       | `是`         |
+| 心跳超时时间       | `3000 ms`    |
+| 可靠传输重试间隔   | `100 ms`     |
+| 可靠传输最大重试   | `3 次`       |
 
-帧格式：
+---
 
-```text
-5A A5 | ID:u8 | Len:u8 | Payload:Len bytes | CRC8:u8
-```
+## 帧格式
 
-当前活动消息只有：
+每帧结构如下（小端序）：
 
-| ID | 名称 | Payload | 方向 |
-|---|---|---|---|
-| `0x10` | FruitDetection | `fruit_id:u8, status:u8` | ROS -> MCU |
-| `0xFD` | Ack | `acked_id:u8, ack_seq:u8` | 双向框架消息 |
-| `0xFE` | Heartbeat | `count:u32` | ROS发送，MCU原样回显 |
-| `0xFF` | Handshake | `protocol_hash:u32` | ROS发送，匹配时MCU原样回显 |
+|  字节位置   | 字段     | 说明                                      |
+| :---------: | :------- | :---------------------------------------- |
+|      0      | Header1  | 固定 `0x5a`                               |
+|      1      | Header2  | 固定 `0xa5`                               |
+|      2      | ID       | 消息 ID，见下表                           |
+|      3      | Len      | 数据段字节数                              |
+| 4 … 4+Len-1 | Data     | 各字段按结构体内存布局排列                |
+|    4+Len    | Checksum | CRC8，覆盖 ID + Len + Data，多项式 `0x31` |
 
-## 握手与心跳
+---
 
-- MCU上电或USB重连后处于未握手状态。
-- 未握手时只有`Handshake`可以进入业务分发，其他消息均忽略。
-- 哈希匹配时MCU回显相同Handshake并建立新会话。
-- 哈希不匹配时不回显、不进入连接状态，并记录版本错误。
-- 握手成功后，ROS必须在3000 ms内持续发送Heartbeat。
-- MCU收到Heartbeat后原样回显同一个`count`并刷新在线时间。
-- 连续3000 ms没有Heartbeat时会话失效，旧水果结果不可再使用。
-- 心跳失联不会让本测试固件打开夹爪、回HOME或中断独立上电HOME。
+## 电控 → ROS（电控主动发送）
 
-## FruitDetection
+### `Ack` — ID `0xfd`
 
-`FruitDetection`固定`Len=2`，不带`ack_seq`，MCU不会为它发送ACK。
-重复识别帧只刷新最新Watch快照，本阶段不会触发机械臂或夹爪动作。
+- **ROS 话题**：`auto_serial_bridge/system/ack`
+- **ROS 消息类型**：`std_msgs/msg/Int32MultiArray`
+- **数据段字节数（Len）**：`2`
+- **注意事项**：Framework ACK. Do not change this system message.
 
-| fruit_id | 含义 |
-|---:|---|
-| 0 | 无目标，要求`status=0` |
-| 1 | 苹果 |
-| 2 | 辣椒 |
-| 3 | 南瓜 |
-| 4 | 洋葱 |
-| 5 | 梨 |
-| 6 | 西红柿 |
+| 字节偏移 | 字段名     | C 类型    | 字节数 |
+| :------: | :--------- | :-------- | :----: |
+|    0     | `acked_id` | `uint8_t` |   1    |
+|    1     | `ack_seq`  | `uint8_t` |   1    |
+|  **2**   | *(CRC8)*   | `uint8_t` |   1    |
 
-| status | 含义 |
-|---:|---|
-| 0 | 未成熟 |
-| 1 | 成熟 |
+### `Heartbeat` — ID `0xfe`
 
-合法业务结果为`fruit_id=1..6`且`status=0..1`。`{0,0}`表示无目标并
-使当前结果无效；`fruit_id=0,status!=0`、未知水果ID或未知状态均拒绝。
+- **ROS 话题**：`auto_serial_bridge/system/heartbeat`
+- **ROS 消息类型**：`std_msgs/msg/UInt32`
+- **数据段字节数（Len）**：`4`
+- **注意事项**：Framework heartbeat. The peer returns the same count.
 
-## 当前机械臂测试语义
+| 字节偏移 | 字段名   | C 类型     | 字节数 |
+| :------: | :------- | :--------- | :----: |
+|    0     | `count`  | `uint32_t` |   4    |
+|  **4**   | *(CRC8)* | `uint8_t`  |   1    |
 
-- 新协议不再包含旧Task 0..6、Cartesian目标、ToolControl或动作状态包。
-- 机械臂独立完成三台CAN1达妙、两台USART6舵机初始化和HOME。
-- HOME控制点是ID1俯仰舵机轴心，目标约为`(225.1666,0,192.0) mm`。
-- 物理+X方向由底座朝向目标侧后通过达妙上位机保存的零点定义。
-- 固件不发送达妙清零命令，也不在FK/IK中增加X反号或180度偏置。
+### `Handshake` — ID `0xff`
+
+- **ROS 话题**：`auto_serial_bridge/system/handshake`
+- **ROS 消息类型**：`std_msgs/msg/UInt32`
+- **数据段字节数（Len）**：`4`
+- **注意事项**：Framework handshake carrying the protocol hash.
+- **默认生成行为**：`on_receive_Handshake()` 在收到匹配 `PROTOCOL_HASH` 的握手包后会自动调用 `send_Handshake(pkt)` 回包。
+
+| 字节偏移 | 字段名          | C 类型     | 字节数 |
+| :------: | :-------------- | :--------- | :----: |
+|    0     | `protocol_hash` | `uint32_t` |   4    |
+|  **4**   | *(CRC8)*        | `uint8_t`  |   1    |
+
+---
+
+## ROS → 电控（电控被动接收）
+
+### `Ack` — ID `0xfd`
+
+- **ROS 话题**：`auto_serial_bridge/system/ack`
+- **ROS 消息类型**：`std_msgs/msg/Int32MultiArray`
+- **数据段字节数（Len）**：`2`
+- **注意事项**：Framework ACK. Do not change this system message.
+
+| 字节偏移 | 字段名     | C 类型    | 字节数 |
+| :------: | :--------- | :-------- | :----: |
+|    0     | `acked_id` | `uint8_t` |   1    |
+|    1     | `ack_seq`  | `uint8_t` |   1    |
+|  **2**   | *(CRC8)*   | `uint8_t` |   1    |
+
+### `Heartbeat` — ID `0xfe`
+
+- **ROS 话题**：`auto_serial_bridge/system/heartbeat`
+- **ROS 消息类型**：`std_msgs/msg/UInt32`
+- **数据段字节数（Len）**：`4`
+- **注意事项**：Framework heartbeat. The peer returns the same count.
+- **默认生成行为**：`on_receive_Heartbeat()` 会自动调用 `send_Heartbeat(pkt)`，按原样回同一个 `count` 作为 ACK。
+
+| 字节偏移 | 字段名   | C 类型     | 字节数 |
+| :------: | :------- | :--------- | :----: |
+|    0     | `count`  | `uint32_t` |   4    |
+|  **4**   | *(CRC8)* | `uint8_t`  |   1    |
+
+### `Handshake` — ID `0xff`
+
+- **ROS 话题**：`auto_serial_bridge/system/handshake`
+- **ROS 消息类型**：`std_msgs/msg/UInt32`
+- **数据段字节数（Len）**：`4`
+- **注意事项**：Framework handshake carrying the protocol hash.
+- **默认生成行为**：`on_receive_Handshake()` 在收到匹配 `PROTOCOL_HASH` 的握手包后会自动调用 `send_Handshake(pkt)` 回包。
+
+| 字节偏移 | 字段名          | C 类型     | 字节数 |
+| :------: | :-------------- | :--------- | :----: |
+|    0     | `protocol_hash` | `uint32_t` |   4    |
+|  **4**   | *(CRC8)*        | `uint8_t`  |   1    |
+
+### `FruitDetection` — ID `0x10`
+
+- **ROS 话题**：`fruit_hardware_bridge/d435i/result`
+- **ROS 消息类型**：`std_msgs/msg/UInt8MultiArray`
+- **数据段字节数（Len）**：`2`
+- **注意事项**：D435i highest-confidence fruit result. When fruit_id is 0, status is 0 and must be ignored.
+
+| fruit_id | English      | 中文         |
+| :------: | :----------- | :----------- |
+|    0     | no_detection | 未识别到目标 |
+|    1     | apple        | 苹果         |
+|    2     | chili        | 辣椒         |
+|    3     | pumpkin      | 南瓜         |
+|    4     | onion        | 洋葱         |
+|    5     | pear         | 梨           |
+|    6     | tomato       | 西红柿       |
+
+| status | English | 中文   |
+| :----: | :------ | :----- |
+|   0    | unripe  | 未成熟 |
+|   1    | ripe    | 成熟   |
+
+
+| 字节偏移 | 字段名     | C 类型    | 字节数 |
+| :------: | :--------- | :-------- | :----: |
+|    0     | `fruit_id` | `uint8_t` |   1    |
+|    1     | `status`   | `uint8_t` |   1    |
+|  **2**   | *(CRC8)*   | `uint8_t` |   1    |
+
+---
+
+*文档由构建系统自动生成，版本以协议哈希为准。*

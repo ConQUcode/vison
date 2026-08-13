@@ -1,7 +1,7 @@
 /**
  * @file usb.h
  * @author your name
- * @brief USB虚拟串口通信模块
+ * @brief USB CDC 接收环形缓冲区和双优先级拷贝发送队列。
  * @version 0.1
  * @date 2025-12-18
  * 
@@ -15,31 +15,12 @@
 #include "stdint.h"
 #include "usbd_cdc_if.h"
 
-/* 协议常量定义 */
-#define USB_FRAME_HEADER    0xAA
-#define USB_FRAME_FOOTER    0x55
-#define USB_FUNC_CONTROL    0x02
-#define USB_DATA_LEN        0x08
-#define USB_FRAME_LEN       13
-
 /* 接收缓冲区大小 */
 #define USB_RX_BUFFER_SIZE 512
 
 /* USB接收数据回调函数类型 */
 typedef void (*usb_rx_callback_t)(uint8_t *data, uint32_t len);
 
-/* 底盘控制指令结构体 */
-#pragma pack(1)
-typedef struct {
-    float linear_x;   // 线速度 m/s
-    float linear_y;   // 横移速度 m/s
-    float angular_z;  // 角速度 rad/s
-} USB_Chassis_Cmd_s;
-#pragma pack()
-
-/* 外部变量声明 */
-extern USB_Chassis_Cmd_s usb_chassis_cmd;
-extern uint32_t usb_last_recv_time;
 extern volatile uint32_t g_usb_rx_overflow_count;
 extern volatile uint32_t g_usb_tx_fail_count;
 
@@ -62,7 +43,7 @@ typedef struct {
 extern USB_Tx_Debug_s g_usb_tx_debug;
 
 /**
- * @brief USB模块初始化
+ * @brief 初始化 USB 软件缓冲和发送队列；不调用 MX_USB_DEVICE_Init。
  * 
  */
 void USB_Init(void);
@@ -105,8 +86,13 @@ uint8_t USB_TransmitString(const char *str);
 void USB_RxHandler(uint8_t *buf, uint32_t len);
 
 /**
- * @brief USB数据解析任务(建议在主循环或任务中调用)
+ * @brief 在 UsbTask 中把接收环形缓冲逐字节交给协议 Runtime。
  */
 void USB_ProcessTask(void);
+
+/** 协议端口使用的拷贝发送接口，high_priority 非零时进入系统队列。 */
+uint8_t USB_ProtocolWrite(const uint8_t *data,
+                          uint16_t len,
+                          uint8_t high_priority);
 
 #endif // USB_H

@@ -1,3 +1,8 @@
+/**
+ * @file dmmotor.h
+ * @brief 达妙电机位置速度模式、特殊模式命令和反馈健康接口。
+ */
+
 #ifndef DMMOTOR_H
 #define DMMOTOR_H
 
@@ -94,13 +99,16 @@ typedef struct {
 
 extern volatile DM_Init_Error_e g_dm_motor_last_init_error;
 
+/** 注册一个达妙电机；失败返回 NULL 并更新 g_dm_motor_last_init_error。 */
 DM_MotorInstance *DMMotorInit(const DM_Motor_Init_Config_s *config);
+/** 允许 1 kHz 调用，内部按 2 ms 轮转发送已启用电机目标。 */
 void DMMotorControl(uint32_t now_ms);
 
 uint8_t DMMotorSetPositionSpeed(DM_MotorInstance *motor,
                                 float position_rad,
                                 float velocity_limit_rad_s);
 uint8_t DMMotorHoldCurrentPosition(DM_MotorInstance *motor);
+/** 发送 Enter Motor Mode 特殊帧；成功发送不等于已收到模式确认。 */
 uint8_t DMMotorEnterMode(DM_MotorInstance *motor);
 uint8_t DMMotorEnterModeAndHoldOpenLoop(DM_MotorInstance *motor);
 uint8_t DMMotorDisable(DM_MotorInstance *motor);
@@ -108,6 +116,7 @@ uint8_t DMMotorClearFault(DM_MotorInstance *motor);
 void DMMotorResetSoftwareFault(DM_MotorInstance *motor);
 
 uint8_t DMMotorFeedbackValid(const DM_MotorInstance *motor);
+/** 判断反馈帧有效且距离最近反馈不超过配置超时。 */
 uint8_t DMMotorIsOnline(const DM_MotorInstance *motor, uint32_t now_ms);
 uint8_t DMMotorModeConfirmed(const DM_MotorInstance *motor);
 uint8_t DMMotorHasActiveStateFault(const DM_MotorInstance *motor);

@@ -1,7 +1,7 @@
 /**
  * @file usb.c
  * @author your name
- * @brief USB虚拟串口通信模块实现
+ * @brief USB CDC 接收缓存、发送队列、超时恢复和任务上下文协议派发。
  * @version 0.1
  * @date 2025-12-18
  * 
@@ -14,13 +14,11 @@
 #include "stdio.h"
 #include "usb_device.h"
 #include "main.h" // 确保可以使用 HAL_GetTick()
-#include "protocol.h"
+#include "protocol_runtime.h"
 
 extern USBD_HandleTypeDef hUsbDeviceFS;
 
 /* 全局变量 */
-USB_Chassis_Cmd_s usb_chassis_cmd;
-uint32_t usb_last_recv_time = 0;
 volatile uint32_t g_usb_rx_overflow_count = 0;
 volatile uint32_t g_usb_tx_fail_count = 0;
 USB_Tx_Debug_s g_usb_tx_debug;
@@ -63,8 +61,7 @@ void USB_Init(void)
 {
     if (!usb_initialized)
     {
-        // USB外设初始化在main.c中已经调用MX_USB_DEVICE_Init()完成
-        // 这里只需要初始化模块内部变量
+        /* USB 外设由 UsbTask_f 初始化；这里只清空软件队列和状态。 */
         memset(ring_buffer, 0, RING_BUFFER_SIZE);
         rb_head = 0;
         rb_tail = 0;
@@ -83,9 +80,6 @@ void USB_Init(void)
         rx_callback = NULL;
         usb_initialized = 1;
         
-        // 初始化指令数据
-        memset(&usb_chassis_cmd, 0, sizeof(usb_chassis_cmd));
-        usb_last_recv_time = 0;
     }
 }
 
@@ -397,24 +391,20 @@ void USB_ProcessTask(void)
             __enable_irq();
         }
         /* 协议状态只在USB任务上下文复位，避免CDC中断与解析并发。 */
-        protocol_reset_connection();
+        ProtocolRuntimeResetConnection();
     }
     
     // 循环处理缓冲区中的数据
     while (RingBuffer_Read(&byte))
     {
-        protocol_fsm_feed(byte);
+        ProtocolRuntimeFeedByte(byte);
     }
 }
 
-uint8_t serial_write(const uint8_t *data, uint16_t len)
+uint8_t USB_ProtocolWrite(const uint8_t *data,
+                          uint16_t len,
+                          uint8_t high_priority)
 {
-    uint8_t high_priority = 0u;
-
-    if (data != NULL && len >= 3u) {
-        /* ACK独占高优先队列，不让心跳或状态重试挤占命令确认空间。 */
-        high_priority = data[2] == PACKET_ID_ACK;
-    }
     return (high_priority != 0u ?
             USB_TransmitCopyHighPriority(data, len) :
             USB_TransmitCopy(data, len)) == USBD_OK ? 1u : 0u;

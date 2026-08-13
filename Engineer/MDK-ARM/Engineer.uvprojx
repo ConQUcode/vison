@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../MODULE/algorithm;../MODULE/C_comm;../MODULE/motor;../MODULE/motor/DJImotor;../MODULE/motor/DMmotor;../BSP/CAN;../BSP/DWT;../BSP/USART;../APPLICATION;../MODULE/remote;../Middlewares/Third_Party/FreeRTOS/Source/include;../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;../Middlewares/ST/ARM/DSP/Inc;../MODULE/daemon;../MODULE;../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS;../APPLICATION/dribble;../APPLICATION/chassis;../MODULE/imu;../APPLICATION/cmd;../MODULE/relay;./Engineer;../USB_DEVICE/App;../USB_DEVICE/Target;../Middlewares/ST/STM32_USB_Device_Library/Core/Inc;../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc;../MODULE/usb;../MODULE/protocol;../MODULE/feite_motor;../MODULE/buzzer;../APPLICATION/catch;../APPLICATION/arm</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../MODULE/algorithm;../MODULE/motor;../MODULE/motor/DJImotor;../MODULE/motor/DMmotor;../BSP/CAN;../BSP/DWT;../BSP/USART;../APPLICATION;../Middlewares/Third_Party/FreeRTOS/Source/include;../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;../Middlewares/ST/ARM/DSP/Inc;../MODULE/daemon;../MODULE;../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS;../APPLICATION/chassis;../MODULE/imu;./Engineer;../USB_DEVICE/App;../USB_DEVICE/Target;../Middlewares/ST/STM32_USB_Device_Library/Core/Inc;../Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc;../MODULE/usb;../MODULE/protocol;../MODULE/servo;../MODULE/buzzer;../APPLICATION/arm</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -1176,11 +1176,6 @@
               <FilePath>..\MODULE\motor\DMmotor\dmmotor.c</FilePath>
             </File>
             <File>
-              <FileName>remote.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\MODULE\remote\remote.c</FilePath>
-            </File>
-            <File>
               <FileName>ramp_contorller.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\MODULE\algorithm\ramp_contorller.c</FilePath>
@@ -1221,11 +1216,6 @@
               <FilePath>..\MODULE\algorithm\QuaternionEKF.c</FilePath>
             </File>
             <File>
-              <FileName>relay.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\MODULE\relay\relay.c</FilePath>
-            </File>
-            <File>
               <FileName>usb.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\MODULE\usb\usb.c</FilePath>
@@ -1246,14 +1236,19 @@
               <FilePath>..\MODULE\protocol\protocol.h</FilePath>
             </File>
             <File>
-              <FileName>feite_motor.c</FileName>
+              <FileName>protocol_runtime.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\MODULE\feite_motor\feite_motor.c</FilePath>
+              <FilePath>..\MODULE\protocol\protocol_runtime.c</FilePath>
             </File>
             <File>
-              <FileName>hsl_servo.c</FileName>
+              <FileName>protocol_port.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\MODULE\feite_motor\hsl_servo.c</FilePath>
+              <FilePath>..\MODULE\protocol\protocol_port.c</FilePath>
+            </File>
+            <File>
+              <FileName>huaner_servo.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\MODULE\servo\huaner_servo.c</FilePath>
             </File>
             <File>
               <FileName>buzzer.c</FileName>
@@ -1271,14 +1266,14 @@
               <FilePath>..\APPLICATION\chassis\chassis.c</FilePath>
             </File>
             <File>
-              <FileName>robot_cmd.c</FileName>
+              <FileName>app_runtime.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\APPLICATION\cmd\robot_cmd.c</FilePath>
+              <FilePath>..\APPLICATION\app_runtime.c</FilePath>
             </File>
             <File>
-              <FileName>Test.c</FileName>
+              <FileName>app_arm_flow.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\APPLICATION\Test.c</FilePath>
+              <FilePath>..\APPLICATION\app_arm_flow.c</FilePath>
             </File>
             <File>
               <FileName>arm.c</FileName>
@@ -1296,11 +1291,6 @@
               <FilePath>..\APPLICATION\arm\arm_trajectory.c</FilePath>
             </File>
             <File>
-              <FileName>arm_wrist.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\APPLICATION\arm\arm_wrist.c</FilePath>
-            </File>
-            <File>
               <FileName>arm_tool.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\APPLICATION\arm\arm_tool.c</FilePath>
@@ -1309,16 +1299,6 @@
               <FileName>fruit_usb_bridge.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\APPLICATION\fruit_usb_bridge.c</FilePath>
-            </File>
-            <File>
-              <FileName>catch.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\APPLICATION\catch\catch.c</FilePath>
-            </File>
-            <File>
-              <FileName>catch.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\APPLICATION\catch\catch.h</FilePath>
             </File>
           </Files>
         </Group>

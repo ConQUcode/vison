@@ -1,3 +1,8 @@
+/**
+ * @file arm_internal.h
+ * @brief 机械臂状态机与轨迹模块之间的内部接口，业务层不得直接调用。
+ */
+
 #ifndef __ARM_INTERNAL_H__
 #define __ARM_INTERNAL_H__
 
@@ -17,11 +22,11 @@ Arm_Motion_Result_e ArmSetCartesianTarget(const Arm_Position_s *target,
                                           Arm_IK_Result_s *result);
 Arm_Motion_Result_e ArmMoveLinear(const Arm_Position_s *target,
                                   float max_speed_mm_s);
-Arm_Motion_Result_e ArmSetToolTipTargetVerticalDown(
-    const Arm_Position_s *target_tip,
-    Arm_IK_Result_s *result);
-Arm_Motion_Result_e ArmMoveLinearToolTipVerticalDown(
-    const Arm_Position_s *target_tip,
+Arm_Motion_Result_e ArmSetToolCenterTarget(
+    const Arm_Position_s *target_center,
+    Arm_Tool_Center_IK_Result_s *result);
+Arm_Motion_Result_e ArmMoveLinearToolCenter(
+    const Arm_Position_s *target_center,
     float max_speed_mm_s);
 
 #endif

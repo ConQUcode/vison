@@ -1,3 +1,8 @@
+/**
+ * @file arm.c
+ * @brief 三台达妙机械臂的启动、使能、HOME、命令邮箱和故障保护状态机。
+ */
+
 #include "arm.h"
 
 #include "arm_config.h"
@@ -5,7 +10,6 @@
 #include "arm_kinematics.h"
 #include "arm_tool.h"
 #include "arm_trajectory.h"
-#include "arm_wrist.h"
 #include "dmmotor.h"
 #include "can.h"
 #include "stm32f4xx_hal.h"
@@ -1009,6 +1013,12 @@ static void ArmUpdateFeedback(uint32_t now_ms)
             debug->limit_result = limit;
             debug->hard_boundary_ok = g_arm_state.hard_boundary_ok[axis];
             debug->rx_count = motor->measure.rx_count;
+            {
+                int32_t feedback_age = (int32_t)(now_ms -
+                    motor->measure.last_feedback_tick);
+                debug->feedback_age_ms = feedback_age < 0 ? 0u :
+                    (uint32_t)feedback_age;
+            }
             debug->tx_count = motor->tx_count;
             debug->tx_fail_count = motor->tx_fail_count;
             debug->mode_command_count = motor->mode_command_count;
@@ -1078,7 +1088,7 @@ static void ArmUpdateTeachAndKinematicsDebug(void)
             g_arm_state.motor_position_rad[axis];
     }
     g_arm_teach_point.wrist_center_mm = g_arm_state.wrist_center;
-    g_arm_teach_point.point_type = ARM_CONTROL_POINT_TOOL_TIP;
+    g_arm_teach_point.point_type = ARM_CONTROL_POINT_TOOL_CENTER;
     g_arm_teach_point.tool_tip_mm = g_arm_state.tool_tip;
     g_arm_teach_point.small_link_pitch_deg =
         g_arm_state.small_link_pitch_deg;
@@ -1101,6 +1111,11 @@ static void ArmUpdateTeachAndKinematicsDebug(void)
     memcpy(g_arm_kinematics_debug.q_target_deg, g_arm_state.q_target_deg,
            sizeof(g_arm_kinematics_debug.q_target_deg));
     g_arm_kinematics_debug.wrist_center_mm = g_arm_state.wrist_center;
+    g_arm_kinematics_debug.tool_center_mm = g_arm_state.tool_tip;
+    g_arm_kinematics_debug.tool_axis_to_center_mm =
+        ARM_TOOL_PITCH_AXIS_TO_CENTER_MM;
+    g_arm_kinematics_debug.tool_pitch_feedback_deg =
+        tool->tool_pitch_feedback_deg;
     g_arm_kinematics_debug.horizontal_radius_mm = sqrtf(
         g_arm_state.wrist_center.x_mm * g_arm_state.wrist_center.x_mm +
         g_arm_state.wrist_center.y_mm * g_arm_state.wrist_center.y_mm);
@@ -1671,8 +1686,12 @@ void ArmInit(void)
     g_arm_boot_debug.motion_result = ARM_MOTION_RESULT_NOT_READY;
     g_arm_boot_debug.ik_status = ARM_IK_INVALID_ARGUMENT;
     g_arm_boot_debug.state_tick = arm_runtime.boot_tick;
-    ArmWristInit();
+#if ARM_BOOT_MODE == ARM_BOOT_MODE_TEACH_POINT
+    /* 打点模式只建立USART6反馈轮询，不允许工具初始化状态机发送目标。 */
+    ArmToolInitFeedbackOnly();
+#else
     ArmToolInit();
+#endif
     ArmTrajectoryInit();
 
     if (!g_arm_state.config_valid || !g_arm_state.kinematics_valid) {
@@ -1685,6 +1704,10 @@ void ArmInit(void)
     g_arm_state.mode = ARM_MODE_DM_ENABLE_ONLY;
 #elif ARM_BOOT_MODE == ARM_BOOT_MODE_TEACH_POINT
     g_arm_state.mode = ARM_MODE_TEACH_POINT;
+    /* 主控单独复位时也强制退出旧Motor Mode，随后不再发送控制帧。 */
+    for (uint8_t axis = 0u; axis < ARM_AXIS_COUNT; ++axis) {
+        (void)DMMotorDisable(arm_joint[axis].motor);
+    }
 #elif ARM_BOOT_MODE == ARM_BOOT_MODE_TOOL_SERVO_INIT_ONLY
     g_arm_state.mode = ARM_MODE_TEACH_POINT;
     g_arm_state.start_state = ARM_START_WAIT_PASSIVE_FEEDBACK;
@@ -1698,6 +1721,12 @@ void ArmTask(void)
     ArmUpdateFeedback(now_ms);
     ArmToolUpdateSmallLinkPitch(g_arm_state.small_link_pitch_deg);
     ArmProcessCommandMailbox(now_ms);
+    /*
+     * 笛卡尔命令会在邮箱处理中同步完成整条路径预检。预检期间CAN中断
+     * 仍会更新电机反馈时间，因此后续在线/温度/轨迹检查必须刷新时钟，
+     * 不能继续使用进入ArmTask前的旧快照。
+     */
+    now_ms = HAL_GetTick();
 #if ARM_BOOT_MODE == ARM_BOOT_MODE_DM_ENABLE_ONLY
     ArmProcessEnableOnly(now_ms);
 #elif ARM_BOOT_MODE == ARM_BOOT_MODE_TOOL_SERVO_INIT_ONLY
@@ -1736,6 +1765,14 @@ void ArmTask(void)
         ArmProcessFaultReset(now_ms);
     }
     else {
+        /*
+         * 打点模式不经过正常启动状态机，同步带补偿标志必须在此常开，
+         * 否则q3反馈是未补偿的电机原始角（2026-08-13实测偏差达
+         * q2-180，导致打点关节角完全失真）。每周期重置可在故障复位
+         * 清零后自愈；q2反馈无效时补偿函数内部自动回退为0。
+         */
+        arm_runtime.elbow_coupling_active =
+            ARM_ELBOW_SHOULDER_COUPLING_ENABLE != 0u ? 1u : 0u;
         g_arm_state.start_state = ArmAllFeedbackValid(now_ms) ?
             ARM_START_READY : ARM_START_WAIT_PASSIVE_FEEDBACK;
     }
@@ -1750,6 +1787,8 @@ void ArmTask(void)
         }
     }
 #endif
+    /* 顺序执行到此统一跳收尾；部分BOOT模式不使用该标签，避免闲置告警。 */
+    goto arm_task_finish;
 arm_task_finish:
     ArmUpdateFeedback(now_ms);
     ArmToolUpdateSmallLinkPitch(g_arm_state.small_link_pitch_deg);
@@ -1809,6 +1848,39 @@ const Arm_Teach_Point_s *ArmGetTeachPoint(void)
 {
     return &g_arm_teach_point;
 }
+
+#if ARM_BOOT_MODE == ARM_BOOT_MODE_TEACH_POINT
+/*
+ * 打点模式达妙反馈轮询。达妙MIT协议不主动上报，电机只有收到命令帧
+ * 才回复一帧反馈；打点模式不运行DMMotorControl，初始化的一次失能后
+ * 反馈会冻结。这里周期性重发失能命令充当查询帧：对已失能电机没有
+ * 任何力矩影响，但每帧都触发一帧反馈回复。
+ * 每20ms轮转一轴，每台电机约60ms刷新一次，小于100ms在线判定超时。
+ */
+#define ARM_TEACH_DM_POLL_INTERVAL_MS 20u
+
+void ArmTeachPointFeedbackPoll(uint32_t now_ms)
+{
+    static uint32_t next_poll_tick;
+    static uint8_t poll_axis;
+
+    if ((int32_t)(now_ms - next_poll_tick) < 0) {
+        return;
+    }
+    next_poll_tick = now_ms + ARM_TEACH_DM_POLL_INTERVAL_MS;
+    (void)DMMotorDisable(arm_joint[poll_axis].motor);
+    poll_axis++;
+    if (poll_axis >= ARM_AXIS_COUNT) {
+        poll_axis = 0u;
+    }
+}
+#else
+void ArmTeachPointFeedbackPoll(uint32_t now_ms)
+{
+    /* 非打点模式由DMMotorControl周期发送，命令帧本身即反馈来源。 */
+    (void)now_ms;
+}
+#endif
 
 uint8_t ArmBeginJointMove(const float target_q_deg[3])
 {
@@ -1885,9 +1957,21 @@ static Arm_Command_Result_e ArmExecuteJointCommand(
     if (ArmTrajectoryIsBusy()) {
         return ARM_COMMAND_BUSY;
     }
-    result = command->move_type == ARM_MOVE_DIRECT ?
-        ArmTrajectorySetJointDirect(command->q_deg) :
-        ArmTrajectoryMoveJoint(command->q_deg);
+    if (command->move_type == ARM_MOVE_DIRECT) {
+        /* 直接模式保留原语义；同步俯仰只用于有时间轴的关节轨迹。 */
+        if (command->tool_relative_pitch_valid != 0u ||
+            command->waypoint_valid != 0u) {
+            return ARM_COMMAND_UNSUPPORTED;
+        }
+        result = ArmTrajectorySetJointDirect(command->q_deg);
+    } else {
+        result = ArmTrajectoryMoveJointWithOptions(
+            command->q_deg,
+            command->waypoint_valid,
+            command->waypoint_q_deg,
+            command->tool_relative_pitch_valid,
+            command->tool_relative_pitch_deg);
+    }
     if (result == ARM_MOTION_RESULT_OK) {
         return ARM_COMMAND_OK;
     }
@@ -1912,7 +1996,7 @@ static Arm_Command_Result_e ArmExecuteCartesianCommand(
         return ARM_COMMAND_UNSUPPORTED;
     }
     if (command->control_point != ARM_CONTROL_POINT_WRIST_CENTER &&
-        command->control_point != ARM_CONTROL_POINT_TOOL_TIP) {
+        command->control_point != ARM_CONTROL_POINT_TOOL_CENTER) {
         return ARM_COMMAND_INVALID;
     }
     if (g_arm_state.mode != ARM_MODE_READY ||
@@ -1981,11 +2065,7 @@ static Arm_Command_Result_e ArmExecuteToolCommand(
                                           g_arm_state.q_feedback_deg)) {
                 return ARM_COMMAND_PREFLIGHT_FAILED;
             }
-            if (ArmToolSetPitchDeg(command->pitch_deg) != ARM_COMMAND_OK) {
-                return ARM_COMMAND_INVALID;
-            }
-            return ArmToolTrackPitch(command->pitch_deg,
-                g_arm_state.small_link_pitch_deg, HAL_GetTick());
+            return ArmToolSetPitchDeg(command->pitch_deg);
 
         case ARM_TOOL_ACTION_GRIPPER_READY:
             return ready ? ArmToolSetGripper(ARM_GRIPPER_COMMAND_READY) :
@@ -2319,6 +2399,15 @@ static void ArmProcessCommandMailbox(uint32_t now_ms)
         joint_command.move_type = command.payload.joint.move_type;
         memcpy(joint_command.q_deg, command.payload.joint.q_deg,
                sizeof(joint_command.q_deg));
+        joint_command.waypoint_valid =
+            command.payload.joint.waypoint_valid;
+        memcpy(joint_command.waypoint_q_deg,
+               command.payload.joint.waypoint_q_deg,
+               sizeof(joint_command.waypoint_q_deg));
+        joint_command.tool_relative_pitch_valid =
+            command.payload.joint.tool_relative_pitch_valid;
+        joint_command.tool_relative_pitch_deg =
+            command.payload.joint.tool_relative_pitch_deg;
         result = ArmExecuteJointCommand(&joint_command);
     } else if (command.type == ARM_COMMAND_TYPE_CARTESIAN) {
         Arm_Cartesian_Command_s cartesian_command;
@@ -2393,6 +2482,14 @@ Arm_Command_Result_e ArmSubmitJointCommand(
     host_command.payload.joint.move_type = command->move_type;
     memcpy(host_command.payload.joint.q_deg, command->q_deg,
            sizeof(host_command.payload.joint.q_deg));
+    host_command.payload.joint.waypoint_valid = command->waypoint_valid;
+    memcpy(host_command.payload.joint.waypoint_q_deg,
+           command->waypoint_q_deg,
+           sizeof(host_command.payload.joint.waypoint_q_deg));
+    host_command.payload.joint.tool_relative_pitch_valid =
+        command->tool_relative_pitch_valid;
+    host_command.payload.joint.tool_relative_pitch_deg =
+        command->tool_relative_pitch_deg;
     return ArmSubmitCommand(&host_command);
 }
 
@@ -2417,6 +2514,25 @@ Arm_Command_Result_e ArmSubmitCartesianCommand(
     host_command.payload.cartesian.tool_yaw_valid = command->tool_yaw_valid;
     host_command.payload.cartesian.tool_yaw_deg = command->tool_yaw_deg;
     return ArmSubmitCommand(&host_command);
+}
+
+Arm_Command_Result_e ArmSubmitToolCenterCommand(
+    const Arm_Tool_Center_Command_s *command)
+{
+    Arm_Cartesian_Command_s cartesian;
+
+    if (command == NULL) {
+        return ARM_COMMAND_INVALID;
+    }
+    memset(&cartesian, 0, sizeof(cartesian));
+    cartesian.command_id = command->command_id;
+    cartesian.control_point = ARM_CONTROL_POINT_TOOL_CENTER;
+    cartesian.move_type = command->move_type;
+    cartesian.target_mm = command->target_center_mm;
+    cartesian.max_speed_mm_s = command->max_speed_mm_s;
+    cartesian.tool_pitch_valid = command->tool_pitch_valid;
+    cartesian.tool_pitch_deg = command->tool_pitch_deg;
+    return ArmSubmitCartesianCommand(&cartesian);
 }
 
 Arm_Command_Result_e ArmSubmitRealtimeCartesianTarget(
@@ -2581,7 +2697,7 @@ static void ArmUpdateHostStatus(void)
            sizeof(g_arm_host_status.q_feedback_deg));
     memcpy(g_arm_host_status.q_target_deg, g_arm_state.q_target_deg,
            sizeof(g_arm_host_status.q_target_deg));
-    /* 线协议和主臂IK统一上报ID1俯仰舵机轴心。 */
+    /* 通用position字段继续保持ID1轴心，避免改变现有上位机协议语义。 */
     g_arm_host_status.position_mm = current_endpoint;
     g_arm_host_status.target_position_mm =
         g_arm_motion_debug.target_position_mm;
@@ -2608,8 +2724,7 @@ static void ArmUpdateHostStatus(void)
     g_arm_host_status.gripper_stall_latched =
         tool->gripper_stall_latched;
     g_arm_host_status.wrist_center_mm = g_arm_state.wrist_center;
-    /* 兼容保留字段名；新协议语义同样是ID1舵机轴心。 */
-    g_arm_host_status.tool_tip_mm = current_endpoint;
+    g_arm_host_status.tool_tip_mm = g_arm_state.tool_tip;
     g_arm_host_status.tool_error_code = tool->error_code;
     g_arm_host_status.trajectory_progress =
         g_arm_motion_debug.trajectory_progress;

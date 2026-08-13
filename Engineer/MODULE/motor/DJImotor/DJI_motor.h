@@ -1,7 +1,7 @@
 /**
  * @file DJI_motor.h
  * @author Bi Kaixiang (wexhicy@gmail.com)
- * @brief   DJI电机
+ * @brief DJI 电机反馈、PID 控制和分组 CAN 发送接口。
  * @version 0.1
  * @date 2024-01-07
  *
@@ -18,7 +18,7 @@
 #include "stdint.h"
 #include "daemon.h"
 
-#define DJI_MOTOR_CNT 12 // DJI电机数量
+#define DJI_MOTOR_CNT 12 // 全工程最多注册的 DJI 电机数量
 
 /* 滤波系数设置为1的时候即关闭滤波 */
 #define SPEED_SMOOTH_COEF   0.85f     // 最好大于0.85
@@ -30,11 +30,11 @@ typedef struct
     uint16_t last_ecd;        // 上一次读取的编码器值
     uint16_t ecd;             // 0-8191,刻度总共有8192格
     float angle_single_round; // 单圈角度
-    float speed_aps;          // 角速度,单位为:度/秒
+    float speed_aps;          // 电机输出轴角速度，单位 deg/s
     int16_t real_current;     // 实际电流
     uint8_t temperature;      // 温度 Celsius
 
-    float total_angle;   // 总角度,注意方向
+    float total_angle;   // 电机输出轴累计角度，单位 deg；方向未归一化
     int32_t total_round; // 总圈数,注意方向
 	
 		float zero_offset; // 新增的零点偏移量
