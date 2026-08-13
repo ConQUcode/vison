@@ -23,6 +23,7 @@ typedef enum {
     CHASSIS_TEST_STRAIGHT_2,
     CHASSIS_TEST_STOP_AFTER_STRAIGHT_2,
     CHASSIS_TEST_WAIT_AFTER_STRAIGHT_2,
+    CHASSIS_TEST_DONE,
     CHASSIS_TEST_FAULT
 } Chassis_Test_State_e;
 
@@ -48,6 +49,7 @@ typedef struct {
     uint8_t motion_enabled;
     uint8_t left_can_id;
     uint8_t right_can_id;
+    uint8_t one_shot_straight;
     uint32_t state_tick;
     uint32_t test_start_tick;
     uint32_t imu_update_tick;
@@ -78,6 +80,8 @@ typedef struct {
     float segment_left_distance_m;
     float segment_right_distance_m;
     float segment_distance_m;
+    float straight_target_distance_m;
+    float straight_tolerance_m;
     /* 直行航向完整PID及左右轮目标/反馈。 */
     float heading_target_deg;
     float heading_error_deg;
@@ -118,6 +122,11 @@ extern Chassis_Debug_s g_chassis_debug;
  * @return 1 初始化成功；0 参数、电机注册或配置失败。
  */
 uint8_t ChassisInit(attitude_t *imu);
+uint8_t ChassisInitOneShotStraight(attitude_t *imu, float distance_m,
+                                   float tolerance_m);
+uint8_t ChassisStartOneShotStraight(float distance_m, float tolerance_m);
+uint8_t ChassisOneShotDone(void);
+uint8_t ChassisFaulted(void);
 /** 允许 1 kHz 调用，内部按 CHASSIS_CONTROL_PERIOD_MS 更新控制和里程计。 */
 void ChassisTask(uint32_t now_ms);
 /** 每次 INS_Task 完成后调用，用于 IMU 数据新鲜度监督。 */

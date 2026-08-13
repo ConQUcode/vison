@@ -2658,18 +2658,21 @@ static void ArmUpdateHostStatus(void)
         Arm_Tool_Action_e action =
             arm_command_mailbox.command.payload.tool.action;
 
-        if (ArmToolGripperFaulted() != 0u ||
-            tool->servo_feedback_valid[0] == 0u ||
-            tool->servo_feedback_valid[1] == 0u) {
+        if (ArmToolGripperFaulted() != 0u) {
             ArmHostFinishCommand(g_arm_host_status.active_command_id,
                 ARM_COMMAND_TYPE_TOOL, ARM_COMMAND_STATE_FAULTED,
                 ARM_COMMAND_NOT_READY);
         } else if (action == ARM_TOOL_ACTION_SET_PITCH) {
-            if (tool->servo_arrived[0] != 0u) {
+            if (tool->servo_feedback_valid[0] == 0u) {
+                ArmHostFinishCommand(g_arm_host_status.active_command_id,
+                    ARM_COMMAND_TYPE_TOOL, ARM_COMMAND_STATE_FAULTED,
+                    ARM_COMMAND_NOT_READY);
+            } else if (tool->servo_arrived[0] != 0u) {
                 ArmHostFinishCommand(g_arm_host_status.active_command_id,
                     ARM_COMMAND_TYPE_TOOL, ARM_COMMAND_STATE_COMPLETED,
                     ARM_COMMAND_OK);
             }
+            /* 夹爪动作的反馈失鲜和超时统一由ID2状态机收敛为明确终态。 */
         } else if (ArmToolGripperActionComplete() != 0u) {
             ArmHostFinishCommand(g_arm_host_status.active_command_id,
                 ARM_COMMAND_TYPE_TOOL, ARM_COMMAND_STATE_COMPLETED,

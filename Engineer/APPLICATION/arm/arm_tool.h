@@ -39,10 +39,11 @@ typedef enum {
     ARM_GRIPPER_OPEN,              /* 已在默认位置550。 */
     ARM_GRIPPER_CLOSING,           /* 正在闭合到探测抓取位置660。 */
     ARM_GRIPPER_CONTACT_SUSPECTED, /* 已检测到位置停滞，尚未完成卸力。 */
-    ARM_GRIPPER_RELIEVING,         /* 分级卸力：每次回退10，最多5次。 */
+    ARM_GRIPPER_RELIEVING,         /* 分级卸力：每次回退10，最多4次。 */
     ARM_GRIPPER_HELD_CONTACT,      /* 受阻后卸力完成，不代表检测到夹持力。 */
     ARM_GRIPPER_CLOSED_EMPTY,      /* 正常到达660，未检测到提前接触。 */
-    ARM_GRIPPER_JAMMED,            /* 5次分级回退后仍不能跟随目标。 */
+    ARM_GRIPPER_FORCED_HELD,       /* 4次回退耗尽，记录后强制按抓取完成处理。 */
+    ARM_GRIPPER_JAMMED,            /* 非接触卸力失败或其他夹爪卡死。 */
     ARM_GRIPPER_FAULT              /* 反馈、发送、超时或初始化故障。 */
 } Arm_Gripper_State_e;
 
@@ -127,6 +128,7 @@ typedef struct {
     uint32_t gripper_last_feedback_sequence;
     uint32_t gripper_contact_count;
     uint32_t gripper_jam_count;
+    uint32_t gripper_forced_held_count;
     uint32_t gripper_timeout_count;
 
     /* 非阻塞发送统计及配置工具长度对应的夹爪中心调试值。 */

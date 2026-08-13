@@ -1,16 +1,19 @@
-# Chassis 65 mm Before Pick
+# Segmented Chassis Move And Three Picks
 
 ## Goal
 
-In `APP_MODE_ARM`, drive the chassis forward 65 mm once, wait until it has
-stopped, then start the existing alternating arm pick/place loop.
+In `APP_MODE_ARM`, run a finite sequence: drive 585 mm, pick/place point 1,
+drive 500 mm, pick/place point 2, drive 500 mm, pick/place point 1, then stop.
 
 ## Phases
 
-- [in_progress] Inspect chassis initialization, distance control, task ownership, and public API.
-- [pending] Add a one-shot configurable-distance chassis operation without enabling the legacy 1 m/turn loop.
-- [pending] Integrate chassis initialization/tasks and gate arm picking on successful 65 mm completion.
-- [pending] Run static consistency and diff checks; do not compile or flash.
+- [complete] Inspect chassis initialization, distance control, task ownership, and public API.
+- [complete] Add a one-shot configurable-distance chassis operation without enabling the legacy 1 m/turn loop.
+- [complete] Integrate chassis initialization/tasks and gate arm picking on successful 650 mm completion.
+- [complete] Run static consistency and diff checks; do not compile or flash.
+- [complete] Add repeatable one-shot straight segments after the first move.
+- [complete] Limit the test to three pick/place operations: point 1, 2, 1.
+- [complete] Reduce contact-relief attempts from five to four.
 
 ## Constraints
 
@@ -21,4 +24,6 @@ stopped, then start the existing alternating arm pick/place loop.
 
 ## Errors
 
-- None.
+- `rg` patterns containing spaces/pipes were parsed by `cmd`; subsequent searches use separate `-e` patterns or simple tokens.
+- PowerShell startup failed with `8009001d`; continued in native `cmd.exe`.
+- Two broad patches were rejected by encoded Chinese comment anchors; no partial edits landed, and the changes were reapplied with stable symbol anchors.

@@ -27,6 +27,12 @@
  */
 #define APP_ARM_TOOL_CENTER_TEST_ENABLE              1u
 #define APP_ARM_PICK_PLACE_COMMAND_ID_BASE    0xA11B0000u
+/* 抓取循环开始前，底盘只向前移动一次585mm；停车误差窗口为3mm。 */
+#define APP_ARM_PRE_PICK_CHASSIS_DISTANCE_M          0.585f
+#define APP_ARM_PRE_PICK_CHASSIS_TOLERANCE_M         0.003f
+/* 前两次完成放置后前进500mm；总共执行点1、点2、点1三次抓放。 */
+#define APP_ARM_BETWEEN_PICK_CHASSIS_DISTANCE_M      0.500f
+#define APP_ARM_TEST_PICK_COUNT                         3u
 /*
  * 两个采摘打点的完整教导位姿（2026-08-13无力打点实测+耦合修正）。
  * 点1在底座正左(q1约+90deg)，点2在正右(q1约-90deg)。

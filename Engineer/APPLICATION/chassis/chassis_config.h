@@ -11,16 +11,16 @@
 /* CAN2主动轮：左ID1、右ID2；以下命令/反馈符号必须架空实测确认。 */
 #define CHASSIS_LEFT_MOTOR_ID                  1u
 #define CHASSIS_RIGHT_MOTOR_ID                 2u
-#define CHASSIS_LEFT_COMMAND_SIGN              1.0f
-#define CHASSIS_RIGHT_COMMAND_SIGN           (-1.0f)
-#define CHASSIS_LEFT_FEEDBACK_SIGN             1.0f
-#define CHASSIS_RIGHT_FEEDBACK_SIGN          (-1.0f)
+#define CHASSIS_LEFT_COMMAND_SIGN            (-1.0f)
+#define CHASSIS_RIGHT_COMMAND_SIGN             1.0f
+#define CHASSIS_LEFT_FEEDBACK_SIGN           (-1.0f)
+#define CHASSIS_RIGHT_FEEDBACK_SIGN            1.0f
 /* 机械参数：95 mm轮径、19.2032减速比、320 mm轮距（轮距待实测）。 */
 #define CHASSIS_WHEEL_RADIUS_M                 0.0475f
 #define CHASSIS_REDUCTION_RATIO               19.2032f
 #define CHASSIS_TRACK_WIDTH_M                  0.320f
 /* 当前实测方向：逆时针转动车体时逻辑Yaw应增加；若相反只修改此符号。 */
-#define CHASSIS_IMU_YAW_SIGN                 (1.0f)
+#define CHASSIS_IMU_YAW_SIGN                (-1.0f)
 /* 状态机与循环测试时序。 */
 #define CHASSIS_CONTROL_PERIOD_MS              5u
 #define CHASSIS_TEST_START_DELAY_MS         3000u

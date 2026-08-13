@@ -17,23 +17,25 @@
 #include "DJI_motor.h"
 #include "dmmotor.h"
 
-#if APP_CHASSIS_ONE_METER_ENABLED
+#if APP_CHASSIS_ONE_METER_ENABLED || APP_ARM_ENABLED
 #include "chassis.h"
 #include "ins_task.h"
-#elif APP_ARM_CORE_ENABLED
+#endif
+#if APP_ARM_CORE_ENABLED
 #include "arm.h"
 #include "arm_kinematics.h"
 #include "arm_tool.h"
 #if APP_ARM_ENABLED
 #include "fruit_usb_bridge.h"
 #endif
-#elif APP_HUANER_FEEDBACK_ENABLED
+#endif
+#if APP_HUANER_FEEDBACK_ENABLED
 #include "huaner_servo.h"
 #endif
 
 App_Arm_Teach_Debug_s g_app_arm_teach_debug;
 
-#if APP_CHASSIS_ONE_METER_ENABLED
+#if APP_CHASSIS_ONE_METER_ENABLED || APP_ARM_ENABLED
 /* INS_Init 返回的姿态快照只由 INS 写、底盘读。 */
 static attitude_t *app_chassis_imu;
 #endif
@@ -55,11 +57,13 @@ typedef enum {
     APP_ARM_SCHED_WAIT_READY = 0, /* 等HOME完成、主机ready。 */
     APP_ARM_SCHED_PICK,           /* 坐标抓取子流程运行中。 */
     APP_ARM_SCHED_PLACE,          /* 固定角度放置子流程运行中。 */
+    APP_ARM_SCHED_DONE,           /* 三次抓放完成后保持停止。 */
     APP_ARM_SCHED_FAILED          /* 任一子流程失败后原位保持。 */
 } App_Arm_Sched_State_e;
 
 static App_Arm_Sched_State_e app_arm_sched_state;
 static uint8_t app_arm_pick_point_index;
+static uint8_t app_arm_completed_pick_count;
 
 /* 左右两个教导点交替抓取，首次从点1开始。 */
 static const App_Arm_Pick_Target_s app_arm_pick_points[2] = {
@@ -89,12 +93,13 @@ static void AppArmPickPlaceTestTask(uint32_t now_ms)
     App_Arm_Flow_Status_e status = AppArmFlowPoll(now_ms);
     Arm_Host_Status_s host;
 
-    if (status == APP_ARM_FLOW_FAILED) {
+    if (status == APP_ARM_FLOW_FAILED || ChassisFaulted() != 0u) {
         app_arm_sched_state = APP_ARM_SCHED_FAILED;
     }
     switch (app_arm_sched_state) {
     case APP_ARM_SCHED_WAIT_READY:
-        if (ArmGetHostStatus(&host) == 0u || host.ready == 0u) {
+        if (ChassisOneShotDone() == 0u ||
+            ArmGetHostStatus(&host) == 0u || host.ready == 0u) {
             break;
         }
         if (AppArmFlowStartPick(
@@ -113,16 +118,25 @@ static void AppArmPickPlaceTestTask(uint32_t now_ms)
     case APP_ARM_SCHED_PLACE: {
         uint8_t next_pick_point_index =
             (uint8_t)(app_arm_pick_point_index ^ 1u);
-        if (status == APP_ARM_FLOW_DONE &&
-            AppArmFlowStartPick(
-                &app_arm_pick_points[next_pick_point_index], now_ms) != 0u) {
-            app_arm_pick_point_index = next_pick_point_index;
-            g_app_arm_pick_place_test_debug.cycle_count++;
-            app_arm_sched_state = APP_ARM_SCHED_PICK;
+        if (status == APP_ARM_FLOW_DONE) {
+            if ((uint8_t)(app_arm_completed_pick_count + 1u) >=
+                    APP_ARM_TEST_PICK_COUNT) {
+                app_arm_completed_pick_count++;
+                g_app_arm_pick_place_test_debug.cycle_count++;
+                app_arm_sched_state = APP_ARM_SCHED_DONE;
+            } else if (ChassisStartOneShotStraight(
+                    APP_ARM_BETWEEN_PICK_CHASSIS_DISTANCE_M,
+                    APP_ARM_PRE_PICK_CHASSIS_TOLERANCE_M) != 0u) {
+                app_arm_completed_pick_count++;
+                g_app_arm_pick_place_test_debug.cycle_count++;
+                app_arm_pick_point_index = next_pick_point_index;
+                app_arm_sched_state = APP_ARM_SCHED_WAIT_READY;
+            }
         }
         break;
     }
 
+    case APP_ARM_SCHED_DONE:
     case APP_ARM_SCHED_FAILED:
     default:
         break;
@@ -221,11 +235,16 @@ void AppInit(void)
     ProtocolRuntimeInit();
     FruitUsbBridgeInit();
     BuzzerInit();
+    app_chassis_imu = INS_Init();
+    (void)ChassisInitOneShotStraight(
+        app_chassis_imu, APP_ARM_PRE_PICK_CHASSIS_DISTANCE_M,
+        APP_ARM_PRE_PICK_CHASSIS_TOLERANCE_M);
     ArmInit();
 #if APP_ARM_TOOL_CENTER_TEST_ENABLE
     AppArmFlowInit();
     app_arm_sched_state = APP_ARM_SCHED_WAIT_READY;
     app_arm_pick_point_index = 0u;
+    app_arm_completed_pick_count = 0u;
 #endif
 #elif APP_HUANER_FEEDBACK_ENABLED
     if (HuanerServoInit() != 0u) {
@@ -240,7 +259,7 @@ void AppInit(void)
 
 void AppImuTask(uint32_t now_ms)
 {
-#if APP_CHASSIS_ONE_METER_ENABLED
+#if APP_CHASSIS_ONE_METER_ENABLED || APP_ARM_ENABLED
     INS_Task();
     ChassisNotifyImuUpdate(now_ms);
 #else
@@ -250,7 +269,7 @@ void AppImuTask(uint32_t now_ms)
 
 void AppChassisTask(uint32_t now_ms)
 {
-#if APP_CHASSIS_ONE_METER_ENABLED
+#if APP_CHASSIS_ONE_METER_ENABLED || APP_ARM_ENABLED
     ChassisTask(now_ms);
 #else
     (void)now_ms;

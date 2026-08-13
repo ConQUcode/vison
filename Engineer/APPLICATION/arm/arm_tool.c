@@ -72,7 +72,8 @@ static void ArmToolUpdateGripperStallDebug(void)
         g_arm_tool_debug.gripper_state == ARM_GRIPPER_READY ||
         g_arm_tool_debug.gripper_state == ARM_GRIPPER_OPEN ||
         g_arm_tool_debug.gripper_state == ARM_GRIPPER_HELD_CONTACT ||
-        g_arm_tool_debug.gripper_state == ARM_GRIPPER_CLOSED_EMPTY;
+        g_arm_tool_debug.gripper_state == ARM_GRIPPER_CLOSED_EMPTY ||
+        g_arm_tool_debug.gripper_state == ARM_GRIPPER_FORCED_HELD;
     g_arm_gripper_stall_debug.target_deg =
         ArmToolServoPositionToDeg(g_arm_tool_debug.gripper_target_pos);
     g_arm_gripper_stall_debug.current_deg =
@@ -735,6 +736,31 @@ static uint8_t ArmToolUpdateStallWindow(uint32_t now_ms)
     return 0u;
 }
 
+static void ArmToolHandleReliefAttemptTimeout(uint32_t now_ms)
+{
+    if (ArmToolQueueNextRelief(now_ms) == 0u) {
+        uint8_t contact_attempts_exhausted =
+            arm_gripper_relief_outcome == ARM_GRIPPER_RELIEF_CONTACT &&
+            g_arm_tool_debug.gripper_relief_attempt_count >=
+                ARM_GRIPPER_RELIEF_MAX_ATTEMPTS;
+
+        g_arm_tool_debug.gripper_jam_count++;
+        g_arm_tool_debug.gripper_state =
+            contact_attempts_exhausted != 0u ?
+                ARM_GRIPPER_FORCED_HELD : ARM_GRIPPER_FAULT;
+        g_arm_tool_debug.gripper_fault_latched =
+            contact_attempts_exhausted != 0u ? 0u : 1u;
+        if (contact_attempts_exhausted != 0u) {
+            g_arm_tool_debug.gripper_forced_held_count++;
+        }
+        g_arm_tool_debug.error_code = ARM_TOOL_ERROR_GRIPPER_STALL;
+        if (g_arm_tool_debug.init_state == ARM_TOOL_INIT_RELIEVING) {
+            g_arm_tool_debug.init_state = ARM_TOOL_INIT_ERROR;
+        }
+        arm_gripper_relief_outcome = ARM_GRIPPER_RELIEF_NONE;
+    }
+}
+
 static void ArmToolProcessClosing(uint32_t now_ms, uint8_t boot_motion)
 {
     uint32_t elapsed_ms = now_ms -
@@ -743,10 +769,15 @@ static void ArmToolProcessClosing(uint32_t now_ms, uint8_t boot_motion)
         ARM_GRIPPER_BOOT_DEADLINE_MS : ARM_GRIPPER_CLOSE_DEADLINE_MS;
 
     if (g_arm_tool_debug.servo_feedback_valid[1] == 0u) {
-        if (g_arm_tool_debug.servo_online[1] == 0u) {
+        /* 反馈失鲜不能绕过动作总截止时间，否则会永久停在CLOSING。 */
+        if (g_arm_tool_debug.servo_online[1] == 0u ||
+            elapsed_ms >= deadline_ms) {
             g_arm_tool_debug.gripper_state = ARM_GRIPPER_FAULT;
             g_arm_tool_debug.gripper_fault_latched = 1u;
             g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_FEEDBACK;
+            if (elapsed_ms >= deadline_ms) {
+                g_arm_tool_debug.gripper_timeout_count++;
+            }
             if (boot_motion != 0u) {
                 g_arm_tool_debug.init_state = ARM_TOOL_INIT_ERROR;
             }
@@ -792,6 +823,8 @@ static void ArmToolProcessClosing(uint32_t now_ms, uint8_t boot_motion)
 static void ArmToolProcessRelief(uint32_t now_ms)
 {
     int32_t relief_error;
+    uint32_t elapsed_ms = now_ms -
+        g_arm_tool_debug.gripper_action_start_tick;
 
     if (g_arm_tool_debug.servo_feedback_valid[1] == 0u) {
         if (g_arm_tool_debug.servo_online[1] == 0u) {
@@ -801,6 +834,10 @@ static void ArmToolProcessRelief(uint32_t now_ms)
             if (g_arm_tool_debug.init_state == ARM_TOOL_INIT_RELIEVING) {
                 g_arm_tool_debug.init_state = ARM_TOOL_INIT_ERROR;
             }
+        } else if (elapsed_ms >= ARM_GRIPPER_RELIEF_ATTEMPT_TIMEOUT_MS) {
+            /* 短时失鲜仍推进本次回退，四次接触卸力最终进入FORCED_HELD。 */
+            g_arm_tool_debug.gripper_settle_start_tick = 0u;
+            ArmToolHandleReliefAttemptTimeout(now_ms);
         }
         return;
     }
@@ -812,21 +849,8 @@ static void ArmToolProcessRelief(uint32_t now_ms)
     if (g_arm_tool_debug.tx_pending[1] != 0u ||
         (uint32_t)relief_error > ARM_GRIPPER_RELIEF_ARRIVAL_ERROR_POS) {
         g_arm_tool_debug.gripper_settle_start_tick = 0u;
-        if ((uint32_t)(now_ms -
-                g_arm_tool_debug.gripper_action_start_tick) >=
-            ARM_GRIPPER_RELIEF_ATTEMPT_TIMEOUT_MS) {
-            if (ArmToolQueueNextRelief(now_ms) == 0u) {
-                g_arm_tool_debug.gripper_jam_count++;
-                g_arm_tool_debug.gripper_state =
-                    arm_gripper_relief_outcome == ARM_GRIPPER_RELIEF_CONTACT ?
-                    ARM_GRIPPER_JAMMED : ARM_GRIPPER_FAULT;
-                g_arm_tool_debug.gripper_fault_latched = 1u;
-                g_arm_tool_debug.error_code = ARM_TOOL_ERROR_GRIPPER_STALL;
-                if (g_arm_tool_debug.init_state == ARM_TOOL_INIT_RELIEVING) {
-                    g_arm_tool_debug.init_state = ARM_TOOL_INIT_ERROR;
-                }
-                arm_gripper_relief_outcome = ARM_GRIPPER_RELIEF_NONE;
-            }
+        if (elapsed_ms >= ARM_GRIPPER_RELIEF_ATTEMPT_TIMEOUT_MS) {
+            ArmToolHandleReliefAttemptTimeout(now_ms);
         }
         return;
     }
@@ -904,6 +928,7 @@ static void ARM_TOOL_DISABLED_UNUSED ArmToolProcessGripper(uint32_t now_ms)
         case ARM_GRIPPER_CONTACT_SUSPECTED:
         case ARM_GRIPPER_HELD_CONTACT:
         case ARM_GRIPPER_CLOSED_EMPTY:
+        case ARM_GRIPPER_FORCED_HELD:
         case ARM_GRIPPER_JAMMED:
         case ARM_GRIPPER_FAULT:
         default:
@@ -1202,7 +1227,8 @@ uint8_t ArmToolGripperActionComplete(void)
     return g_arm_tool_debug.gripper_state == ARM_GRIPPER_READY ||
            g_arm_tool_debug.gripper_state == ARM_GRIPPER_OPEN ||
            g_arm_tool_debug.gripper_state == ARM_GRIPPER_HELD_CONTACT ||
-           g_arm_tool_debug.gripper_state == ARM_GRIPPER_CLOSED_EMPTY;
+           g_arm_tool_debug.gripper_state == ARM_GRIPPER_CLOSED_EMPTY ||
+           g_arm_tool_debug.gripper_state == ARM_GRIPPER_FORCED_HELD;
 }
 
 uint8_t ArmToolGripperFaulted(void)

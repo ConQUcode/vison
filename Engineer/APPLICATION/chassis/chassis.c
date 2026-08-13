@@ -32,6 +32,9 @@ static float chassis_last_right_distance_m;
 static float chassis_last_imu_yaw_deg;
 static float chassis_ramped_linear_m_s;
 static float chassis_ramped_angular_rad_s;
+static uint8_t chassis_one_shot_start_requested;
+static float chassis_requested_distance_m;
+static float chassis_requested_tolerance_m;
 
 static float ChassisClamp(float value, float min_value, float max_value)
 {
@@ -426,9 +429,9 @@ static void ChassisRunStraight(uint32_t now_ms, float dt_s,
         ChassisLatchFault(CHASSIS_FAULT_EXCESS_DISTANCE);
         return;
     }
-    remaining_m = CHASSIS_TEST_DISTANCE_M -
+    remaining_m = g_chassis_debug.straight_target_distance_m -
         g_chassis_debug.segment_distance_m;
-    if (remaining_m <= CHASSIS_DISTANCE_TOLERANCE_M) {
+    if (remaining_m <= g_chassis_debug.straight_tolerance_m) {
         ChassisResetMotionRamps();
         ChassisZeroTargets();
         chassis_stop_stable_tick = 0u;
@@ -573,17 +576,29 @@ static uint8_t ChassisWaitFinished(uint32_t now_ms)
     return 0u;
 }
 
-uint8_t ChassisInit(attitude_t *imu)
+static uint8_t ChassisInitInternal(attitude_t *imu,
+                                   uint8_t one_shot_straight,
+                                   float distance_m,
+                                   float tolerance_m)
 {
     Motor_Init_Config_s config;
 
     memset(&g_chassis_debug, 0, sizeof(g_chassis_debug));
     memset(&config, 0, sizeof(config));
+    chassis_one_shot_start_requested = 0u;
+    chassis_requested_distance_m = 0.0f;
+    chassis_requested_tolerance_m = 0.0f;
     chassis_imu = imu;
-    if (chassis_imu == NULL) {
+    if (chassis_imu == NULL || !isfinite(distance_m) ||
+        !isfinite(tolerance_m) || distance_m <= 0.0f ||
+        tolerance_m <= 0.0f || tolerance_m >= distance_m) {
         g_chassis_debug.fault = CHASSIS_FAULT_INIT;
+        g_chassis_debug.state = CHASSIS_TEST_FAULT;
         return 0u;
     }
+    g_chassis_debug.one_shot_straight = one_shot_straight;
+    g_chassis_debug.straight_target_distance_m = distance_m;
+    g_chassis_debug.straight_tolerance_m = tolerance_m;
     config.can_init_config.can_handle = &hcan2;
     config.controller_param_init_config.speed_PID.Kp = CHASSIS_SPEED_PID_KP;
     config.controller_param_init_config.speed_PID.Ki = CHASSIS_SPEED_PID_KI;
@@ -629,11 +644,55 @@ uint8_t ChassisInit(attitude_t *imu)
     g_chassis_debug.initialized = 1u;
     g_chassis_debug.left_can_id = CHASSIS_LEFT_MOTOR_ID;
     g_chassis_debug.right_can_id = CHASSIS_RIGHT_MOTOR_ID;
-    g_chassis_debug.state = CHASSIS_AUTO_FORWARD_TEST_ENABLE != 0u ?
-        CHASSIS_TEST_WAIT_IMU : CHASSIS_TEST_DISABLED;
+    g_chassis_debug.state = one_shot_straight != 0u ||
+        CHASSIS_AUTO_FORWARD_TEST_ENABLE != 0u ?
+            CHASSIS_TEST_WAIT_IMU : CHASSIS_TEST_DISABLED;
     g_chassis_debug.state_tick = HAL_GetTick();
     chassis_last_control_tick = HAL_GetTick();
     return 1u;
+}
+
+uint8_t ChassisInit(attitude_t *imu)
+{
+    return ChassisInitInternal(imu, 0u, CHASSIS_TEST_DISTANCE_M,
+                               CHASSIS_DISTANCE_TOLERANCE_M);
+}
+
+uint8_t ChassisInitOneShotStraight(attitude_t *imu, float distance_m,
+                                   float tolerance_m)
+{
+    return ChassisInitInternal(imu, 1u, distance_m, tolerance_m);
+}
+
+uint8_t ChassisStartOneShotStraight(float distance_m, float tolerance_m)
+{
+    if (g_chassis_debug.initialized == 0u ||
+        g_chassis_debug.one_shot_straight == 0u ||
+        g_chassis_debug.state != CHASSIS_TEST_DONE ||
+        chassis_one_shot_start_requested != 0u ||
+        !isfinite(distance_m) || !isfinite(tolerance_m) ||
+        distance_m <= 0.0f || tolerance_m <= 0.0f ||
+        tolerance_m >= distance_m) {
+        return 0u;
+    }
+    chassis_requested_distance_m = distance_m;
+    chassis_requested_tolerance_m = tolerance_m;
+    chassis_one_shot_start_requested = 1u;
+    return 1u;
+}
+
+uint8_t ChassisOneShotDone(void)
+{
+    return g_chassis_debug.initialized != 0u &&
+        g_chassis_debug.one_shot_straight != 0u &&
+        chassis_one_shot_start_requested == 0u &&
+        g_chassis_debug.state == CHASSIS_TEST_DONE;
+}
+
+uint8_t ChassisFaulted(void)
+{
+    return g_chassis_debug.fault != CHASSIS_FAULT_NONE ||
+        g_chassis_debug.state == CHASSIS_TEST_FAULT;
 }
 
 void ChassisNotifyImuUpdate(uint32_t now_ms)
@@ -714,7 +773,9 @@ void ChassisTask(uint32_t now_ms)
             if (!ChassisFeedbackHealthy()) break;
             ChassisUpdateOdometry();
             if (ChassisStopSettled(now_ms)) {
-                ChassisSetState(CHASSIS_TEST_WAIT_AFTER_STRAIGHT_1, now_ms);
+                ChassisSetState(g_chassis_debug.one_shot_straight != 0u ?
+                    CHASSIS_TEST_DONE :
+                    CHASSIS_TEST_WAIT_AFTER_STRAIGHT_1, now_ms);
             }
             break;
 
@@ -771,6 +832,22 @@ void ChassisTask(uint32_t now_ms)
                 g_chassis_debug.cycle_count++;
                 ChassisBeginStraight(CHASSIS_TEST_STRAIGHT_1, now_ms,
                     g_chassis_debug.yaw_deg);
+            }
+            break;
+
+        case CHASSIS_TEST_DONE:
+            ChassisResetMotionRamps();
+            ChassisZeroTargets();
+            if (chassis_one_shot_start_requested != 0u) {
+                if (!ChassisFeedbackHealthy()) break;
+                ChassisUpdateOdometry();
+                g_chassis_debug.straight_target_distance_m =
+                    chassis_requested_distance_m;
+                g_chassis_debug.straight_tolerance_m =
+                    chassis_requested_tolerance_m;
+                chassis_one_shot_start_requested = 0u;
+                ChassisBeginStraight(CHASSIS_TEST_STRAIGHT_1, now_ms,
+                                     g_chassis_debug.yaw_deg);
             }
             break;
 

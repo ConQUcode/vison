@@ -471,6 +471,7 @@ static void AppArmFlowPollPick(const Arm_Host_Status_s *host,
         break;
 
     case APP_ARM_PICK_STEP_WAIT_CLOSE:
+        /* FORCED_HELD after four contact-relief attempts completes the grip. */
         /*
          * 提前受阻并完成分级卸力后进入HELD_CONTACT，或无阻挡正常到660
          * 进入CLOSED_EMPTY，

@@ -266,11 +266,11 @@
 #define ARM_GRIPPER_CLOSE_ARRIVAL_STABLE_MS           120u
 #define ARM_GRIPPER_STALL_ERROR_POS                     6u
 /*
- * 检测到接触后每次向张开方向回退10，最多回退5次（累计最多50）。
- * 任一次回退到位并稳定后立即停止；5次均不能跟随才判定卡死。
+ * 检测到接触后每次向张开方向回退10，最多回退4次（累计最多40）。
+ * 任一次回退到位并稳定后立即停止；4次均不能跟随则强制按抓取完成。
  */
 #define ARM_GRIPPER_RELIEF_STEP_POS                   10u
-#define ARM_GRIPPER_RELIEF_MAX_ATTEMPTS                5u
+#define ARM_GRIPPER_RELIEF_MAX_ATTEMPTS                4u
 #define ARM_GRIPPER_RELIEF_ARRIVAL_ERROR_POS            5u
 #define ARM_GRIPPER_RELIEF_MOVE_TIME_MS              150u
 #define ARM_GRIPPER_RELIEF_ATTEMPT_TIMEOUT_MS         400u
