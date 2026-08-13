@@ -1,6 +1,6 @@
 /**
  * @file chassis.h
- * @brief CAN2 双 M3508 差速底盘的直行/右转循环测试状态、故障和 Watch 快照。
+ * @brief CAN2 双 M3508 差速底盘的通用相对运动命令接口与 Watch 快照。
  */
 
 #ifndef __CHASSIS_H_
@@ -10,22 +10,34 @@
 #include "stdint.h"
 
 typedef enum {
-    CHASSIS_TEST_DISABLED = 0,
-    CHASSIS_TEST_WAIT_IMU,
-    CHASSIS_TEST_WAIT_MOTORS,
-    CHASSIS_TEST_SETTLE_ZERO,
-    CHASSIS_TEST_STRAIGHT_1,
-    CHASSIS_TEST_STOP_AFTER_STRAIGHT_1,
-    CHASSIS_TEST_WAIT_AFTER_STRAIGHT_1,
-    CHASSIS_TEST_TURN_RIGHT,
-    CHASSIS_TEST_STOP_AFTER_TURN,
-    CHASSIS_TEST_WAIT_AFTER_TURN,
-    CHASSIS_TEST_STRAIGHT_2,
-    CHASSIS_TEST_STOP_AFTER_STRAIGHT_2,
-    CHASSIS_TEST_WAIT_AFTER_STRAIGHT_2,
-    CHASSIS_TEST_DONE,
-    CHASSIS_TEST_FAULT
-} Chassis_Test_State_e;
+    CHASSIS_STATE_WAIT_READY = 0,
+    CHASSIS_STATE_IDLE,
+    CHASSIS_STATE_RUNNING,
+    CHASSIS_STATE_STOPPING,
+    CHASSIS_STATE_COMPLETED,
+    CHASSIS_STATE_CANCELLED,
+    CHASSIS_STATE_FAULT
+} Chassis_State_e;
+
+typedef enum {
+    CHASSIS_COMMAND_NONE = 0,
+    CHASSIS_COMMAND_RELATIVE_STRAIGHT,
+    CHASSIS_COMMAND_RELATIVE_TURN
+} Chassis_Command_Type_e;
+
+typedef enum {
+    CHASSIS_HEADING_NONE = 0,
+    CHASSIS_HEADING_HOLD_START
+} Chassis_Heading_Mode_e;
+
+typedef enum {
+    CHASSIS_COMMAND_ACCEPTED = 0,
+    CHASSIS_COMMAND_NOT_READY,
+    CHASSIS_COMMAND_BUSY,
+    CHASSIS_COMMAND_DUPLICATE,
+    CHASSIS_COMMAND_INVALID,
+    CHASSIS_COMMAND_FAULTED
+} Chassis_Command_Result_e;
 
 typedef enum {
     CHASSIS_FAULT_NONE = 0,
@@ -35,22 +47,50 @@ typedef enum {
     CHASSIS_FAULT_TIMEOUT,
     CHASSIS_FAULT_EXCESS_DISTANCE,
     CHASSIS_FAULT_DIRECTION,
-    CHASSIS_FAULT_TURN_DIRECTION
+    CHASSIS_FAULT_TURN_DIRECTION,
+    CHASSIS_FAULT_EMERGENCY_STOP
 } Chassis_Fault_e;
 
 typedef struct {
-    /* 初始化、状态机、在线与故障信息。 */
-    uint8_t initialized;
-    Chassis_Test_State_e state;
+    uint32_t command_id;
+    Chassis_Command_Type_e type;
+    /* 正距离表示沿物理车头方向前进，负距离表示后退。 */
+    float distance_mm;
+    /* 正角度表示逻辑 Yaw 增加，负角度表示逻辑 Yaw 减少。 */
+    float angle_deg;
+    float tolerance_mm;
+    Chassis_Heading_Mode_e heading_mode;
+} Chassis_Command_s;
+
+typedef struct {
+    uint32_t command_id;
+    Chassis_Command_Type_e command_type;
+    Chassis_State_e state;
     Chassis_Fault_e fault;
+    float target_distance_mm;
+    float actual_distance_mm;
+    float target_angle_deg;
+    float actual_angle_deg;
+} Chassis_Status_s;
+
+typedef struct {
+    uint8_t initialized;
+    Chassis_State_e state;
+    Chassis_Fault_e fault;
+    Chassis_Command_Result_e last_submit_result;
+    uint32_t command_id;
+    Chassis_Command_Type_e command_type;
+    Chassis_Heading_Mode_e heading_mode;
     uint8_t left_online;
     uint8_t right_online;
     uint8_t imu_healthy;
     uint8_t motion_enabled;
     uint8_t left_can_id;
     uint8_t right_can_id;
+    /* 旧OneShot Watch字段保留兼容；通用执行器中恒为0。 */
     uint8_t one_shot_straight;
     uint32_t state_tick;
+    uint32_t command_start_tick;
     uint32_t test_start_tick;
     uint32_t imu_update_tick;
     uint32_t control_count;
@@ -60,9 +100,15 @@ typedef struct {
     uint32_t imu_fault_count;
     uint32_t direction_fault_count;
     uint32_t turn_direction_fault_count;
+    uint32_t completed_count;
+    uint32_t cancelled_count;
     uint32_t cycle_count;
     uint32_t straight_count;
-    /* 编码器原始累计角、轮距和IMU/轮差里程计。 */
+    float target_distance_mm;
+    float actual_distance_mm;
+    float tolerance_mm;
+    float target_angle_deg;
+    float actual_angle_deg;
     float left_total_angle_deg;
     float right_total_angle_deg;
     float left_distance_m;
@@ -74,7 +120,6 @@ typedef struct {
     float wheel_yaw_deg;
     float imu_wheel_yaw_error_deg;
     float yaw_zero_deg;
-    /* 当前直行段相对距离；x/y和左右总距离在循环中持续累计。 */
     float segment_start_left_m;
     float segment_start_right_m;
     float segment_left_distance_m;
@@ -82,7 +127,6 @@ typedef struct {
     float segment_distance_m;
     float straight_target_distance_m;
     float straight_tolerance_m;
-    /* 直行航向完整PID及左右轮目标/反馈。 */
     float heading_target_deg;
     float heading_error_deg;
     float heading_pid_integral_deg_s;
@@ -90,7 +134,6 @@ typedef struct {
     float heading_pid_i_rad_s;
     float heading_pid_d_rad_s;
     float heading_correction_rad_s;
-    /* 右转90度完整PID、连续Yaw目标和稳定窗口。 */
     float turn_start_yaw_deg;
     float turn_target_yaw_deg;
     float turn_error_deg;
@@ -116,22 +159,19 @@ typedef struct {
 
 extern Chassis_Debug_s g_chassis_debug;
 
-/**
- * @brief 注册 CAN2 M3508 ID1/ID2，并绑定只读 INS 姿态快照。
- * @param imu INS_Init() 返回的共享姿态指针，不得为 NULL。
- * @return 1 初始化成功；0 参数、电机注册或配置失败。
- */
+/** 只初始化并等待 IMU/电机就绪，不自动执行运动。 */
 uint8_t ChassisInit(attitude_t *imu);
-uint8_t ChassisInitOneShotStraight(attitude_t *imu, float distance_m,
-                                   float tolerance_m);
-uint8_t ChassisStartOneShotStraight(float distance_m, float tolerance_m);
-uint8_t ChassisOneShotDone(void);
+/** 提交单条相对运动命令；水果任务只使用 RELATIVE_STRAIGHT。 */
+Chassis_Command_Result_e ChassisSubmitCommand(
+    const Chassis_Command_s *command);
+uint8_t ChassisGetStatus(Chassis_Status_s *status);
+/** 正常停车并以 CANCELLED 结束当前命令。 */
+void ChassisCancelMotion(void);
 uint8_t ChassisFaulted(void);
-/** 允许 1 kHz 调用，内部按 CHASSIS_CONTROL_PERIOD_MS 更新控制和里程计。 */
+/** 允许 1 kHz 调用，内部按 CHASSIS_CONTROL_PERIOD_MS 更新。 */
 void ChassisTask(uint32_t now_ms);
-/** 每次 INS_Task 完成后调用，用于 IMU 数据新鲜度监督。 */
 void ChassisNotifyImuUpdate(uint32_t now_ms);
-/** 立即停两轮并锁存故障；循环测试不会自动恢复。 */
+/** 立即停机并锁存 CHASSIS_FAULT_EMERGENCY_STOP。 */
 void ChassisEmergencyStop(void);
 
 #endif

@@ -20,12 +20,16 @@
 #if APP_CHASSIS_ONE_METER_ENABLED || APP_ARM_ENABLED
 #include "chassis.h"
 #include "ins_task.h"
+#if APP_CHASSIS_ONE_METER_ENABLED
+#include "chassis_config.h"
+#endif
 #endif
 #if APP_ARM_CORE_ENABLED
 #include "arm.h"
 #include "arm_kinematics.h"
 #include "arm_tool.h"
 #if APP_ARM_ENABLED
+#include "app_fruit_task.h"
 #include "fruit_usb_bridge.h"
 #endif
 #endif
@@ -45,99 +49,80 @@ static uint8_t app_huaner_next_id;
 static uint32_t app_huaner_next_tick;
 #endif
 
-#if APP_ARM_ENABLED && APP_ARM_TOOL_CENTER_TEST_ENABLE
-/*
- * 抓放循环调度器。两条控制链的实现都在 app_arm_flow.c：
- * - 坐标抓取PickFlow：工具中心IK直线轨迹到参数化目标点后闭合夹爪。
- * - 固定角度放置PlaceFlow：写死关节角的转移、后方释放和恢复序列。
- * 本调度器只负责串联两个子流程；后续"底盘+双打点"任务层同样只需
- * 在这里按顺序启动子流程，不必修改子流程内部。
- */
+#if APP_CHASSIS_ONE_METER_ENABLED
 typedef enum {
-    APP_ARM_SCHED_WAIT_READY = 0, /* 等HOME完成、主机ready。 */
-    APP_ARM_SCHED_PICK,           /* 坐标抓取子流程运行中。 */
-    APP_ARM_SCHED_PLACE,          /* 固定角度放置子流程运行中。 */
-    APP_ARM_SCHED_DONE,           /* 三次抓放完成后保持停止。 */
-    APP_ARM_SCHED_FAILED          /* 任一子流程失败后原位保持。 */
-} App_Arm_Sched_State_e;
+    APP_CHASSIS_TEST_STRAIGHT_1 = 0,
+    APP_CHASSIS_TEST_TURN_RIGHT,
+    APP_CHASSIS_TEST_STRAIGHT_2,
+    APP_CHASSIS_TEST_WAIT,
+    APP_CHASSIS_TEST_FAILED
+} App_Chassis_Test_State_e;
 
-static App_Arm_Sched_State_e app_arm_sched_state;
-static uint8_t app_arm_pick_point_index;
-static uint8_t app_arm_completed_pick_count;
+static App_Chassis_Test_State_e app_chassis_test_state;
+static uint32_t app_chassis_test_command_id;
+static uint32_t app_chassis_test_wait_tick;
 
-/* 左右两个教导点交替抓取，首次从点1开始。 */
-static const App_Arm_Pick_Target_s app_arm_pick_points[2] = {
-    {
-        { APP_ARM_PICK_POINT_1_Q1_DEG,
-          APP_ARM_PICK_POINT_1_Q2_DEG,
-          APP_ARM_PICK_POINT_1_Q3_DEG },
-        APP_ARM_PICK_TOOL_RELATIVE_PITCH_DEG,
-        APP_ARM_PICK_POINT_1_X_MM,
-        APP_ARM_PICK_POINT_1_Y_MM,
-        APP_ARM_PICK_POINT_1_Z_MM,
-    },
-    {
-        { APP_ARM_PICK_POINT_2_Q1_DEG,
-          APP_ARM_PICK_POINT_2_Q2_DEG,
-          APP_ARM_PICK_POINT_2_Q3_DEG },
-        APP_ARM_PICK_TOOL_RELATIVE_PITCH_DEG,
-        APP_ARM_PICK_POINT_2_X_MM,
-        APP_ARM_PICK_POINT_2_Y_MM,
-        APP_ARM_PICK_POINT_2_Z_MM,
-    },
-};
-
-/** READY后循环"点1抓放 -> 点2抓放"；失败即锁存停止。 */
-static void AppArmPickPlaceTestTask(uint32_t now_ms)
+static uint8_t AppChassisTestSubmit(Chassis_Command_Type_e type,
+                                    float distance_mm,
+                                    float angle_deg)
 {
-    App_Arm_Flow_Status_e status = AppArmFlowPoll(now_ms);
-    Arm_Host_Status_s host;
+    Chassis_Command_s command;
 
-    if (status == APP_ARM_FLOW_FAILED || ChassisFaulted() != 0u) {
-        app_arm_sched_state = APP_ARM_SCHED_FAILED;
+    memset(&command, 0, sizeof(command));
+    command.command_id = ++app_chassis_test_command_id;
+    command.type = type;
+    command.distance_mm = distance_mm;
+    command.angle_deg = angle_deg;
+    command.tolerance_mm = CHASSIS_DISTANCE_TOLERANCE_M * 1000.0f;
+    command.heading_mode = CHASSIS_HEADING_HOLD_START;
+    return ChassisSubmitCommand(&command) == CHASSIS_COMMAND_ACCEPTED;
+}
+
+/** 通过公共命令接口复现原1m、右转90deg、1m循环。 */
+static void AppChassisOneMeterTestTask(uint32_t now_ms)
+{
+    Chassis_Status_s status;
+
+    if (ChassisGetStatus(&status) == 0u ||
+        status.state == CHASSIS_STATE_FAULT) {
+        app_chassis_test_state = APP_CHASSIS_TEST_FAILED;
+        return;
     }
-    switch (app_arm_sched_state) {
-    case APP_ARM_SCHED_WAIT_READY:
-        if (ChassisOneShotDone() == 0u ||
-            ArmGetHostStatus(&host) == 0u || host.ready == 0u) {
+    if (app_chassis_test_state == APP_CHASSIS_TEST_FAILED ||
+        status.state == CHASSIS_STATE_RUNNING ||
+        status.state == CHASSIS_STATE_STOPPING ||
+        status.state == CHASSIS_STATE_WAIT_READY) {
+        return;
+    }
+    switch (app_chassis_test_state) {
+    case APP_CHASSIS_TEST_STRAIGHT_1:
+        if (AppChassisTestSubmit(CHASSIS_COMMAND_RELATIVE_STRAIGHT,
+                CHASSIS_TEST_DISTANCE_M * 1000.0f, 0.0f)) {
+            app_chassis_test_state = APP_CHASSIS_TEST_TURN_RIGHT;
+        }
+        break;
+    case APP_CHASSIS_TEST_TURN_RIGHT:
+        if (AppChassisTestSubmit(CHASSIS_COMMAND_RELATIVE_TURN,
+                0.0f, CHASSIS_TURN_ANGLE_DEG)) {
+            app_chassis_test_state = APP_CHASSIS_TEST_STRAIGHT_2;
+        }
+        break;
+    case APP_CHASSIS_TEST_STRAIGHT_2:
+        if (AppChassisTestSubmit(CHASSIS_COMMAND_RELATIVE_STRAIGHT,
+                CHASSIS_TEST_DISTANCE_M * 1000.0f, 0.0f)) {
+            app_chassis_test_wait_tick = 0u;
+            app_chassis_test_state = APP_CHASSIS_TEST_WAIT;
+        }
+        break;
+    case APP_CHASSIS_TEST_WAIT:
+        if (app_chassis_test_wait_tick == 0u) {
+            app_chassis_test_wait_tick = now_ms;
             break;
         }
-        if (AppArmFlowStartPick(
-                &app_arm_pick_points[app_arm_pick_point_index], now_ms) != 0u) {
-            app_arm_sched_state = APP_ARM_SCHED_PICK;
+        if ((uint32_t)(now_ms - app_chassis_test_wait_tick) >= 3000u) {
+            app_chassis_test_state = APP_CHASSIS_TEST_STRAIGHT_1;
         }
         break;
-
-    case APP_ARM_SCHED_PICK:
-        if (status == APP_ARM_FLOW_DONE &&
-            AppArmFlowStartPlace(now_ms) != 0u) {
-            app_arm_sched_state = APP_ARM_SCHED_PLACE;
-        }
-        break;
-
-    case APP_ARM_SCHED_PLACE: {
-        uint8_t next_pick_point_index =
-            (uint8_t)(app_arm_pick_point_index ^ 1u);
-        if (status == APP_ARM_FLOW_DONE) {
-            if ((uint8_t)(app_arm_completed_pick_count + 1u) >=
-                    APP_ARM_TEST_PICK_COUNT) {
-                app_arm_completed_pick_count++;
-                g_app_arm_pick_place_test_debug.cycle_count++;
-                app_arm_sched_state = APP_ARM_SCHED_DONE;
-            } else if (ChassisStartOneShotStraight(
-                    APP_ARM_BETWEEN_PICK_CHASSIS_DISTANCE_M,
-                    APP_ARM_PRE_PICK_CHASSIS_TOLERANCE_M) != 0u) {
-                app_arm_completed_pick_count++;
-                g_app_arm_pick_place_test_debug.cycle_count++;
-                app_arm_pick_point_index = next_pick_point_index;
-                app_arm_sched_state = APP_ARM_SCHED_WAIT_READY;
-            }
-        }
-        break;
-    }
-
-    case APP_ARM_SCHED_DONE:
-    case APP_ARM_SCHED_FAILED:
     default:
         break;
     }
@@ -230,21 +215,20 @@ void AppInit(void)
     BuzzerInit();
     app_chassis_imu = INS_Init();
     (void)ChassisInit(app_chassis_imu);
+    app_chassis_test_state = APP_CHASSIS_TEST_STRAIGHT_1;
+    app_chassis_test_command_id = 0xC1000000u;
+    app_chassis_test_wait_tick = 0u;
 #elif APP_ARM_ENABLED
     USB_Init();
     ProtocolRuntimeInit();
     FruitUsbBridgeInit();
     BuzzerInit();
     app_chassis_imu = INS_Init();
-    (void)ChassisInitOneShotStraight(
-        app_chassis_imu, APP_ARM_PRE_PICK_CHASSIS_DISTANCE_M,
-        APP_ARM_PRE_PICK_CHASSIS_TOLERANCE_M);
+    (void)ChassisInit(app_chassis_imu);
     ArmInit();
 #if APP_ARM_TOOL_CENTER_TEST_ENABLE
     AppArmFlowInit();
-    app_arm_sched_state = APP_ARM_SCHED_WAIT_READY;
-    app_arm_pick_point_index = 0u;
-    app_arm_completed_pick_count = 0u;
+    AppFruitTaskInit();
 #endif
 #elif APP_HUANER_FEEDBACK_ENABLED
     if (HuanerServoInit() != 0u) {
@@ -271,6 +255,9 @@ void AppChassisTask(uint32_t now_ms)
 {
 #if APP_CHASSIS_ONE_METER_ENABLED || APP_ARM_ENABLED
     ChassisTask(now_ms);
+#if APP_CHASSIS_ONE_METER_ENABLED
+    AppChassisOneMeterTestTask(now_ms);
+#endif
 #else
     (void)now_ms;
 #endif
@@ -284,7 +271,7 @@ void AppArmTask(uint32_t now_ms)
     now_ms = HAL_GetTick();
 #if APP_ARM_ENABLED
 #if APP_ARM_TOOL_CENTER_TEST_ENABLE
-    AppArmPickPlaceTestTask(now_ms);
+    AppFruitTask(now_ms);
 #endif
 #elif APP_ARM_TEACH_POINT_ENABLED
     (void)now_ms;

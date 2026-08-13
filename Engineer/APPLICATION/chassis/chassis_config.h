@@ -1,13 +1,11 @@
 /**
  * @file chassis_config.h
- * @brief 双轮底盘直行/右转循环测试的机械参数、方向、时序、PID 和安全边界。
+ * @brief 双轮底盘通用相对运动的机械参数、方向、时序、PID 和安全边界。
  */
 
 #ifndef __CHASSIS_CONFIG_H_
 #define __CHASSIS_CONFIG_H_
 
-/* 置1后自动执行“1m-右转90度-1m”循环；故障锁存后不会自动重试。 */
-#define CHASSIS_AUTO_FORWARD_TEST_ENABLE       1u
 /* CAN2主动轮：左ID1、右ID2；以下命令/反馈符号必须架空实测确认。 */
 #define CHASSIS_LEFT_MOTOR_ID                  1u
 #define CHASSIS_RIGHT_MOTOR_ID                 2u
@@ -21,7 +19,7 @@
 #define CHASSIS_TRACK_WIDTH_M                  0.320f
 /* 当前实测方向：逆时针转动车体时逻辑Yaw应增加；若相反只修改此符号。 */
 #define CHASSIS_IMU_YAW_SIGN                (-1.0f)
-/* 状态机与循环测试时序。 */
+/* 状态机时序。 */
 #define CHASSIS_CONTROL_PERIOD_MS              5u
 #define CHASSIS_TEST_START_DELAY_MS         3000u
 #define CHASSIS_IMU_STABLE_MS               1000u
@@ -30,8 +28,12 @@
 #define CHASSIS_TURN_TIMEOUT_MS              6000u
 #define CHASSIS_STOP_STABLE_MS                300u
 #define CHASSIS_STOP_TIMEOUT_MS              2000u
-#define CHASSIS_ACTION_WAIT_MS               3000u
 #define CHASSIS_IMU_UPDATE_TIMEOUT_MS          20u
+/* 命令边界。应用和上位机使用mm，控制器内部换算为m。 */
+#define CHASSIS_COMMAND_MAX_DISTANCE_MM       5000.0f
+#define CHASSIS_COMMAND_MAX_TURN_DEG           360.0f
+#define CHASSIS_COMMAND_MIN_TOLERANCE_MM         0.5f
+#define CHASSIS_COMMAND_MAX_TOLERANCE_MM        50.0f
 /* 距离、速度、减速和加速度参数；首次落地不要提高最大速度。 */
 #define CHASSIS_TEST_DISTANCE_M                1.000f
 #define CHASSIS_TEST_MAX_SPEED_M_S             0.200f

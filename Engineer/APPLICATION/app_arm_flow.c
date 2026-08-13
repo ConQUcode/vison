@@ -19,6 +19,7 @@ App_Arm_Pick_Place_Test_Debug_s g_app_arm_pick_place_test_debug;
 #include <string.h>
 
 #include "arm.h"
+#include "arm_config.h"
 #include "arm_tool.h"
 
 /* 子流程运行时状态；同一时刻最多一个子流程活动。 */
@@ -27,6 +28,7 @@ static App_Arm_Flow_Status_e app_flow_status;
 static App_Arm_Pick_Step_e app_pick_step;
 static App_Arm_Place_Step_e app_place_step;
 static App_Arm_Pick_Target_s app_pick_target;
+static App_Arm_Place_Profile_s app_place_profile;
 static uint32_t app_flow_step_tick;    /* 当前步骤进入时刻ms。 */
 static uint32_t app_flow_command_seq;  /* 递增命令ID；邮箱按ID去重。 */
 static uint32_t app_pitch_stable_tick; /* 俯仰反馈连续稳定的起始时刻。 */
@@ -357,23 +359,78 @@ static uint8_t AppArmFlowSubmitDirectedBaseRotation(
     return 1u;
 }
 
-static float AppArmFlowSafeBaseQ1(void)
+static uint8_t AppArmFlowValueInRange(float value, float min_value,
+                                      float max_value)
 {
-    return app_pick_target.q_deg[ARM_JOINT_BASE_YAW] >= 0.0f ?
-        APP_ARM_LEFT_SAFE_BASE_Q1_DEG : APP_ARM_RIGHT_SAFE_BASE_Q1_DEG;
+    return isfinite(value) && value >= min_value && value <= max_value;
 }
 
-static float AppArmFlowPlaceBaseQ1(void)
+static uint8_t AppArmFlowPoseValid(const float q_deg[3])
 {
-    return app_pick_target.q_deg[ARM_JOINT_BASE_YAW] >= 0.0f ?
-        APP_ARM_LEFT_PLACE_BASE_Q1_DEG : APP_ARM_RIGHT_PLACE_BASE_Q1_DEG;
+    return q_deg != NULL &&
+        AppArmFlowValueInRange(q_deg[ARM_JOINT_BASE_YAW],
+                               ARM_Q1_SOFT_MIN_DEG,
+                               ARM_Q1_SOFT_MAX_DEG) &&
+        AppArmFlowValueInRange(q_deg[ARM_JOINT_SHOULDER],
+                               ARM_Q2_SOFT_MIN_DEG,
+                               ARM_Q2_SOFT_MAX_DEG) &&
+        AppArmFlowValueInRange(q_deg[ARM_JOINT_ELBOW],
+                               ARM_Q3_SOFT_MIN_DEG,
+                               ARM_Q3_SOFT_MAX_DEG);
 }
 
-static float AppArmFlowPlaceBaseMidQ1(void)
+static uint8_t AppArmFlowPlaceProfileValid(
+    const App_Arm_Place_Profile_s *profile)
 {
-    return app_pick_target.q_deg[ARM_JOINT_BASE_YAW] >= 0.0f ?
-        APP_ARM_LEFT_PLACE_BASE_MID_Q1_DEG :
-        APP_ARM_RIGHT_PLACE_BASE_MID_Q1_DEG;
+    float to_waypoint_delta;
+    float to_target_delta;
+    float front_waypoint_delta;
+    float front_target_delta;
+
+    if (profile == NULL || profile->profile_id == 0u ||
+        profile->release_pitch_wait_timeout_ms == 0u ||
+        !AppArmFlowPoseValid(profile->safe_q_deg) ||
+        !AppArmFlowPoseValid(profile->release_q_deg) ||
+        !AppArmFlowPoseValid(profile->restore_q_deg)) {
+        return 0u;
+    }
+    if (!AppArmFlowValueInRange(
+               profile->rotate_to_place_waypoint_q1_deg,
+               ARM_Q1_SOFT_MIN_DEG, ARM_Q1_SOFT_MAX_DEG) ||
+        !AppArmFlowValueInRange(profile->rotate_to_place_target_q1_deg,
+                                ARM_Q1_SOFT_MIN_DEG,
+                                ARM_Q1_SOFT_MAX_DEG) ||
+        !AppArmFlowValueInRange(profile->release_tool_relative_pitch_deg,
+                                ARM_TOOL_PITCH_RELATIVE_MIN_DEG,
+                                ARM_TOOL_PITCH_RELATIVE_MAX_DEG) ||
+        !AppArmFlowValueInRange(
+               profile->rotate_to_front_waypoint_q1_deg,
+               ARM_Q1_SOFT_MIN_DEG, ARM_Q1_SOFT_MAX_DEG) ||
+        !AppArmFlowValueInRange(profile->rotate_to_front_target_q1_deg,
+                                ARM_Q1_SOFT_MIN_DEG,
+                                ARM_Q1_SOFT_MAX_DEG)) {
+        return 0u;
+    }
+    if (fabsf(profile->release_q_deg[ARM_JOINT_BASE_YAW] -
+              profile->rotate_to_place_target_q1_deg) > 0.01f ||
+        fabsf(profile->restore_q_deg[ARM_JOINT_BASE_YAW] -
+              profile->rotate_to_place_target_q1_deg) > 0.01f) {
+        return 0u;
+    }
+    to_waypoint_delta = profile->rotate_to_place_waypoint_q1_deg -
+        profile->safe_q_deg[ARM_JOINT_BASE_YAW];
+    to_target_delta = profile->rotate_to_place_target_q1_deg -
+        profile->rotate_to_place_waypoint_q1_deg;
+    front_waypoint_delta = profile->rotate_to_front_waypoint_q1_deg -
+        profile->restore_q_deg[ARM_JOINT_BASE_YAW];
+    front_target_delta = profile->rotate_to_front_target_q1_deg -
+        profile->rotate_to_front_waypoint_q1_deg;
+    return fabsf(to_waypoint_delta) > 0.01f &&
+        fabsf(to_target_delta) > 0.01f &&
+        to_waypoint_delta * to_target_delta > 0.0f &&
+        fabsf(front_waypoint_delta) > 0.01f &&
+        fabsf(front_target_delta) > 0.01f &&
+        front_waypoint_delta * front_target_delta > 0.0f;
 }
 
 /**
@@ -510,9 +567,9 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
     switch (app_place_step) {
     case APP_ARM_PLACE_STEP_SUBMIT_TRANSFER:
         if (AppArmFlowSubmitJoint(
-                0u, 0.0f,
-                1u, APP_ARM_TRANSFER_SHOULDER_Q2_DEG,
-                1u, APP_ARM_TRANSFER_ELBOW_Q3_DEG,
+                1u, app_place_profile.safe_q_deg[ARM_JOINT_BASE_YAW],
+                1u, app_place_profile.safe_q_deg[ARM_JOINT_SHOULDER],
+                1u, app_place_profile.safe_q_deg[ARM_JOINT_ELBOW],
                 now_ms)) {
             AppArmFlowSetPlaceStep(
                 APP_ARM_PLACE_STEP_WAIT_TRANSFER, now_ms);
@@ -530,8 +587,8 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
 
     case APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_PLACE:
         if (AppArmFlowSubmitDirectedBaseRotation(
-                AppArmFlowPlaceBaseMidQ1(), AppArmFlowPlaceBaseQ1(),
-                now_ms)) {
+                app_place_profile.rotate_to_place_waypoint_q1_deg,
+                app_place_profile.rotate_to_place_target_q1_deg, now_ms)) {
             AppArmFlowSetPlaceStep(
                 APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_PLACE, now_ms);
         }
@@ -548,10 +605,11 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
 
     case APP_ARM_PLACE_STEP_SUBMIT_RELEASE_POSE:
         if (AppArmFlowSubmitJointWithRelativePitch(
-                0u, 0.0f,
-                1u, APP_ARM_RELEASE_SHOULDER_Q2_DEG,
-                1u, APP_ARM_RELEASE_ELBOW_DOWN_Q3_DEG,
-                APP_ARM_RELEASE_TOOL_RELATIVE_PITCH_DEG, now_ms)) {
+                1u, app_place_profile.release_q_deg[ARM_JOINT_BASE_YAW],
+                1u, app_place_profile.release_q_deg[ARM_JOINT_SHOULDER],
+                1u, app_place_profile.release_q_deg[ARM_JOINT_ELBOW],
+                app_place_profile.release_tool_relative_pitch_deg,
+                now_ms)) {
             AppArmFlowSetPlaceStep(
                 APP_ARM_PLACE_STEP_WAIT_RELEASE_POSE, now_ms);
         }
@@ -572,7 +630,7 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
             tool->servo_arrived[0] != 0u) {
             AppArmFlowSetPlaceStep(APP_ARM_PLACE_STEP_SUBMIT_OPEN, now_ms);
         } else if ((uint32_t)(now_ms - app_flow_step_tick) >=
-                   APP_ARM_RELEASE_PITCH_WAIT_TIMEOUT_MS) {
+                   app_place_profile.release_pitch_wait_timeout_ms) {
             AppArmFlowFail(APP_ARM_PICK_PLACE_FAILURE_COMMAND_EXECUTION,
                            (uint32_t)ARM_COMMAND_NOT_READY, now_ms);
         }
@@ -594,9 +652,9 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
              * SUBMIT状态和额外调度等待；大臂、小臂仍保持同步运动。
              */
             if (AppArmFlowSubmitJoint(
-                    0u, 0.0f,
-                    1u, APP_ARM_TRANSFER_SHOULDER_Q2_DEG,
-                    1u, APP_ARM_TRANSFER_ELBOW_Q3_DEG,
+                    1u, app_place_profile.restore_q_deg[ARM_JOINT_BASE_YAW],
+                    1u, app_place_profile.restore_q_deg[ARM_JOINT_SHOULDER],
+                    1u, app_place_profile.restore_q_deg[ARM_JOINT_ELBOW],
                     now_ms)) {
                 AppArmFlowSetPlaceStep(
                     APP_ARM_PLACE_STEP_WAIT_RESTORE_TRANSFER, now_ms);
@@ -615,7 +673,8 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
 
     case APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_FRONT:
         if (AppArmFlowSubmitDirectedBaseRotation(
-                AppArmFlowSafeBaseQ1(), APP_ARM_PICK_BASE_Q1_DEG, now_ms)) {
+                app_place_profile.rotate_to_front_waypoint_q1_deg,
+                app_place_profile.rotate_to_front_target_q1_deg, now_ms)) {
             AppArmFlowSetPlaceStep(
                 APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_FRONT, now_ms);
         }
@@ -669,16 +728,30 @@ uint8_t AppArmFlowStartPick(const App_Arm_Pick_Target_s *target,
     return 1u;
 }
 
-uint8_t AppArmFlowStartPlace(uint32_t now_ms)
+App_Arm_Flow_Start_Result_e AppArmFlowStartPlace(
+    const App_Arm_Place_Profile_s *profile, uint32_t now_ms)
 {
-    if (app_flow_active != APP_ARM_FLOW_NONE ||
-        app_flow_status == APP_ARM_FLOW_FAILED) {
-        return 0u;
+    App_Arm_Flow_Start_Result_e result;
+
+    if (app_flow_status == APP_ARM_FLOW_FAILED) {
+        result = APP_ARM_FLOW_START_FAILED;
+    } else if (app_flow_active != APP_ARM_FLOW_NONE) {
+        result = APP_ARM_FLOW_START_BUSY;
+    } else if (profile == NULL || profile->configured == 0u) {
+        result = APP_ARM_FLOW_START_NOT_CONFIGURED;
+    } else if (!AppArmFlowPlaceProfileValid(profile)) {
+        result = APP_ARM_FLOW_START_INVALID;
+    } else {
+        app_place_profile = *profile;
+        app_flow_active = APP_ARM_FLOW_PLACE;
+        app_flow_status = APP_ARM_FLOW_RUNNING;
+        g_app_arm_pick_place_test_debug.place_profile_id =
+            profile->profile_id;
+        AppArmFlowSetPlaceStep(APP_ARM_PLACE_STEP_SUBMIT_TRANSFER, now_ms);
+        result = APP_ARM_FLOW_START_ACCEPTED;
     }
-    app_flow_active = APP_ARM_FLOW_PLACE;
-    app_flow_status = APP_ARM_FLOW_RUNNING;
-    AppArmFlowSetPlaceStep(APP_ARM_PLACE_STEP_SUBMIT_TRANSFER, now_ms);
-    return 1u;
+    g_app_arm_pick_place_test_debug.last_start_result = result;
+    return result;
 }
 
 App_Arm_Flow_Status_e AppArmFlowPoll(uint32_t now_ms)

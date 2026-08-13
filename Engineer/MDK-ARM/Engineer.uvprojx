@@ -1271,6 +1271,11 @@
               <FilePath>..\APPLICATION\app_runtime.c</FilePath>
             </File>
             <File>
+              <FileName>app_fruit_task.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APPLICATION\app_fruit_task.c</FilePath>
+            </File>
+            <File>
               <FileName>app_arm_flow.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\APPLICATION\app_arm_flow.c</FilePath>

@@ -9,8 +9,8 @@
  *   直达教导关节角，最后夹爪闭合抓取。教导姿态夹爪从侧下方斜向上
  *   够水果（ID1相对约-41.5deg），绝对俯仰+坐标IK对该姿态不可达，
  *   故不走工具中心直线轨迹；工具中心坐标仅用于Watch误差显示。
- * - PlaceFlow：写死关节角控制。转移姿态、底座引导旋转到后方、固定
- *   释放姿态、张开夹爪，再恢复姿态并转回前方。所有角度为实机验证值。
+ * - PlaceFlow：显式profile关节控制。转移姿态、底座引导旋转到后方、
+ *   固定释放姿态、张开夹爪，再恢复姿态并转回前方。
  *
  * 同一时刻只允许一个子流程活动；任一命令失败后锁存FAILED原位保持，
  * 不自动重试，与旧抓放测试行为一致。
@@ -36,6 +36,14 @@ typedef enum {
     APP_ARM_FLOW_FAILED
 } App_Arm_Flow_Status_e;
 
+typedef enum {
+    APP_ARM_FLOW_START_ACCEPTED = 0,
+    APP_ARM_FLOW_START_BUSY,
+    APP_ARM_FLOW_START_NOT_CONFIGURED,
+    APP_ARM_FLOW_START_INVALID,
+    APP_ARM_FLOW_START_FAILED
+} App_Arm_Flow_Start_Result_e;
+
 /** 教导位姿抓取子流程步骤；顺序即执行顺序。 */
 typedef enum {
     APP_ARM_PICK_STEP_IDLE = 0,
@@ -52,7 +60,7 @@ typedef enum {
     APP_ARM_PICK_STEP_FAILED
 } App_Arm_Pick_Step_e;
 
-/** 固定角度放置子流程步骤；角度值全部来自 app_config.h 实机验证参数。 */
+/** 显式profile放置子流程步骤；底层不包含区域或左右侧参数。 */
 typedef enum {
     APP_ARM_PLACE_STEP_IDLE = 0,
     APP_ARM_PLACE_STEP_SUBMIT_TRANSFER,        /* 抓取侧大臂竖直、小臂上抬10deg。 */
@@ -93,6 +101,24 @@ typedef struct {
 } App_Arm_Pick_Target_s;
 
 /**
+ * 单个已实测放置策略。三组q均为完整三轴关节位姿；两个waypoint显式
+ * 约束底座绕行方向。未实测区域必须保持configured=0，禁止复用A区。
+ */
+typedef struct {
+    uint32_t profile_id;
+    uint8_t configured;
+    float safe_q_deg[3];
+    float rotate_to_place_waypoint_q1_deg;
+    float rotate_to_place_target_q1_deg;
+    float release_q_deg[3];
+    float release_tool_relative_pitch_deg;
+    uint32_t release_pitch_wait_timeout_ms;
+    float restore_q_deg[3];
+    float rotate_to_front_waypoint_q1_deg;
+    float rotate_to_front_target_q1_deg;
+} App_Arm_Place_Profile_s;
+
+/**
  * 抓放子流程的紧凑Watch变量；符号名沿用旧抓放测试，Watch配置不变。
  * center和wrist单位mm，pitch/q单位deg；workspace_safety_result对应arm.h枚举。
  */
@@ -111,6 +137,8 @@ typedef struct {
     uint32_t motion_fault;
     uint32_t tool_error_code;
     uint32_t active_command_id;
+    uint32_t place_profile_id;
+    App_Arm_Flow_Start_Result_e last_start_result;
     uint32_t cycle_count;
     uint32_t state_elapsed_ms; /* 当前步骤已持续时间ms。 */
     uint8_t servo1_communication_ok;
@@ -155,8 +183,12 @@ void AppArmFlowInit(void);
 uint8_t AppArmFlowStartPick(const App_Arm_Pick_Target_s *target,
                             uint32_t now_ms);
 
-/** 启动固定角度放置子流程；受理条件与AppArmFlowStartPick相同。 */
-uint8_t AppArmFlowStartPlace(uint32_t now_ms);
+/**
+ * 启动显式profile放置子流程。函数在提交任何动作前完整校验profile，
+ * 未配置和字段非法分别返回NOT_CONFIGURED/INVALID。
+ */
+App_Arm_Flow_Start_Result_e AppArmFlowStartPlace(
+    const App_Arm_Place_Profile_s *profile, uint32_t now_ms);
 
 /**
  * 周期推进当前子流程并刷新Watch；无活动流程时只刷新Watch。
