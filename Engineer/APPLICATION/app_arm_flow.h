@@ -4,14 +4,11 @@
  *
  * 工程内机械臂应用动作只有两类控制方式，本模块把它们各自封装成
  * 独立子状态机，调用方通过 Start/Poll 串联，不再混在一个大状态机里：
- * - PickFlow：教导位姿抓取。底座先关节空间对准目标方位（限幅在
- *   +/-89.5deg内避免低位跨X=0），随后一条关节+ID1相对俯仰联合命令
- *   直达教导关节角，最后夹爪闭合抓取。教导姿态夹爪从侧下方斜向上
- *   够水果（ID1相对约-41.5deg），绝对俯仰+坐标IK对该姿态不可达，
- *   故不走工具中心直线轨迹；工具中心坐标仅用于Watch误差显示。
+ * - PickFlow：工具中心坐标抓取。底座先对准目标方位（限幅在
+ *   +/-89.5deg内避免跨X=0），同时让q2/q3进入俯仰可达的准备姿态；
+ *   随后按世界坐标和绝对工具俯仰执行工具中心IK轨迹并闭合夹爪。
  * - PlaceFlow：显式profile关节控制。转移姿态、底座引导旋转到后方、
- *   固定释放姿态、张开夹爪、小臂上抬净空、底座回前方，最后恢复
- *   前方转运姿态。
+ *   固定释放姿态、张开夹爪、小臂上抬净空并让底座回到前方。
  *
  * 同一时刻只允许一个子流程活动；任一命令失败后锁存FAILED原位保持，
  * 不自动重试，与旧抓放测试行为一致。
@@ -45,13 +42,13 @@ typedef enum {
     APP_ARM_FLOW_START_FAILED
 } App_Arm_Flow_Start_Result_e;
 
-/** 教导位姿抓取子流程步骤；顺序即执行顺序。 */
+/** 工具中心坐标抓取子流程步骤；顺序即执行顺序。 */
 typedef enum {
     APP_ARM_PICK_STEP_IDLE = 0,
-    APP_ARM_PICK_STEP_SUBMIT_BASE_AIM,   /* 底座先关节转到目标方位。 */
+    APP_ARM_PICK_STEP_SUBMIT_BASE_AIM,   /* 底座对准并同步进入抓取准备姿态。 */
     APP_ARM_PICK_STEP_WAIT_BASE_AIM,
-    APP_ARM_PICK_STEP_SUBMIT_POSE,       /* 关节+ID1相对俯仰联合命令直达教导位姿。 */
-    APP_ARM_PICK_STEP_WAIT_POSE,
+    APP_ARM_PICK_STEP_SUBMIT_TARGET,     /* 提交夹爪中心坐标和绝对俯仰。 */
+    APP_ARM_PICK_STEP_WAIT_TARGET,
     APP_ARM_PICK_STEP_WAIT_PITCH_STABLE, /* 等ID1反馈稳定在目标附近。 */
     APP_ARM_PICK_STEP_PICK_DWELL,        /* 抓取前固定停留。 */
     APP_ARM_PICK_STEP_SUBMIT_CLOSE,      /* 夹爪闭合，含堵转分级卸力。 */
@@ -77,8 +74,6 @@ typedef enum {
     APP_ARM_PLACE_STEP_WAIT_RELEASE_CLEARANCE,
     APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_FRONT, /* 沿本次抓取侧返回前方。 */
     APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_FRONT,
-    APP_ARM_PLACE_STEP_SUBMIT_RESTORE_TRANSFER,
-    APP_ARM_PLACE_STEP_WAIT_RESTORE_TRANSFER,
     APP_ARM_PLACE_STEP_DONE,
     APP_ARM_PLACE_STEP_FAILED
 } App_Arm_Place_Step_e;
@@ -92,20 +87,27 @@ typedef enum {
 } App_Arm_Pick_Place_Failure_Source_e;
 
 /**
- * 教导位姿抓取目标。q_deg为教导关节角，tool_relative_pitch_deg为
- * ID1相对小臂角；x/y/z为教导时的夹爪中心世界坐标，仅用于Watch
- * 误差显示，不参与运动规划。
+ * 工具中心抓取目标。x/y/z为夹爪中心世界坐标，tool_pitch_deg为
+ * 世界绝对俯仰角；四个字段都直接参与运动规划。
+ */
+typedef struct {
+    float x_mm;
+    float y_mm;
+    float z_mm;
+    float tool_pitch_deg;
+} App_Arm_Pick_Target_s;
+
+/**
+ * 工具中心抓取前的统一关节准备姿态。q1由目标XY方位计算并限幅，q2/q3
+ * 和ID1相对俯仰来自同一组已验证配置，正式抓取与专项测试必须共同使用。
  */
 typedef struct {
     float q_deg[3];
     float tool_relative_pitch_deg;
-    float x_mm;
-    float y_mm;
-    float z_mm;
-} App_Arm_Pick_Target_s;
+} App_Arm_Pick_Staging_s;
 
 /**
- * 单个已实测放置策略。四组q均为完整三轴关节位姿；两个waypoint显式
+ * 单个已实测放置策略。三组q均为完整三轴关节位姿；两个waypoint显式
  * 约束底座绕行方向。未实测区域必须保持configured=0，禁止复用A区。
  */
 typedef struct {
@@ -118,7 +120,6 @@ typedef struct {
     float release_tool_relative_pitch_deg;
     uint32_t release_pitch_wait_timeout_ms;
     float release_clearance_q_deg[3];
-    float restore_q_deg[3];
     float rotate_to_front_waypoint_q1_deg;
     float rotate_to_front_target_q1_deg;
 } App_Arm_Place_Profile_s;
@@ -178,11 +179,18 @@ typedef struct {
 
 extern App_Arm_Pick_Place_Test_Debug_s g_app_arm_pick_place_test_debug;
 
+/**
+ * 根据夹爪中心目标XY构造抓取准备姿态。返回0表示参数无效；成功时完整
+ * 写出q1/q2/q3和ID1相对俯仰，不提交命令，也不改变子流程状态。
+ */
+uint8_t AppArmFlowBuildPickStaging(float target_x_mm, float target_y_mm,
+                                   App_Arm_Pick_Staging_s *staging);
+
 /** 清零两个子流程和Watch状态；上电初始化时调用一次。 */
 void AppArmFlowInit(void);
 
 /**
- * 启动教导位姿抓取子流程。返回1表示已受理；有子流程在运行、参数
+ * 启动工具中心坐标抓取子流程。返回1表示已受理；有子流程在运行、参数
  * 无效或此前已锁存FAILED时返回0，不打断当前动作。
  */
 uint8_t AppArmFlowStartPick(const App_Arm_Pick_Target_s *target,

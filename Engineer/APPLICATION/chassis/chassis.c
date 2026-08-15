@@ -47,6 +47,13 @@ static float ChassisSign(float value)
     return value >= 0.0f ? 1.0f : -1.0f;
 }
 
+static float ChassisMoveToward(float current, float target, float max_step)
+{
+    if (target > current + max_step) return current + max_step;
+    if (target < current - max_step) return current - max_step;
+    return target;
+}
+
 static float ChassisMotorDegSToWheelMS(float motor_deg_s, float sign)
 {
     return sign * motor_deg_s * CHASSIS_DEG_TO_RAD /
@@ -112,22 +119,46 @@ static void ChassisSetWheelTargets(float left_m_s, float right_m_s)
     }
 }
 
+static void ChassisSetBodyVelocityTargets(float linear_m_s,
+                                          float angular_rad_s)
+{
+    float left_m_s = linear_m_s - angular_rad_s *
+        CHASSIS_TRACK_WIDTH_M * 0.5f;
+    float right_m_s = linear_m_s + angular_rad_s *
+        CHASSIS_TRACK_WIDTH_M * 0.5f;
+    float max_abs_m_s = fmaxf(fabsf(left_m_s), fabsf(right_m_s));
+    float scale = 1.0f;
+
+    if (max_abs_m_s > CHASSIS_MAX_WHEEL_SPEED_M_S) {
+        scale = CHASSIS_MAX_WHEEL_SPEED_M_S / max_abs_m_s;
+        left_m_s *= scale;
+        right_m_s *= scale;
+    }
+    g_chassis_debug.velocity_wheel_scale = scale;
+    ChassisSetWheelTargets(left_m_s, right_m_s);
+}
+
 static void ChassisZeroTargets(void)
 {
     g_chassis_debug.linear_command_m_s = 0.0f;
     g_chassis_debug.angular_command_rad_s = 0.0f;
-    ChassisSetWheelTargets(0.0f, 0.0f);
+    ChassisSetBodyVelocityTargets(0.0f, 0.0f);
+}
+
+static void ChassisResetHeadingControl(void)
+{
+    g_chassis_debug.heading_pid_integral_deg_s = 0.0f;
+    g_chassis_debug.heading_pid_p_rad_s = 0.0f;
+    g_chassis_debug.heading_pid_i_rad_s = 0.0f;
+    g_chassis_debug.heading_pid_d_rad_s = 0.0f;
+    g_chassis_debug.heading_correction_rad_s = 0.0f;
 }
 
 static void ChassisResetMotion(void)
 {
     chassis_ramped_linear_m_s = 0.0f;
     chassis_ramped_angular_rad_s = 0.0f;
-    g_chassis_debug.heading_pid_integral_deg_s = 0.0f;
-    g_chassis_debug.heading_pid_p_rad_s = 0.0f;
-    g_chassis_debug.heading_pid_i_rad_s = 0.0f;
-    g_chassis_debug.heading_pid_d_rad_s = 0.0f;
-    g_chassis_debug.heading_correction_rad_s = 0.0f;
+    ChassisResetHeadingControl();
     g_chassis_debug.turn_pid_integral_deg_s = 0.0f;
     g_chassis_debug.turn_pid_p_rad_s = 0.0f;
     g_chassis_debug.turn_pid_i_rad_s = 0.0f;
@@ -220,6 +251,11 @@ static void ChassisUpdateOdometry(void)
         chassis_right_motor->measure.speed_aps, CHASSIS_RIGHT_FEEDBACK_SIGN);
     g_chassis_debug.imu_gyro_z_rad_s = CHASSIS_IMU_YAW_SIGN *
         chassis_imu->Gyro[Z];
+    g_chassis_debug.velocity_actual_vx_mm_s = 500.0f *
+        (g_chassis_debug.left_speed_m_s +
+         g_chassis_debug.right_speed_m_s);
+    g_chassis_debug.velocity_actual_wz_rad_s =
+        g_chassis_debug.imu_gyro_z_rad_s;
     chassis_last_left_distance_m = left_distance;
     chassis_last_right_distance_m = right_distance;
     chassis_last_imu_yaw_deg = CHASSIS_IMU_YAW_SIGN *
@@ -367,11 +403,82 @@ static void ChassisBeginStopping(uint32_t now_ms,
 {
     chassis_stop_terminal_state = terminal_state;
     chassis_stop_stable_tick = 0u;
+    g_chassis_debug.velocity_heading_hold_active = 0u;
+    if (g_chassis_debug.command_type ==
+            CHASSIS_COMMAND_BODY_VELOCITY) {
+        g_chassis_debug.velocity_target_vx_mm_s = 0.0f;
+        g_chassis_debug.velocity_target_wz_rad_s = 0.0f;
+    }
     if (terminal_state == CHASSIS_STATE_COMPLETED) {
         ChassisResetMotion();
         ChassisZeroTargets();
     }
     ChassisSetState(CHASSIS_STATE_STOPPING, now_ms);
+}
+
+static void ChassisApplyVelocityTarget(float vx_mm_s, float wz_rad_s,
+                                       uint32_t now_ms)
+{
+    uint8_t old_heading_hold =
+        g_chassis_debug.velocity_heading_hold_active;
+    uint8_t new_heading_hold;
+
+    if (fabsf(vx_mm_s) <= CHASSIS_VELOCITY_LINEAR_ZERO_MM_S) {
+        vx_mm_s = 0.0f;
+    }
+    if (fabsf(wz_rad_s) <= CHASSIS_VELOCITY_ANGULAR_ZERO_RAD_S) {
+        wz_rad_s = 0.0f;
+    }
+    new_heading_hold = (uint8_t)(vx_mm_s != 0.0f && wz_rad_s == 0.0f);
+    if (new_heading_hold != 0u && old_heading_hold == 0u) {
+        g_chassis_debug.heading_target_deg = g_chassis_debug.yaw_deg;
+        g_chassis_debug.velocity_heading_capture_count++;
+        ChassisResetHeadingControl();
+    } else if (new_heading_hold == 0u && old_heading_hold != 0u) {
+        ChassisResetHeadingControl();
+    }
+    g_chassis_debug.velocity_heading_hold_active = new_heading_hold;
+    g_chassis_debug.velocity_target_vx_mm_s = vx_mm_s;
+    g_chassis_debug.velocity_target_wz_rad_s = wz_rad_s;
+    g_chassis_debug.velocity_command_tick = now_ms;
+}
+
+static void ChassisRunVelocity(uint32_t now_ms, float dt_s)
+{
+    float desired_linear_m_s;
+    float desired_angular_rad_s;
+
+    ChassisUpdateCommandMeasurements();
+    if ((uint32_t)(now_ms - g_chassis_debug.velocity_command_tick) >=
+            CHASSIS_VELOCITY_COMMAND_TIMEOUT_MS) {
+        g_chassis_debug.velocity_timeout_count++;
+        ChassisBeginStopping(now_ms, CHASSIS_STATE_CANCELLED);
+        return;
+    }
+    desired_linear_m_s =
+        g_chassis_debug.velocity_target_vx_mm_s * 0.001f;
+    if (g_chassis_debug.velocity_heading_hold_active != 0u) {
+        g_chassis_debug.heading_error_deg =
+            g_chassis_debug.heading_target_deg - g_chassis_debug.yaw_deg;
+        desired_angular_rad_s = ChassisHeadingPid(
+            g_chassis_debug.heading_error_deg, dt_s);
+    } else {
+        g_chassis_debug.heading_error_deg = 0.0f;
+        g_chassis_debug.heading_correction_rad_s = 0.0f;
+        desired_angular_rad_s =
+            g_chassis_debug.velocity_target_wz_rad_s;
+    }
+    chassis_ramped_linear_m_s = ChassisMoveToward(
+        chassis_ramped_linear_m_s, desired_linear_m_s,
+        CHASSIS_MAX_LINEAR_ACCEL_M_S2 * dt_s);
+    chassis_ramped_angular_rad_s = ChassisMoveToward(
+        chassis_ramped_angular_rad_s, desired_angular_rad_s,
+        CHASSIS_TURN_MAX_ACCEL_RAD_S2 * dt_s);
+    g_chassis_debug.linear_command_m_s = chassis_ramped_linear_m_s;
+    g_chassis_debug.angular_command_rad_s =
+        chassis_ramped_angular_rad_s;
+    ChassisSetBodyVelocityTargets(chassis_ramped_linear_m_s,
+                                  chassis_ramped_angular_rad_s);
 }
 
 static void ChassisRunStraight(uint32_t now_ms, float dt_s)
@@ -438,11 +545,8 @@ static void ChassisRunStraight(uint32_t now_ms, float dt_s)
     }
     g_chassis_debug.linear_command_m_s = chassis_ramped_linear_m_s;
     g_chassis_debug.angular_command_rad_s = angular_rad_s;
-    ChassisSetWheelTargets(
-        chassis_ramped_linear_m_s - angular_rad_s *
-            CHASSIS_TRACK_WIDTH_M * 0.5f,
-        chassis_ramped_linear_m_s + angular_rad_s *
-            CHASSIS_TRACK_WIDTH_M * 0.5f);
+    ChassisSetBodyVelocityTargets(chassis_ramped_linear_m_s,
+                                  angular_rad_s);
 }
 
 static void ChassisRunTurn(uint32_t now_ms, float dt_s)
@@ -482,9 +586,8 @@ static void ChassisRunTurn(uint32_t now_ms, float dt_s)
     g_chassis_debug.turn_output_rad_s = chassis_ramped_angular_rad_s;
     g_chassis_debug.linear_command_m_s = 0.0f;
     g_chassis_debug.angular_command_rad_s = chassis_ramped_angular_rad_s;
-    ChassisSetWheelTargets(
-        -chassis_ramped_angular_rad_s * CHASSIS_TRACK_WIDTH_M * 0.5f,
-        chassis_ramped_angular_rad_s * CHASSIS_TRACK_WIDTH_M * 0.5f);
+    ChassisSetBodyVelocityTargets(0.0f,
+                                  chassis_ramped_angular_rad_s);
     if (fabsf(g_chassis_debug.turn_error_deg) <=
             CHASSIS_TURN_ERROR_TOLERANCE_DEG &&
         fabsf(g_chassis_debug.imu_gyro_z_rad_s) <=
@@ -526,11 +629,8 @@ static void ChassisRunStopping(uint32_t now_ms, float dt_s)
         g_chassis_debug.linear_command_m_s = chassis_ramped_linear_m_s;
         g_chassis_debug.angular_command_rad_s =
             chassis_ramped_angular_rad_s;
-        ChassisSetWheelTargets(
-            chassis_ramped_linear_m_s - chassis_ramped_angular_rad_s *
-                CHASSIS_TRACK_WIDTH_M * 0.5f,
-            chassis_ramped_linear_m_s + chassis_ramped_angular_rad_s *
-                CHASSIS_TRACK_WIDTH_M * 0.5f);
+        ChassisSetBodyVelocityTargets(chassis_ramped_linear_m_s,
+                                      chassis_ramped_angular_rad_s);
         if (chassis_ramped_linear_m_s != 0.0f ||
             chassis_ramped_angular_rad_s != 0.0f) {
             chassis_stop_stable_tick = 0u;
@@ -598,6 +698,16 @@ static uint8_t ChassisCommandValid(const Chassis_Command_s *command)
     return 0u;
 }
 
+static uint8_t ChassisVelocityCommandValid(
+    const Chassis_Velocity_Command_s *command)
+{
+    return (uint8_t)(command != NULL && command->command_id != 0u &&
+        isfinite(command->vx_mm_s) && isfinite(command->wz_rad_s) &&
+        fabsf(command->vx_mm_s) <= CHASSIS_VELOCITY_MAX_LINEAR_MM_S &&
+        fabsf(command->wz_rad_s) <=
+            CHASSIS_VELOCITY_MAX_ANGULAR_RAD_S);
+}
+
 uint8_t ChassisInit(attitude_t *imu)
 {
     Motor_Init_Config_s config;
@@ -653,6 +763,7 @@ uint8_t ChassisInit(attitude_t *imu)
     DJIMotorStop(chassis_left_motor);
     DJIMotorStop(chassis_right_motor);
     g_chassis_debug.initialized = 1u;
+    g_chassis_debug.velocity_wheel_scale = 1.0f;
     g_chassis_debug.left_can_id = CHASSIS_LEFT_MOTOR_ID;
     g_chassis_debug.right_can_id = CHASSIS_RIGHT_MOTOR_ID;
     g_chassis_debug.state = CHASSIS_STATE_WAIT_READY;
@@ -694,7 +805,62 @@ Chassis_Command_Result_e ChassisSubmitCommand(
             command->distance_mm * 0.001f;
         g_chassis_debug.straight_tolerance_m =
             command->tolerance_mm * 0.001f;
+        g_chassis_debug.velocity_heading_hold_active = 0u;
+        g_chassis_debug.velocity_command_tick = 0u;
+        g_chassis_debug.velocity_target_vx_mm_s = 0.0f;
+        g_chassis_debug.velocity_target_wz_rad_s = 0.0f;
         ChassisBeginCommand(HAL_GetTick());
+        result = CHASSIS_COMMAND_ACCEPTED;
+    }
+    g_chassis_debug.last_submit_result = result;
+    return result;
+}
+
+Chassis_Command_Result_e ChassisSubmitVelocityCommand(
+    const Chassis_Velocity_Command_s *command)
+{
+    Chassis_Command_Result_e result;
+    uint32_t now_ms = HAL_GetTick();
+
+    if (g_chassis_debug.initialized == 0u ||
+        g_chassis_debug.state == CHASSIS_STATE_WAIT_READY) {
+        result = CHASSIS_COMMAND_NOT_READY;
+    } else if (g_chassis_debug.state == CHASSIS_STATE_FAULT ||
+               g_chassis_debug.fault != CHASSIS_FAULT_NONE) {
+        result = CHASSIS_COMMAND_FAULTED;
+    } else if (!ChassisVelocityCommandValid(command)) {
+        result = CHASSIS_COMMAND_INVALID;
+    } else if (chassis_latest_command_id != 0u &&
+               (int32_t)(command->command_id -
+                         chassis_latest_command_id) <= 0) {
+        result = CHASSIS_COMMAND_DUPLICATE;
+    } else if (g_chassis_debug.state == CHASSIS_STATE_STOPPING ||
+               (g_chassis_debug.state == CHASSIS_STATE_RUNNING &&
+                g_chassis_debug.command_type !=
+                    CHASSIS_COMMAND_BODY_VELOCITY)) {
+        result = CHASSIS_COMMAND_BUSY;
+    } else {
+        uint8_t already_running = (uint8_t)(
+            g_chassis_debug.state == CHASSIS_STATE_RUNNING &&
+            g_chassis_debug.command_type ==
+                CHASSIS_COMMAND_BODY_VELOCITY);
+
+        chassis_latest_command_id = command->command_id;
+        g_chassis_debug.command_id = command->command_id;
+        g_chassis_debug.command_type = CHASSIS_COMMAND_BODY_VELOCITY;
+        g_chassis_debug.heading_mode = CHASSIS_HEADING_HOLD_ZERO_WZ;
+        g_chassis_debug.target_distance_mm = 0.0f;
+        g_chassis_debug.target_angle_deg = 0.0f;
+        g_chassis_debug.tolerance_mm = 0.0f;
+        g_chassis_debug.straight_target_distance_m = 0.0f;
+        g_chassis_debug.straight_tolerance_m = 0.0f;
+        if (already_running == 0u) {
+            g_chassis_debug.velocity_heading_hold_active = 0u;
+            ChassisBeginCommand(now_ms);
+        }
+        ChassisApplyVelocityTarget(command->vx_mm_s,
+                                   command->wz_rad_s, now_ms);
+        g_chassis_debug.velocity_refresh_count++;
         result = CHASSIS_COMMAND_ACCEPTED;
     }
     g_chassis_debug.last_submit_result = result;
@@ -714,6 +880,14 @@ uint8_t ChassisGetStatus(Chassis_Status_s *status)
     status->actual_distance_mm = g_chassis_debug.actual_distance_mm;
     status->target_angle_deg = g_chassis_debug.target_angle_deg;
     status->actual_angle_deg = g_chassis_debug.actual_angle_deg;
+    status->target_vx_mm_s =
+        g_chassis_debug.velocity_target_vx_mm_s;
+    status->actual_vx_mm_s =
+        g_chassis_debug.velocity_actual_vx_mm_s;
+    status->target_wz_rad_s =
+        g_chassis_debug.velocity_target_wz_rad_s;
+    status->actual_wz_rad_s =
+        g_chassis_debug.velocity_actual_wz_rad_s;
     return 1u;
 }
 
@@ -784,6 +958,9 @@ void ChassisTask(uint32_t now_ms)
         } else if (g_chassis_debug.command_type ==
                    CHASSIS_COMMAND_RELATIVE_TURN) {
             ChassisRunTurn(now_ms, dt_s);
+        } else if (g_chassis_debug.command_type ==
+                   CHASSIS_COMMAND_BODY_VELOCITY) {
+            ChassisRunVelocity(now_ms, dt_s);
         } else {
             ChassisLatchFault(CHASSIS_FAULT_INIT);
         }

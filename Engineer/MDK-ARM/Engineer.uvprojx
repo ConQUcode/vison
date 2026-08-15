@@ -1251,6 +1251,11 @@
               <FilePath>..\MODULE\servo\huaner_servo.c</FilePath>
             </File>
             <File>
+              <FileName>mg995_servo.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\MODULE\servo\mg995_servo.c</FilePath>
+            </File>
+            <File>
               <FileName>buzzer.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\MODULE\buzzer\buzzer.c</FilePath>
@@ -1269,6 +1274,16 @@
               <FileName>app_runtime.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\APPLICATION\app_runtime.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_arm_command_id.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APPLICATION\app_arm_command_id.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_arm_side_pick_place.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APPLICATION\app_arm_side_pick_place.c</FilePath>
             </File>
             <File>
               <FileName>app_fruit_task.c</FileName>
@@ -2612,6 +2627,9 @@
           </Files>
         </Group>
         <Group>
+          <GroupName>::CMSIS</GroupName>
+        </Group>
+        <Group>
           <GroupName>Middlewares/Library/DSP Library/DSP Library</GroupName>
           <GroupOption>
             <CommonProperty>
@@ -2708,9 +2726,6 @@
               </FileOption>
             </File>
           </Files>
-        </Group>
-        <Group>
-          <GroupName>::CMSIS</GroupName>
         </Group>
       </Groups>
     </Target>

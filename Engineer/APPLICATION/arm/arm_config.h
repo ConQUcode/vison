@@ -8,12 +8,12 @@
 
 #include "app_config.h"
 
-/* 坐标：+X车头、+Y车体左侧、+Z向上；长度mm、角度deg、时间ms。 */
+/* 坐标：+X车头、+Y物理左侧、-Y物理右侧、+Z向上；长度mm、角度deg、时间ms。 */
 
 /*
- * 完整初始化复用已经实机验证的组合流程：先闭环初始化ID1/ID2舵机，
- * 再使能三台达妙并同步当前位置，随后将ARM_USB_HOME_*作为ID1俯仰
- * 舵机轴心坐标执行IK归正；最后ID2回到默认位置550才发布整机READY。
+ * 完整初始化先使能三台达妙并同步当前位置，将ARM_USB_HOME_*作为ID1
+ * 俯仰舵机轴心坐标执行IK；q2/q3同步HOME、q1随后HOME，最后才初始化
+ * ID1/ID2并让ID2回到默认位置，然后发布整机READY。
  * 历史名称DM_SINGLE_AXIS_TEST仅作源码兼容，不再表示单轴测试。
  */
 #define ARM_BOOT_MODE_NORMAL               0u
@@ -34,6 +34,8 @@
 #define ARM_DM_TEST_BASE      1u
 #define ARM_DM_TEST_SHOULDER  2u
 #define ARM_DM_TEST_ELBOW     3u
+/* Watch专用：上电HOME阶段大臂和小臂由同一联合位姿命令驱动。 */
+#define ARM_DM_TEST_SHOULDER_ELBOW 4u
 #ifndef ARM_DM_TEST_AXIS
 #define ARM_DM_TEST_AXIS ARM_DM_TEST_NONE
 #endif
@@ -102,10 +104,10 @@
 #define ARM_Q1_SOFT_MIN_DEG              (-180.0f)
 #define ARM_Q1_SOFT_MAX_DEG                180.0f
 /*
- * 肩关节正常运动下限。2026-08-13采摘教导位姿实测q2=28.5deg
- * （大臂前倾够侧下方水果），由35放宽到25；脱困下限20不变。
+ * 大臂硬件范围为0deg~180deg；普通运动保留3deg下限安全余量。
+ * 朝正前方时仍由ARM_FRONT_BARRIER_SHOULDER_Q2_MAX_DEG独立限制栏框侧动作。
  */
-#define ARM_Q2_SOFT_MIN_DEG                 25.0f
+#define ARM_Q2_SOFT_MIN_DEG                  3.0f
 #define ARM_Q2_SOFT_MAX_DEG                180.0f
 /* q3采用机械定义：q3 = -两杆物理内夹角。
  * 正常物理夹角35deg~190deg，对应q3=-190deg~-35deg；
@@ -115,8 +117,9 @@
 /* 底座启动脱困/硬边界与关节命令范围一致；普通IK仍由ARM_AUTO_Q1限制。 */
 #define ARM_Q1_ESCAPE_MIN_DEG            (-180.0f)
 #define ARM_Q1_ESCAPE_MAX_DEG              180.0f
-#define ARM_Q2_ESCAPE_MIN_DEG               20.0f
-#define ARM_Q2_ESCAPE_MAX_DEG              200.0f
+/* 允许从0deg~3deg的软件限位外区域单向脱困回到普通工作区。 */
+#define ARM_Q2_ESCAPE_MIN_DEG                0.0f
+#define ARM_Q2_ESCAPE_MAX_DEG              180.0f
 /* 脱困物理夹角20deg~210deg，对应q3=-210deg~-20deg。 */
 #define ARM_Q3_ESCAPE_MIN_DEG             (-210.0f)
 #define ARM_Q3_ESCAPE_MAX_DEG              (-20.0f)
@@ -125,8 +128,8 @@
 /* 普通FK/IK和笛卡尔轨迹仍限制在前方+/-90deg；后方180deg只供明确关节序列。 */
 #define ARM_AUTO_Q1_MIN_DEG                (-90.0f)
 #define ARM_AUTO_Q1_MAX_DEG                  90.0f
-/* 自动轨迹沿用正常肩关节下限，不允许使用启动脱困边界。 */
-#define ARM_AUTO_Q2_MIN_DEG                 35.0f
+/* 自动轨迹沿用3deg正常肩关节下限，不使用0deg~3deg脱困区域。 */
+#define ARM_AUTO_Q2_MIN_DEG ARM_Q2_SOFT_MIN_DEG
 #define ARM_AUTO_Q2_MAX_DEG ARM_Q2_SOFT_MAX_DEG
 #define ARM_AUTO_Q3_MIN_DEG ARM_Q3_SOFT_MIN_DEG
 #define ARM_AUTO_Q3_MAX_DEG ARM_Q3_SOFT_MAX_DEG
@@ -164,8 +167,8 @@
 #define ARM_DM_TX_FAIL_LIMIT                    5u
 
 /*
- * 三轴上电初始化：反馈和使能就绪后，直接解算并低速移动到HOME末端点。
- * HOME坐标统一复用ARM_USB_HOME_*，不再先经过固定关节初始化姿态。
+ * 三轴上电初始化：反馈和使能就绪后，先让大臂/小臂同步到HOME，再让
+ * 底座单独到HOME；HOME坐标统一复用ARM_USB_HOME_*。
  */
 #define ARM_DM_AUTO_INIT_ENABLE                  1u
 #define ARM_DM_AUTO_INIT_START_DELAY_MS       1000u
@@ -231,10 +234,11 @@
 
 #define ARM_TOOL_PITCH_SERVO_ID                       1u
 #define ARM_TOOL_PITCH_NEUTRAL_POS                  500u
-#define ARM_TOOL_PITCH_SERVO_MIN_POS                125u
+#define ARM_TOOL_PITCH_SERVO_MIN_POS                115u
 #define ARM_TOOL_PITCH_SERVO_MAX_POS                875u
 #define ARM_TOOL_PITCH_RELATIVE_MIN_DEG            (-90.0f)
-#define ARM_TOOL_PITCH_RELATIVE_MAX_DEG              90.0f
+/* 控制值115按当前反向映射对应ID1相对小臂最大俯仰+92.4deg。 */
+#define ARM_TOOL_PITCH_RELATIVE_MAX_DEG              92.4f
 /*
  * ID1实机安装方向：控制值增大时夹爪相对小臂向下转，因此绝对俯仰
  * 增大必须使控制值减小。该符号同时用于目标换算和反馈反算，禁止只改一侧。
@@ -245,12 +249,17 @@
 #define ARM_TOOL_PITCH_UPDATE_PERIOD_MS              20u
 #define ARM_TOOL_PITCH_COMMAND_DEADBAND_POS            2u
 #define ARM_TOOL_PITCH_TRACK_TIME_MS                   0u
+/*
+ * 9600波特率总线上的位置查询可能偶发超过100ms新鲜度窗口。轨迹期间允许
+ * ID1沿用最近一次有效反馈短暂继续跟踪；超过该时限才按离线故障中止。
+ */
+#define ARM_TOOL_PITCH_FEEDBACK_ABORT_MS             300u
 
 #define ARM_GRIPPER_SERVO_ID                           2u
-#define ARM_GRIPPER_SERVO_MIN_POS                    550u
+#define ARM_GRIPPER_SERVO_MIN_POS                    450u
 #define ARM_GRIPPER_SERVO_MAX_POS                    660u
-/* ID2上电、等待抓取和释放均回到默认张开位置550。 */
-#define ARM_GRIPPER_DEFAULT_POS                      550u
+/* ID2上电、等待抓取和释放均回到默认张开位置450。 */
+#define ARM_GRIPPER_DEFAULT_POS                      450u
 #define ARM_GRIPPER_BOOT_POS          ARM_GRIPPER_DEFAULT_POS
 #define ARM_GRIPPER_READY_POS         ARM_GRIPPER_DEFAULT_POS
 #define ARM_GRIPPER_OPEN_POS          ARM_GRIPPER_DEFAULT_POS
@@ -258,6 +267,8 @@
 #define ARM_GRIPPER_CLOSE_POS                        660u
 #define ARM_GRIPPER_MOVE_TIME_MS                     500u
 #define ARM_GRIPPER_BOOT_MOVE_TIME_MS               1000u
+/* ID2张开/回等待位允许短时反馈中断；恢复后仍须由新鲜反馈确认到位。 */
+#define ARM_GRIPPER_FEEDBACK_RECOVERY_TIMEOUT_MS     500u
 /*
  * ID2闭合使用独立的小到位窗口，避免通用舵机+/-15容差吞掉堵转判定。
  * 误差0..5视为正常到位，误差>=6才允许进入停滞检测，两者无空档。

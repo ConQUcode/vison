@@ -10,10 +10,11 @@
 
 #include "app_config.h"
 /*
- * 抓放子流程的状态枚举、Watch结构和 g_app_arm_pick_place_test_debug
- * 已迁移到 app_arm_flow.h/.c；本文件只保留调度入口和打点模式Watch。
+ * 抓放子流程与单侧完整抓放接口分别由独立模块维护；本文件只保留
+ * 整机调度入口和无力打点Watch。
  */
 #include "app_arm_flow.h"
+#include "app_arm_side_pick_place.h"
 
 /** 无力打点模式的紧凑Watch快照；角度deg，坐标mm。 */
 typedef struct {

@@ -34,6 +34,12 @@
 #define CHASSIS_COMMAND_MAX_TURN_DEG           360.0f
 #define CHASSIS_COMMAND_MIN_TOLERANCE_MM         0.5f
 #define CHASSIS_COMMAND_MAX_TOLERANCE_MM        50.0f
+/* 连续车体速度接口：应用层使用mm/s和rad/s，内部统一换算为SI单位。 */
+#define CHASSIS_VELOCITY_MAX_LINEAR_MM_S       200.0f
+#define CHASSIS_VELOCITY_MAX_ANGULAR_RAD_S       0.80f
+#define CHASSIS_VELOCITY_LINEAR_ZERO_MM_S         0.5f
+#define CHASSIS_VELOCITY_ANGULAR_ZERO_RAD_S       0.005f
+#define CHASSIS_VELOCITY_COMMAND_TIMEOUT_MS      300u
 /* 距离、速度、减速和加速度参数；首次落地不要提高最大速度。 */
 #define CHASSIS_TEST_DISTANCE_M                1.000f
 #define CHASSIS_TEST_MAX_SPEED_M_S             0.200f

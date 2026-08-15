@@ -112,8 +112,8 @@ typedef struct {
 typedef enum {
     ARM_TOOL_ACTION_NONE = 0,       /* 不执行工具动作。 */
     ARM_TOOL_ACTION_SET_PITCH,      /* 只调整ID1绝对俯仰。 */
-    ARM_TOOL_ACTION_GRIPPER_READY,  /* ID2回到默认位置550。 */
-    ARM_TOOL_ACTION_GRIPPER_OPEN,   /* ID2回到默认张开位置550。 */
+    ARM_TOOL_ACTION_GRIPPER_READY,  /* ID2回到配置的默认位置。 */
+    ARM_TOOL_ACTION_GRIPPER_OPEN,   /* ID2回到配置的默认张开位置。 */
     ARM_TOOL_ACTION_GRIPPER_CLOSE,  /* ID2到660并启用堵转及分级卸力。 */
     ARM_TOOL_ACTION_RESET_SAFE      /* 清除可恢复工具故障并回安全状态。 */
 } Arm_Tool_Action_e;

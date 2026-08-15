@@ -90,7 +90,7 @@ static uint8_t ARM_TOOL_DISABLED_UNUSED ArmToolSelfTest(void)
     uint16_t position = 0u;
     uint32_t fail_mask = 0u;
 
-    /* 当前实机方向：相对俯仰-90deg对应875，+90deg对应125。 */
+    /* 当前实机方向：相对俯仰-90deg对应875，+92.4deg对应115。 */
     if (!ArmToolPitchPositionForPose(-90.0f, 0.0f, &position) ||
         position != 875u) {
         fail_mask |= 1u << 0;
@@ -99,12 +99,12 @@ static uint8_t ARM_TOOL_DISABLED_UNUSED ArmToolSelfTest(void)
         position != 500u) {
         fail_mask |= 1u << 1;
     }
-    if (!ArmToolPitchPositionForPose(90.0f, 0.0f, &position) ||
-        position != 125u) {
+    if (!ArmToolPitchPositionForPose(92.4f, 0.0f, &position) ||
+        position != 115u) {
         fail_mask |= 1u << 2;
     }
     if (ArmToolPitchPositionForPose(-90.24f, 0.0f, &position) ||
-        ArmToolPitchPositionForPose(90.24f, 0.0f, &position)) {
+        ArmToolPitchPositionForPose(92.64f, 0.0f, &position)) {
         fail_mask |= 1u << 3;
     }
     if (!ArmToolPositionInRange(ARM_GRIPPER_SERVO_ID,
@@ -572,6 +572,7 @@ static Arm_Command_Result_e ArmToolBeginGripperMotion(
     g_arm_tool_debug.gripper_target_state = target_state;
     g_arm_tool_debug.gripper_action_start_tick = now_ms;
     g_arm_tool_debug.gripper_settle_start_tick = 0u;
+    g_arm_tool_debug.gripper_feedback_lost_tick = 0u;
     g_arm_tool_debug.gripper_close_start_pos =
         g_arm_tool_debug.gripper_feedback_pos;
     g_arm_tool_debug.gripper_stall_latched = 0u;
@@ -884,6 +885,9 @@ static void ArmToolProcessRelief(uint32_t now_ms)
 
 static void ARM_TOOL_DISABLED_UNUSED ArmToolProcessGripper(uint32_t now_ms)
 {
+    uint32_t action_elapsed_ms;
+    uint32_t feedback_lost_elapsed_ms;
+
     switch (g_arm_tool_debug.gripper_state) {
         case ARM_GRIPPER_BOOTING:
             ArmToolProcessClosing(now_ms, 1u);
@@ -899,22 +903,40 @@ static void ARM_TOOL_DISABLED_UNUSED ArmToolProcessGripper(uint32_t now_ms)
 
         case ARM_GRIPPER_READYING:
         case ARM_GRIPPER_OPENING:
+            action_elapsed_ms = (uint32_t)(now_ms -
+                g_arm_tool_debug.gripper_action_start_tick);
             if (g_arm_tool_debug.servo_feedback_valid[1] == 0u) {
-                if (g_arm_tool_debug.servo_online[1] == 0u) {
+                if (g_arm_tool_debug.gripper_feedback_lost_tick == 0u) {
+                    g_arm_tool_debug.gripper_feedback_lost_tick = now_ms;
+                    g_arm_tool_debug.gripper_feedback_dropout_count++;
+                }
+                feedback_lost_elapsed_ms = (uint32_t)(now_ms -
+                    g_arm_tool_debug.gripper_feedback_lost_tick);
+                if (action_elapsed_ms > ARM_GRIPPER_MOVE_TIME_MS +
+                        ARM_TOOL_ACTION_DEADLINE_MARGIN_MS) {
                     g_arm_tool_debug.gripper_state = ARM_GRIPPER_FAULT;
                     g_arm_tool_debug.gripper_fault_latched = 1u;
-                    g_arm_tool_debug.error_code =
-                        ARM_TOOL_ERROR_SERVO_FEEDBACK;
+                    g_arm_tool_debug.gripper_timeout_count++;
+                    g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_TIMEOUT;
+                } else if (feedback_lost_elapsed_ms >=
+                           ARM_GRIPPER_FEEDBACK_RECOVERY_TIMEOUT_MS) {
+                    g_arm_tool_debug.gripper_state = ARM_GRIPPER_FAULT;
+                    g_arm_tool_debug.gripper_fault_latched = 1u;
+                    g_arm_tool_debug.error_code = ARM_TOOL_ERROR_SERVO_FEEDBACK;
                 }
-            } else if (ArmToolGripperFeedbackArrived() != 0u) {
+                break;
+            }
+            if (g_arm_tool_debug.gripper_feedback_lost_tick != 0u) {
+                g_arm_tool_debug.gripper_feedback_lost_tick = 0u;
+                g_arm_tool_debug.gripper_feedback_recovery_count++;
+            }
+            if (ArmToolGripperFeedbackArrived() != 0u) {
                 g_arm_tool_debug.gripper_state =
                     g_arm_tool_debug.gripper_target_state;
                 g_arm_tool_debug.gripper_fault_latched = 0u;
                 g_arm_tool_debug.error_code = ARM_TOOL_ERROR_NONE;
-            } else if ((uint32_t)(now_ms -
-                           g_arm_tool_debug.gripper_action_start_tick) >
-                       ARM_GRIPPER_MOVE_TIME_MS +
-                           ARM_TOOL_ACTION_DEADLINE_MARGIN_MS) {
+            } else if (action_elapsed_ms > ARM_GRIPPER_MOVE_TIME_MS +
+                       ARM_TOOL_ACTION_DEADLINE_MARGIN_MS) {
                 g_arm_tool_debug.gripper_state = ARM_GRIPPER_FAULT;
                 g_arm_tool_debug.gripper_fault_latched = 1u;
                 g_arm_tool_debug.gripper_timeout_count++;
@@ -1006,7 +1028,7 @@ static void ARM_TOOL_DISABLED_UNUSED ArmToolProcessInit(uint32_t now_ms)
                     ARM_TOOL_PITCH_NEUTRAL_POS;
                 g_arm_tool_debug.gripper_target_pos =
                     ARM_GRIPPER_BOOT_POS;
-                /* ID2初始化、等待抓取和释放统一使用默认位置550。 */
+                /* ID2初始化、等待抓取和释放统一使用配置的默认位置。 */
                 g_arm_tool_debug.gripper_state = ARM_GRIPPER_UNKNOWN;
                 g_arm_tool_debug.gripper_target_state =
                     ARM_GRIPPER_UNKNOWN;
@@ -1028,6 +1050,33 @@ static void ARM_TOOL_DISABLED_UNUSED ArmToolProcessInit(uint32_t now_ms)
         default:
             break;
     }
+}
+
+void ArmToolPrepareDeferredInit(void)
+{
+    memset(&g_arm_servo_angle_debug, 0,
+           sizeof(g_arm_servo_angle_debug));
+    memset(&g_arm_tool_debug, 0, sizeof(g_arm_tool_debug));
+    memset(&g_arm_gripper_stall_debug, 0,
+           sizeof(g_arm_gripper_stall_debug));
+    memset(&arm_tool_tx_scheduler, 0, sizeof(arm_tool_tx_scheduler));
+    arm_tool_feedback_only_mode = 0u;
+    arm_tool_feedback_unload_in_progress = 0u;
+    arm_gripper_relief_outcome = ARM_GRIPPER_RELIEF_NONE;
+
+    g_arm_servo_angle_debug.servo1_current_deg = NAN;
+    g_arm_servo_angle_debug.servo1_target_deg = NAN;
+    g_arm_servo_angle_debug.servo2_current_deg = NAN;
+    g_arm_servo_angle_debug.servo2_target_deg = NAN;
+    g_arm_gripper_stall_debug.current_deg = NAN;
+    g_arm_tool_debug.initialized = 0u;
+    g_arm_tool_debug.init_state = ARM_TOOL_INIT_DISABLED;
+    g_arm_tool_debug.gripper_state = ARM_GRIPPER_UNKNOWN;
+    g_arm_tool_debug.gripper_target_state = ARM_GRIPPER_UNKNOWN;
+    g_arm_tool_debug.small_link_pitch_deg = NAN;
+    g_arm_tool_debug.tool_pitch_target_deg = NAN;
+    g_arm_tool_debug.tool_pitch_feedback_deg = NAN;
+    g_arm_tool_debug.last_update_tick = HAL_GetTick();
 }
 
 void ArmToolInit(void)

@@ -32,11 +32,11 @@ typedef enum {
 
 typedef enum {
     ARM_GRIPPER_UNKNOWN = 0,       /* 尚无有效反馈或状态未建立。 */
-    ARM_GRIPPER_BOOTING,           /* 上电移动到默认位置550。 */
-    ARM_GRIPPER_READYING,          /* 移动到等待抓取位置550。 */
-    ARM_GRIPPER_READY,             /* 已在默认位置550。 */
-    ARM_GRIPPER_OPENING,           /* 正在打开到默认位置550。 */
-    ARM_GRIPPER_OPEN,              /* 已在默认位置550。 */
+    ARM_GRIPPER_BOOTING,           /* 上电移动到配置的默认位置。 */
+    ARM_GRIPPER_READYING,          /* 移动到配置的默认位置。 */
+    ARM_GRIPPER_READY,             /* 已在配置的默认位置。 */
+    ARM_GRIPPER_OPENING,           /* 正在打开到配置的默认位置。 */
+    ARM_GRIPPER_OPEN,              /* 已在配置的默认位置。 */
     ARM_GRIPPER_CLOSING,           /* 正在闭合到探测抓取位置660。 */
     ARM_GRIPPER_CONTACT_SUSPECTED, /* 已检测到位置停滞，尚未完成卸力。 */
     ARM_GRIPPER_RELIEVING,         /* 分级卸力：每次回退10，最多4次。 */
@@ -49,8 +49,8 @@ typedef enum {
 
 typedef enum {
     ARM_GRIPPER_COMMAND_HOLD = 0, /* 保持当前目标，不发送新动作。 */
-    ARM_GRIPPER_COMMAND_READY,    /* 到550，等待抓取。 */
-    ARM_GRIPPER_COMMAND_OPEN,     /* 到550，张开/释放。 */
+    ARM_GRIPPER_COMMAND_READY,    /* 到配置的默认位置，等待抓取。 */
+    ARM_GRIPPER_COMMAND_OPEN,     /* 到配置的默认位置，张开/释放。 */
     ARM_GRIPPER_COMMAND_CLOSE     /* 到660，启用接触/卡死检测。 */
 } Arm_Gripper_Command_e;
 
@@ -130,6 +130,10 @@ typedef struct {
     uint32_t gripper_jam_count;
     uint32_t gripper_forced_held_count;
     uint32_t gripper_timeout_count;
+    /* READY/OPEN反馈恢复Watch；lost_tick为0表示当前反馈正常。 */
+    uint32_t gripper_feedback_lost_tick;
+    uint32_t gripper_feedback_dropout_count;
+    uint32_t gripper_feedback_recovery_count;
 
     /* 非阻塞发送统计及配置工具长度对应的夹爪中心调试值。 */
     uint32_t error_code;
@@ -152,6 +156,8 @@ extern Arm_Servo_Angle_Debug_s g_arm_servo_angle_debug;
 extern Arm_Gripper_Stall_Debug_s g_arm_gripper_stall_debug;
 
 void ArmToolInit(void);
+/** 完整上电初始化前仅清空工具状态；不初始化USART6，也不发送舵机目标。 */
+void ArmToolPrepareDeferredInit(void);
 /** 打点模式初始化：只轮询ID1/ID2位置反馈，绝不发送舵机动作目标。 */
 void ArmToolInitFeedbackOnly(void);
 /* 1 ms周期服务：刷新反馈、发送一次性目标并推进夹爪状态机。 */
@@ -183,7 +189,7 @@ float ArmToolSmallLinkPitchFromJoint(const float q_deg[3]);
 float ArmToolPitchFromFeedback(float small_link_pitch_deg,
                                uint16_t position);
 
-/* ID1输出轴中心与夹爪中心之间的正向/反向坐标换算，长度见arm_config.h。 */
+/* ID1轴心与夹爪中心换算；底座q1正角朝世界Y正侧，长度见arm_config.h。 */
 uint8_t ArmToolGetCenterFromWrist(const Arm_Position_s *wrist,
                                   float base_yaw_deg,
                                   float tool_pitch_deg,

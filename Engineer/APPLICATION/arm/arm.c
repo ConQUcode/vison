@@ -22,6 +22,7 @@
 #define ARM_RAD_TO_DEG  (180.0f / ARM_PI)
 #define ARM_AXIS_COUNT  3u
 #define ARM_AXIS_NONE   0xffu
+#define ARM_AUTO_INIT_ARM_AXIS_COUNT 2u
 
 typedef struct {
     DM_MotorInstance *motor;
@@ -42,9 +43,13 @@ typedef struct {
     uint32_t stable_tick;
     uint32_t direction_tick;
     uint32_t auto_init_tick;
+    uint32_t auto_init_arm_stable_tick[ARM_AUTO_INIT_ARM_AXIS_COUNT];
+    uint32_t auto_init_arm_direction_tick[ARM_AUTO_INIT_ARM_AXIS_COUNT];
     float direction_start_deg;
     float active_target_deg;
     float active_speed_deg_s;
+    float auto_init_arm_direction_start_deg[ARM_AUTO_INIT_ARM_AXIS_COUNT];
+    float auto_init_hold_base_deg;
     uint8_t enter_mode_index;
     uint8_t disable_sent;
     uint8_t resetting;
@@ -720,40 +725,6 @@ static uint8_t ArmAxisArrived(uint8_t axis, uint32_t now_ms)
     return 0u;
 }
 
-static uint8_t ArmPoseArrived(const float target_q_deg[3], uint32_t now_ms)
-{
-    uint8_t axis;
-
-    if (target_q_deg == NULL) {
-        arm_runtime.stable_tick = 0u;
-        return 0u;
-    }
-    for (axis = 0u; axis < ARM_AXIS_COUNT; ++axis) {
-        float error_deg;
-        float speed_deg_s;
-
-        if (!isfinite(target_q_deg[axis]) ||
-            !isfinite(arm_joint[axis].feedback_deg)) {
-            arm_runtime.stable_tick = 0u;
-            return 0u;
-        }
-        error_deg = target_q_deg[axis] - arm_joint[axis].feedback_deg;
-        speed_deg_s = ArmMotorVelocityToJointDegS(
-            (Arm_Joint_e)axis, arm_joint[axis].motor->measure.velocity_rad_s);
-        if (!isfinite(speed_deg_s) ||
-            ArmAbs(error_deg) > ARM_ARRIVAL_ERROR_DEG ||
-            ArmAbs(speed_deg_s) > ARM_ARRIVAL_SPEED_DEG_S) {
-            arm_runtime.stable_tick = 0u;
-            return 0u;
-        }
-    }
-    if (arm_runtime.stable_tick == 0u) {
-        arm_runtime.stable_tick = now_ms;
-    }
-    return (uint32_t)(now_ms - arm_runtime.stable_tick) >=
-        ARM_ARRIVAL_STABLE_MS;
-}
-
 static uint8_t ArmAxisMovingWrongWay(uint8_t axis, uint32_t now_ms)
 {
     float expected_direction = arm_runtime.active_target_deg >=
@@ -831,6 +802,152 @@ static uint8_t ArmRunAxisMotion(uint8_t axis,
         return 0u;
     }
     return ArmAxisArrived(axis, now_ms);
+}
+
+static uint8_t ArmAutoInitArmAxis(uint8_t pair_index)
+{
+    return pair_index == 0u ? ARM_JOINT_SHOULDER : ARM_JOINT_ELBOW;
+}
+
+static uint8_t ArmAutoInitArmAxisArrived(uint8_t pair_index,
+                                         float target_deg,
+                                         uint32_t now_ms)
+{
+    uint8_t axis = ArmAutoInitArmAxis(pair_index);
+    float error_deg = target_deg - arm_joint[axis].feedback_deg;
+    float speed_deg_s = ArmMotorVelocityToJointDegS(
+        (Arm_Joint_e)axis, arm_joint[axis].motor->measure.velocity_rad_s);
+
+    if (ArmAbs(error_deg) <= ARM_ARRIVAL_ERROR_DEG &&
+        ArmAbs(speed_deg_s) <= ARM_ARRIVAL_SPEED_DEG_S) {
+        if (arm_runtime.auto_init_arm_stable_tick[pair_index] == 0u) {
+            arm_runtime.auto_init_arm_stable_tick[pair_index] = now_ms;
+        }
+        return (uint32_t)(now_ms -
+            arm_runtime.auto_init_arm_stable_tick[pair_index]) >=
+            ARM_ARRIVAL_STABLE_MS;
+    }
+    arm_runtime.auto_init_arm_stable_tick[pair_index] = 0u;
+    return 0u;
+}
+
+static uint8_t ArmAutoInitArmAxisMovingWrongWay(uint8_t pair_index,
+                                                float target_deg,
+                                                uint32_t now_ms)
+{
+    uint8_t axis = ArmAutoInitArmAxis(pair_index);
+    float expected_direction = target_deg >=
+        arm_runtime.auto_init_arm_direction_start_deg[pair_index] ?
+        1.0f : -1.0f;
+    float moved_deg = arm_joint[axis].feedback_deg -
+        arm_runtime.auto_init_arm_direction_start_deg[pair_index];
+
+    if (moved_deg * expected_direction >= -ARM_WRONG_DIRECTION_DELTA_DEG) {
+        arm_runtime.auto_init_arm_direction_tick[pair_index] = 0u;
+        arm_runtime.auto_init_arm_direction_start_deg[pair_index] =
+            arm_joint[axis].feedback_deg;
+        return 0u;
+    }
+    if (arm_runtime.auto_init_arm_direction_tick[pair_index] == 0u) {
+        arm_runtime.auto_init_arm_direction_tick[pair_index] = now_ms;
+        return 0u;
+    }
+    return (uint32_t)(now_ms -
+        arm_runtime.auto_init_arm_direction_tick[pair_index]) >=
+        ARM_WRONG_DIRECTION_TIME_MS;
+}
+
+static uint8_t ArmStartAutoInitArmMotion(const float target_q_deg[3],
+                                         float speed_deg_s)
+{
+    float pose_q_deg[3];
+    uint8_t pair_index;
+
+    if (target_q_deg == NULL || !isfinite(speed_deg_s) ||
+        speed_deg_s <= 0.0f) {
+        return 0u;
+    }
+    arm_runtime.auto_init_hold_base_deg =
+        arm_joint[ARM_JOINT_BASE_YAW].feedback_deg;
+    pose_q_deg[ARM_JOINT_BASE_YAW] = arm_runtime.auto_init_hold_base_deg;
+    pose_q_deg[ARM_JOINT_SHOULDER] = target_q_deg[ARM_JOINT_SHOULDER];
+    pose_q_deg[ARM_JOINT_ELBOW] = target_q_deg[ARM_JOINT_ELBOW];
+    for (pair_index = 0u;
+         pair_index < ARM_AUTO_INIT_ARM_AXIS_COUNT;
+         ++pair_index) {
+        uint8_t axis = ArmAutoInitArmAxis(pair_index);
+
+        arm_runtime.auto_init_arm_stable_tick[pair_index] = 0u;
+        arm_runtime.auto_init_arm_direction_tick[pair_index] = 0u;
+        arm_runtime.auto_init_arm_direction_start_deg[pair_index] =
+            arm_joint[axis].feedback_deg;
+    }
+    g_arm_state.active_axis = ARM_AXIS_NONE;
+    return ArmCommandPose(pose_q_deg, speed_deg_s, 1u);
+}
+
+static uint8_t ArmRunAutoInitArmMotion(const float target_q_deg[3],
+                                       float speed_deg_s,
+                                       uint32_t now_ms,
+                                       uint32_t timeout_ms)
+{
+    float pose_q_deg[3];
+    uint8_t pair_index;
+    uint8_t all_arrived = 1u;
+
+    if (target_q_deg == NULL || !ArmAllFeedbackValid(now_ms)) {
+        ArmLatchFault(ARM_FAULT_FEEDBACK_TIMEOUT);
+        return 0u;
+    }
+    if (ArmAnyMotorStateFault()) {
+        ArmLatchFault(ARM_FAULT_MOTOR_STATE);
+        return 0u;
+    }
+    for (pair_index = 0u;
+         pair_index < ARM_AUTO_INIT_ARM_AXIS_COUNT;
+         ++pair_index) {
+        uint8_t axis = ArmAutoInitArmAxis(pair_index);
+        float current_deg = arm_joint[axis].feedback_deg;
+        float remaining = target_q_deg[axis] - current_deg;
+
+        if (!isfinite(current_deg) ||
+            ArmCheckLimit(axis, current_deg) == ARM_LIMIT_OUTSIDE_HARD ||
+            (remaining != 0.0f &&
+             ((current_deg < arm_joint[axis].soft_min_deg &&
+               remaining < 0.0f) ||
+              (current_deg > arm_joint[axis].soft_max_deg &&
+               remaining > 0.0f)))) {
+            ArmLatchFault(ARM_FAULT_HARD_BOUNDARY);
+            return 0u;
+        }
+        if (ArmAutoInitArmAxisMovingWrongWay(
+                pair_index, target_q_deg[axis], now_ms)) {
+            ArmLatchFault(ARM_FAULT_ESCAPE_DIRECTION);
+            return 0u;
+        }
+    }
+    if ((uint32_t)(now_ms - arm_runtime.auto_init_tick) >= timeout_ms) {
+        ArmLatchFault(ARM_FAULT_ESCAPE_TIMEOUT);
+        return 0u;
+    }
+    pose_q_deg[ARM_JOINT_BASE_YAW] = arm_runtime.auto_init_hold_base_deg;
+    pose_q_deg[ARM_JOINT_SHOULDER] = target_q_deg[ARM_JOINT_SHOULDER];
+    pose_q_deg[ARM_JOINT_ELBOW] = target_q_deg[ARM_JOINT_ELBOW];
+    if (!ArmCommandPose(pose_q_deg, speed_deg_s, 1u)) {
+        ArmLatchFault(ARM_FAULT_CAN_TX);
+        return 0u;
+    }
+    for (pair_index = 0u;
+         pair_index < ARM_AUTO_INIT_ARM_AXIS_COUNT;
+         ++pair_index) {
+        uint8_t axis = ArmAutoInitArmAxis(pair_index);
+
+        if (!ArmAutoInitArmAxisArrived(
+                pair_index, target_q_deg[axis], now_ms)) {
+            all_arrived = 0u;
+        }
+    }
+    return all_arrived;
 }
 
 static uint8_t ArmFindEscapeAxis(uint8_t *axis_out, float *target_out)
@@ -1150,6 +1267,7 @@ static void ArmProcessAutoInit(uint32_t now_ms)
 {
     Arm_DM_Auto_Init_Debug_s *init = &g_arm_dm_debug.auto_init;
     float seed_q_deg[3];
+    uint8_t axis;
 
     if (init->enable == 0u) {
         if (init->state != ARM_DM_AUTO_INIT_IDLE) {
@@ -1224,47 +1342,71 @@ static void ArmProcessAutoInit(uint32_t now_ms)
                 init->result = ARM_COMMAND_PREFLIGHT_FAILED;
                 break;
             }
-            if (!ArmCommandPose(init->target_q_deg, init->speed_deg_s, 0u)) {
+            init->axis = ARM_DM_TEST_SHOULDER_ELBOW;
+            init->step = 1u;
+            /* 兼容单值Watch字段，以大臂代表当前大臂/小臂联合阶段。 */
+            init->start_deg =
+                arm_joint[ARM_JOINT_SHOULDER].feedback_deg;
+            init->target_deg = init->target_q_deg[ARM_JOINT_SHOULDER];
+            if (!ArmStartAutoInitArmMotion(init->target_q_deg,
+                                           init->speed_deg_s)) {
                 init->state = ARM_DM_AUTO_INIT_FAULT;
                 init->result = ARM_COMMAND_PREFLIGHT_FAILED;
                 break;
             }
             arm_runtime.auto_init_tick = now_ms;
-            arm_runtime.stable_tick = 0u;
-            init->axis = ARM_DM_TEST_NONE;
-            init->step = 1u;
-            init->start_deg = NAN;
-            init->target_deg = NAN;
             init->elapsed_ms = 0u;
             init->result = ARM_COMMAND_OK;
             init->state = ARM_DM_AUTO_INIT_WAIT_AXIS;
             break;
 
         case ARM_DM_AUTO_INIT_WAIT_AXIS:
-            if (ArmToolGetState()->tool_pitch_target_valid != 0u) {
-                (void)ArmToolTrackPitch(
-                    ArmToolGetState()->tool_pitch_target_deg,
-                    g_arm_state.small_link_pitch_deg, now_ms);
-            }
-            if (ArmPoseArrived(init->target_q_deg, now_ms)) {
-                init->axis = ARM_DM_TEST_NONE;
-                init->done = 1u;
-                init->result = ARM_COMMAND_OK;
-                init->state = ARM_DM_AUTO_INIT_DONE;
-                break;
-            }
-            if ((uint32_t)(now_ms - arm_runtime.auto_init_tick) >=
-                ARM_DM_AUTO_INIT_STEP_TIMEOUT_MS) {
+            if (ArmRunAutoInitArmMotion(
+                    init->target_q_deg, init->speed_deg_s, now_ms,
+                    ARM_DM_AUTO_INIT_STEP_TIMEOUT_MS)) {
+                init->step = 2u;
+                init->state = ARM_DM_AUTO_INIT_MOVE_SAFE;
+            } else if (g_arm_state.fault_latched != ARM_FAULT_NONE) {
                 init->state = ARM_DM_AUTO_INIT_FAULT;
                 init->result = ARM_COMMAND_NOT_READY;
             }
             break;
 
         case ARM_DM_AUTO_INIT_MOVE_SAFE:
+            axis = ARM_JOINT_BASE_YAW;
+            if (init->step != 2u) {
+                init->state = ARM_DM_AUTO_INIT_FAULT;
+                init->result = ARM_COMMAND_PREFLIGHT_FAILED;
+                break;
+            }
+            init->axis = ARM_DM_TEST_BASE;
+            init->start_deg = arm_joint[axis].feedback_deg;
+            init->target_deg = init->target_q_deg[axis];
+            if (!ArmStartAxisMotion(axis, init->target_q_deg[axis],
+                                    init->speed_deg_s, now_ms, 1u)) {
+                init->state = ARM_DM_AUTO_INIT_FAULT;
+                init->result = ARM_COMMAND_PREFLIGHT_FAILED;
+                break;
+            }
+            arm_runtime.auto_init_tick = now_ms;
+            init->elapsed_ms = 0u;
+            init->result = ARM_COMMAND_OK;
+            init->state = ARM_DM_AUTO_INIT_WAIT_SAFE;
+            break;
+
         case ARM_DM_AUTO_INIT_WAIT_SAFE:
-            /* 旧的固定姿态二段初始化已取消；兼容旧Watch状态时直接失败。 */
-            init->state = ARM_DM_AUTO_INIT_FAULT;
-            init->result = ARM_COMMAND_PREFLIGHT_FAILED;
+            axis = ARM_JOINT_BASE_YAW;
+            if (ArmRunAxisMotion(axis, now_ms,
+                                 ARM_DM_AUTO_INIT_STEP_TIMEOUT_MS, 1u)) {
+                g_arm_state.active_axis = ARM_AXIS_NONE;
+                init->axis = ARM_DM_TEST_NONE;
+                init->done = 1u;
+                init->result = ARM_COMMAND_OK;
+                init->state = ARM_DM_AUTO_INIT_DONE;
+            } else if (g_arm_state.fault_latched != ARM_FAULT_NONE) {
+                init->state = ARM_DM_AUTO_INIT_FAULT;
+                init->result = ARM_COMMAND_NOT_READY;
+            }
             break;
 
         case ARM_DM_AUTO_INIT_DONE:
@@ -1310,16 +1452,8 @@ static void ArmProcessBootSequence(uint32_t now_ms)
                  */
                 arm_runtime.elbow_coupling_active =
                     ARM_ELBOW_SHOULDER_COUPLING_ENABLE != 0u ? 1u : 0u;
-                /*
-                 * 达妙先完成使能并保持上电当前位置，末端舵机在后台继续
-                 * 查询反馈。两台舵机未就绪时禁止自动HOME，但不再阻塞
-                 * 三台达妙进入位置保持，便于分别判断CAN与USART6故障。
-                 */
-                if (ArmToolReadyForMotion() && ArmToolTxIdle()) {
-                    ArmSetBootState(ARM_BOOT_AUTO_INIT, now_ms);
-                } else {
-                    ArmSetBootState(ARM_BOOT_WAIT_TOOL, now_ms);
-                }
+                /* ID1/ID2尚未初始化；大臂和小臂先同步HOME。 */
+                ArmSetBootState(ARM_BOOT_AUTO_INIT, now_ms);
             }
             break;
 
@@ -1335,13 +1469,15 @@ static void ArmProcessBootSequence(uint32_t now_ms)
             } else if (g_arm_dm_debug.auto_init.state ==
                        ARM_DM_AUTO_INIT_DONE) {
                 arm_runtime.elbow_coupling_active = 1u;
-                ArmSetBootState(ARM_BOOT_STABILIZE, now_ms);
+                /* q2/q3同步HOME且q1随后HOME后，才初始化ID1/ID2。 */
+                ArmToolInit();
+                ArmSetBootState(ARM_BOOT_WAIT_TOOL, now_ms);
             }
             break;
 
         case ARM_BOOT_WAIT_TOOL:
             if (ArmToolReadyForMotion() && ArmToolTxIdle()) {
-                ArmSetBootState(ARM_BOOT_AUTO_INIT, now_ms);
+                ArmSetBootState(ARM_BOOT_STABILIZE, now_ms);
             } else if (ArmToolGetState()->init_state == ARM_TOOL_INIT_ERROR ||
                        g_arm_boot_debug.elapsed_ms >=
                            ARM_BOOT_TOOL_INIT_TIMEOUT_MS) {
@@ -1681,7 +1817,7 @@ void ArmInit(void)
            sizeof(g_arm_dm_debug.auto_init.target_q_deg));
     g_arm_dm_debug.auto_init.elapsed_ms = 0u;
     g_arm_dm_debug.auto_init.cycle_count = 0u;
-    /* 先使能三台达妙原位保持，末端反馈就绪后才允许自动HOME。 */
+    /* 先使能三台达妙原位保持，随后q2/q3同步、q1单独自动HOME。 */
     g_arm_boot_debug.state = ARM_BOOT_WAIT_MOTORS;
     g_arm_boot_debug.motion_result = ARM_MOTION_RESULT_NOT_READY;
     g_arm_boot_debug.ik_status = ARM_IK_INVALID_ARGUMENT;
@@ -1689,6 +1825,9 @@ void ArmInit(void)
 #if ARM_BOOT_MODE == ARM_BOOT_MODE_TEACH_POINT
     /* 打点模式只建立USART6反馈轮询，不允许工具初始化状态机发送目标。 */
     ArmToolInitFeedbackOnly();
+#elif ARM_BOOT_MODE == ARM_BOOT_MODE_FULL_INIT
+    /* 完整上电时延迟ID1/ID2，保证q2/q3同步HOME后再初始化工具。 */
+    ArmToolPrepareDeferredInit();
 #else
     ArmToolInit();
 #endif

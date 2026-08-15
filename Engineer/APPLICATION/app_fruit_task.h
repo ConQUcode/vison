@@ -8,6 +8,8 @@
 
 #include <stdint.h>
 
+#include "app_arm_flow.h"
+
 typedef enum {
     APP_FRUIT_AREA_UNCONFIGURED = 0,
     APP_FRUIT_AREA_A
@@ -63,6 +65,11 @@ typedef struct {
 } App_Fruit_Task_Debug_s;
 
 extern App_Fruit_Task_Debug_s g_app_fruit_task_debug;
+
+/** 按显式区域和侧别复制已配置的放置profile；未配置时返回0并清空输出。 */
+uint8_t AppFruitGetPlaceProfile(App_Fruit_Area_e area,
+                                App_Fruit_Side_e side,
+                                App_Arm_Place_Profile_s *profile);
 
 void AppFruitTaskInit(void);
 void AppFruitTask(uint32_t now_ms);

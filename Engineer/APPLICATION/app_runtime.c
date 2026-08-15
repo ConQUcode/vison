@@ -25,16 +25,20 @@
 #endif
 #endif
 #if APP_ARM_CORE_ENABLED
+#include "app_arm_command_id.h"
 #include "arm.h"
 #include "arm_kinematics.h"
 #include "arm_tool.h"
-#if APP_ARM_ENABLED
 #include "app_fruit_task.h"
+#if APP_ARM_ENABLED
 #include "fruit_usb_bridge.h"
 #endif
 #endif
 #if APP_HUANER_FEEDBACK_ENABLED
 #include "huaner_servo.h"
+#endif
+#if APP_MG995_TEST_ENABLED
+#include "mg995_servo.h"
 #endif
 
 App_Arm_Teach_Debug_s g_app_arm_teach_debug;
@@ -129,6 +133,29 @@ static void AppChassisOneMeterTestTask(uint32_t now_ms)
 }
 #endif
 
+#if APP_ARM_POSTURE_TEST_ENABLED
+/** 当前台架调用者只负责在公共单侧任务完成后提交另一侧。 */
+static void AppArmPostureTestTask(uint32_t now_ms)
+{
+    App_Arm_Side_Pick_Place_Status_e status =
+        AppArmSidePickPlacePoll(now_ms);
+
+    if (status == APP_ARM_SIDE_PICK_PLACE_DONE) {
+        App_Fruit_Side_e completed_side =
+            (App_Fruit_Side_e)g_app_arm_posture_test_debug.active_side;
+        App_Fruit_Side_e next_side;
+
+        if (completed_side == APP_FRUIT_SIDE_LEFT) {
+            next_side = APP_FRUIT_SIDE_RIGHT;
+        } else if (completed_side == APP_FRUIT_SIDE_RIGHT) {
+            next_side = APP_FRUIT_SIDE_LEFT;
+        } else {
+            return;
+        }
+        (void)AppArmSidePickPlaceStart(next_side, now_ms);
+    }
+}
+#endif
 #if APP_ARM_TEACH_POINT_ENABLED
 /** 汇总被动反馈和FK结果；只读状态，不提交任何电机或舵机动作。 */
 static void AppArmTeachPointUpdate(void)
@@ -209,6 +236,10 @@ void AppInit(void)
     /* DWT 是 INS 和各控制模块的统一高精度时间基准，只初始化一次。 */
     DWT_Init(168u);
 
+#if APP_ARM_CORE_ENABLED
+    AppArmCommandIdInit();
+#endif
+
 #if APP_CHASSIS_ONE_METER_ENABLED
     USB_Init();
     ProtocolRuntimeInit();
@@ -230,6 +261,11 @@ void AppInit(void)
     AppArmFlowInit();
     AppFruitTaskInit();
 #endif
+#elif APP_ARM_POSTURE_TEST_ENABLED
+    AppArmFlowInit();
+    AppArmSidePickPlaceInit();
+    (void)AppArmSidePickPlaceStart(APP_FRUIT_SIDE_LEFT, HAL_GetTick());
+    ArmInit();
 #elif APP_HUANER_FEEDBACK_ENABLED
     if (HuanerServoInit() != 0u) {
         app_huaner_next_id = 1u;
@@ -238,6 +274,8 @@ void AppInit(void)
 #elif APP_ARM_TEACH_POINT_ENABLED
     memset(&g_app_arm_teach_debug, 0, sizeof(g_app_arm_teach_debug));
     ArmInit();
+#elif APP_MG995_TEST_ENABLED
+    (void)Mg995ServoInit();
 #endif
 }
 
@@ -273,6 +311,8 @@ void AppArmTask(uint32_t now_ms)
 #if APP_ARM_TOOL_CENTER_TEST_ENABLE
     AppFruitTask(now_ms);
 #endif
+#elif APP_ARM_POSTURE_TEST_ENABLED
+    AppArmPostureTestTask(now_ms);
 #elif APP_ARM_TEACH_POINT_ENABLED
     (void)now_ms;
     AppArmTeachPointUpdate();
@@ -284,6 +324,10 @@ void AppArmTask(uint32_t now_ms)
 
 void AppMotorControlTask(uint32_t now_ms)
 {
+#if APP_MG995_TEST_ENABLED
+    /* MG995专项模式不注册或周期控制任何达妙/DJI电机。 */
+    (void)now_ms;
+#else
     /* 两个驱动在零实例时均为空操作；集中调用可保持唯一任务所有权。 */
 #if !APP_ARM_TEACH_POINT_ENABLED
     DMMotorControl(now_ms);
@@ -295,6 +339,7 @@ void AppMotorControlTask(uint32_t now_ms)
     ArmTeachPointFeedbackPoll(now_ms);
 #endif
     DJIMotorControl();
+#endif
 }
 
 void AppUsbTask(uint32_t now_ms)

@@ -4,13 +4,13 @@
  */
 
 #include "app_fruit_task.h"
-
-#include "app_arm_flow.h"
+#include "app_config.h"
 #include "app_fruit_task_config.h"
-#include "arm.h"
-#include "chassis.h"
 
 #include <string.h>
+
+/* 非水果模式也保留Watch符号，任务实现只在完整机械臂模式参与链接。 */
+App_Fruit_Task_Debug_s g_app_fruit_task_debug;
 
 #define APP_FRUIT_PLACE_PROFILE_A_LEFT  0xA001u
 #define APP_FRUIT_PLACE_PROFILE_A_RIGHT 0xA002u
@@ -28,38 +28,6 @@ typedef struct {
     const App_Arm_Place_Profile_s *place_profile;
 } App_Fruit_Task_Item_s;
 
-App_Fruit_Task_Debug_s g_app_fruit_task_debug;
-
-static uint32_t app_fruit_next_chassis_command_id;
-
-static const App_Fruit_Point_s app_fruit_point_a_left = {
-    APP_FRUIT_POINT_A_LEFT,
-    APP_FRUIT_AREA_A,
-    APP_FRUIT_SIDE_LEFT,
-    {
-        { APP_FRUIT_A_LEFT_Q1_DEG, APP_FRUIT_A_LEFT_Q2_DEG,
-          APP_FRUIT_A_LEFT_Q3_DEG },
-        APP_FRUIT_A_PICK_TOOL_RELATIVE_PITCH_DEG,
-        APP_FRUIT_A_LEFT_X_MM,
-        APP_FRUIT_A_LEFT_Y_MM,
-        APP_FRUIT_A_LEFT_Z_MM,
-    },
-};
-
-static const App_Fruit_Point_s app_fruit_point_a_right = {
-    APP_FRUIT_POINT_A_RIGHT,
-    APP_FRUIT_AREA_A,
-    APP_FRUIT_SIDE_RIGHT,
-    {
-        { APP_FRUIT_A_RIGHT_Q1_DEG, APP_FRUIT_A_RIGHT_Q2_DEG,
-          APP_FRUIT_A_RIGHT_Q3_DEG },
-        APP_FRUIT_A_PICK_TOOL_RELATIVE_PITCH_DEG,
-        APP_FRUIT_A_RIGHT_X_MM,
-        APP_FRUIT_A_RIGHT_Y_MM,
-        APP_FRUIT_A_RIGHT_Z_MM,
-    },
-};
-
 static const App_Arm_Place_Profile_s app_fruit_place_a_left = {
     APP_FRUIT_PLACE_PROFILE_A_LEFT,
     1u,
@@ -73,8 +41,6 @@ static const App_Arm_Place_Profile_s app_fruit_place_a_left = {
     APP_FRUIT_A_RELEASE_PITCH_WAIT_TIMEOUT_MS,
     { APP_FRUIT_A_LEFT_PLACE_Q1_DEG, APP_FRUIT_A_RELEASE_Q2_DEG,
       APP_FRUIT_A_RELEASE_CLEARANCE_Q3_DEG },
-    { APP_FRUIT_A_LEFT_FRONT_Q1_DEG, APP_FRUIT_A_TRANSFER_Q2_DEG,
-      APP_FRUIT_A_TRANSFER_Q3_DEG },
     APP_FRUIT_A_LEFT_FRONT_WAYPOINT_Q1_DEG,
     APP_FRUIT_A_LEFT_FRONT_Q1_DEG,
 };
@@ -92,20 +58,82 @@ static const App_Arm_Place_Profile_s app_fruit_place_a_right = {
     APP_FRUIT_A_RELEASE_PITCH_WAIT_TIMEOUT_MS,
     { APP_FRUIT_A_RIGHT_PLACE_Q1_DEG, APP_FRUIT_A_RELEASE_Q2_DEG,
       APP_FRUIT_A_RELEASE_CLEARANCE_Q3_DEG },
-    { APP_FRUIT_A_RIGHT_FRONT_Q1_DEG, APP_FRUIT_A_TRANSFER_Q2_DEG,
-      APP_FRUIT_A_TRANSFER_Q3_DEG },
     APP_FRUIT_A_RIGHT_FRONT_WAYPOINT_Q1_DEG,
     APP_FRUIT_A_RIGHT_FRONT_Q1_DEG,
 };
 
-/* 当前三次抓取：首组585 mm，之后按A区相邻组间距各前进500 mm。 */
+uint8_t AppFruitGetPlaceProfile(App_Fruit_Area_e area,
+                                App_Fruit_Side_e side,
+                                App_Arm_Place_Profile_s *profile)
+{
+    const App_Arm_Place_Profile_s *source = NULL;
+
+    if (profile == NULL) {
+        return 0u;
+    }
+    memset(profile, 0, sizeof(*profile));
+    if (area != APP_FRUIT_AREA_A) {
+        return 0u;
+    }
+    if (side == APP_FRUIT_SIDE_LEFT) {
+        source = &app_fruit_place_a_left;
+    } else if (side == APP_FRUIT_SIDE_RIGHT) {
+        source = &app_fruit_place_a_right;
+    }
+    if (source == NULL || source->configured == 0u) {
+        return 0u;
+    }
+    *profile = *source;
+    return 1u;
+}
+
+#if APP_ARM_ENABLED && APP_ARM_TOOL_CENTER_TEST_ENABLE
+
+#include "arm.h"
+#include "chassis.h"
+
+static uint32_t app_fruit_next_chassis_command_id;
+
+static const App_Fruit_Point_s app_fruit_point_a_left = {
+    APP_FRUIT_POINT_A_LEFT,
+    APP_FRUIT_AREA_A,
+    APP_FRUIT_SIDE_LEFT,
+    {
+        APP_FRUIT_A_LEFT_X_MM,
+        APP_FRUIT_A_LEFT_Y_MM,
+        APP_FRUIT_A_LEFT_Z_MM,
+        APP_FRUIT_A_PICK_TOOL_PITCH_DEG,
+    },
+};
+
+static const App_Fruit_Point_s app_fruit_point_a_right = {
+    APP_FRUIT_POINT_A_RIGHT,
+    APP_FRUIT_AREA_A,
+    APP_FRUIT_SIDE_RIGHT,
+    {
+        APP_FRUIT_A_RIGHT_X_MM,
+        APP_FRUIT_A_RIGHT_Y_MM,
+        APP_FRUIT_A_RIGHT_Z_MM,
+        APP_FRUIT_A_PICK_TOOL_PITCH_DEG,
+    },
+};
+
+/*
+ * 原地模式仅用于机械臂硬件联调，不代表A区完整场地路线。
+ * 关闭测试开关后恢复585/点1、500/点2、500/点1并最终DONE。
+ */
 static const App_Fruit_Task_Item_s app_fruit_test_tasks[] = {
+#if APP_FRUIT_TEST_IN_PLACE_ALTERNATING_ENABLE
+    { 0.0f, &app_fruit_point_a_left, &app_fruit_place_a_left },
+    { 0.0f, &app_fruit_point_a_right, &app_fruit_place_a_right },
+#else
     { APP_FRUIT_AREA_A_FIRST_MOVE_MM,
       &app_fruit_point_a_left, &app_fruit_place_a_left },
     { APP_FRUIT_AREA_A_GROUP_SPACING_MM,
       &app_fruit_point_a_right, &app_fruit_place_a_right },
     { APP_FRUIT_AREA_A_GROUP_SPACING_MM,
       &app_fruit_point_a_left, &app_fruit_place_a_left },
+#endif
 };
 
 static const App_Fruit_Task_Item_s *AppFruitCurrentTask(void)
@@ -141,8 +169,14 @@ static void AppFruitRefreshWatch(const Chassis_Status_s *chassis)
             task->place_profile->profile_id;
     }
     if (chassis != NULL) {
-        g_app_fruit_task_debug.chassis_actual_distance_mm =
-            chassis->actual_distance_mm;
+        if (task != NULL && task->move_before_pick_mm == 0.0f) {
+            g_app_fruit_task_debug.chassis_command_id = 0u;
+            g_app_fruit_task_debug.chassis_target_distance_mm = 0.0f;
+            g_app_fruit_task_debug.chassis_actual_distance_mm = 0.0f;
+        } else {
+            g_app_fruit_task_debug.chassis_actual_distance_mm =
+                chassis->actual_distance_mm;
+        }
     }
     g_app_fruit_task_debug.arm_active_flow =
         g_app_arm_pick_place_test_debug.active_flow;
@@ -220,6 +254,17 @@ void AppFruitTask(uint32_t now_ms)
             Chassis_Command_s command;
             Chassis_Command_Result_e result;
 
+            if (task->move_before_pick_mm == 0.0f) {
+                if (AppArmFlowStartPick(&task->point->pick_target,
+                                        now_ms) != 0u) {
+                    g_app_fruit_task_debug.state = APP_FRUIT_TASK_PICK;
+                } else {
+                    AppFruitFail(APP_FRUIT_FAILURE_ARM_START,
+                                 (uint32_t)APP_ARM_FLOW_START_BUSY);
+                }
+                break;
+            }
+
             memset(&command, 0, sizeof(command));
             command.command_id = AppFruitNextChassisCommandId();
             command.type = CHASSIS_COMMAND_RELATIVE_STRAIGHT;
@@ -285,10 +330,15 @@ void AppFruitTask(uint32_t now_ms)
             g_app_fruit_task_debug.task_index++;
             if (g_app_fruit_task_debug.task_index >=
                 g_app_fruit_task_debug.task_count) {
+#if APP_FRUIT_TEST_IN_PLACE_ALTERNATING_ENABLE
+                g_app_fruit_task_debug.task_index = 0u;
+                g_app_fruit_task_debug.state = APP_FRUIT_TASK_WAIT_READY;
+#else
                 g_app_fruit_task_debug.state = APP_FRUIT_TASK_DONE;
                 g_app_fruit_task_debug.area = APP_FRUIT_AREA_UNCONFIGURED;
                 g_app_fruit_task_debug.side = APP_FRUIT_SIDE_NONE;
                 g_app_fruit_task_debug.point_id = APP_FRUIT_POINT_NONE;
+#endif
             } else {
                 g_app_fruit_task_debug.state = APP_FRUIT_TASK_WAIT_READY;
             }
@@ -301,3 +351,5 @@ void AppFruitTask(uint32_t now_ms)
         break;
     }
 }
+
+#endif /* APP_ARM_ENABLED && APP_ARM_TOOL_CENTER_TEST_ENABLE */

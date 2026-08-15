@@ -1,6 +1,6 @@
 # 参数位置和调参说明
 
-更新时间：2026-08-14
+更新时间：2026-08-15
 
 修改参数后需要重新编译。底盘和机械臂首次动作应架空测试；当前已实测
 方向符号不得凭直觉改动，每次只调整一个参数组。
@@ -11,10 +11,41 @@
 
 | 参数 | 当前值 | 作用 |
 |---|---:|---|
-| `APP_MODE` | `APP_MODE_ARM` | A区三次自动抓放测试 |
-| `APP_ARM_TOOL_CENTER_TEST_ENABLE` | `1` | 启用水果任务和机械臂抓放子流程 |
+| `APP_MODE` | `APP_MODE_MG995_TEST` | 当前只测试左右摄像头水平0deg，不运行机械臂、底盘或IMU |
+| 右侧MG995 | `PI6 / TIM8_CH2 / 1500 us` | 舵机90deg，对应摄像头0deg |
+| 左侧MG995 | `PI7 / TIM8_CH3 / 1500 us` | 舵机90deg，对应摄像头0deg |
+| 左侧定姿路径 | `[0,340,-150] -> [0,480,-150] mm` | 首轮，使用A左放置profile |
+| 右侧定姿路径 | `[0,-340,-150] -> [0,-480,-150] mm` | 只对左侧Y取负，使用A右放置profile |
+| 两侧绝对俯仰 | `-5 deg` | X/Z、速度、等待和夹爪动作完全一致 |
+| 定姿测试速度 | `100 mm/s` | 首次验证使用，不影响正式抓取的 `200 mm/s` |
+| `APP_ARM_TOOL_CENTER_TEST_ENABLE` | `1` | 为正式水果流程和当前A左/A右放置提供共享子流程 |
 
-其他模式为底盘一米循环、幻儿反馈专项和机械臂无力打点，一次只能选择一个。
+当前MG995模式只调用 `Mg995ServoInit()`，机械臂、底盘、IMU、USB业务和
+DM/DJI电机周期控制均不运行。观察 `g_mg995_servo_debug`：正常应为
+`state=READY`、`initialized=1`，左右`camera_angle_deg`均为0deg，两侧均为
+`pulse_us=1500/angle_deg=90`。
+
+切回 `APP_MODE_ARM_POSTURE_TEST` 后，机械臂才会先完成左抓放并返回前方，
+再完成右抓放并持续交替。只有放置子流程返回 `DONE` 才切换侧别；任何
+机械臂、舵机或profile故障都锁存 `FAILED`，不会跳过当前侧。
+
+左右完整动作统一由 `AppArmSidePickPlaceStart(side, now_ms)` 提交并由
+`AppArmSidePickPlacePoll(now_ms)` 周期推进。调参时不要在上位机桥或
+`app_runtime.c` 复制坐标和放置角；它们只选择LEFT/RIGHT并观察
+`g_app_arm_posture_test_debug.operation_status`。运行中重复提交返回 `BUSY`，
+成功完成一侧后状态保持 `DONE`，由调用者决定是否以及何时提交下一侧。
+
+当前绝对俯仰为 `-5 deg`、Z为 `-150 mm`。按实时运动学对
+`|Y|=340..480 mm` 逐毫米镜像预检，两侧q2/q3和ID1结果一致；接近点ID1
+相对俯仰约 `+91.71 deg`、
+控制值约 `117.89`；距当前 `+92.4 deg/115` 软件边界约 `0.69 deg/2.89`。
+终点q2约 `7.88 deg`，距3deg软件下限约 `4.88 deg`。
+
+`APP_ARM_COMMAND_ID_SEED=0xA1100000u` 是固件内部机械臂命令序列的启动
+种子，通常不作为调参项修改。专项测试、抓放流程和未来新增内部流程必须统一
+调用 `AppArmCommandIdNext()`；不得新增私有命令基址，也不得在子流程初始化时
+重置序列。可通过 `g_app_arm_command_id_debug` 检查最后发放ID和计数。底盘
+命令属于独立命令域，不使用该种子。
 
 ## A 区任务参数
 
@@ -22,15 +53,17 @@
 
 | 参数 | 当前值 | 含义 |
 |---|---:|---|
+| `APP_FRUIT_TEST_IN_PLACE_ALTERNATING_ENABLE` | 1 | 原地左右点无限交替；不提交底盘命令 |
 | `APP_FRUIT_AREA_A_FIRST_POSITION_MM` | 500 mm | 启动区边界到A区第一组水果的纵向距离 |
 | `APP_FRUIT_ARM_CENTER_BEHIND_NOSE_MM` | 85 mm | 启动时机械臂中心落后物理车头的安装偏移 |
 | `APP_FRUIT_AREA_A_FIRST_MOVE_MM` | 585 mm | 首段 `500+85`，只补偿一次安装偏移 |
 | `APP_FRUIT_AREA_A_GROUP_SPACING_MM` | 500 mm | A区相邻两组水果的纵向距离 |
 | `APP_FRUIT_CHASSIS_TOLERANCE_MM` | 3 mm | 水果任务停车距离容差 |
 
-A区共4组、每组左右各1个水果；当前只测试连续3组，距离为
-`585/500/500 mm`。A左/A右抓取点和放置角也集中在该文件。调点时必须
-保留区域和侧别语义，不要把数组下标或 `q1` 正负当成业务判断。
+A区共4组、每组左右各1个水果；当前测试开关为 `1`，底盘原地不动，
+点1/点2完整抓放并无限交替。将开关改为 `0` 后恢复连续3组场地测试，
+距离为 `585/500/500 mm`。两点抓取坐标和放置角也集中在该文件；
+`A_LEFT/A_RIGHT` 分别固定表示物理左侧 `Y>0` 和物理右侧 `Y<0`。
 B/C/D 未配置，不能套用A区参数。
 
 ## 底盘通用接口和方向
@@ -74,6 +107,21 @@ WAIT_READY -> IDLE -> RUNNING -> STOPPING -> COMPLETED
 BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方向、命令
 方向、IMU方向、有效轮径、轮距、速度环、直行P/D/I、转角P/D/I。
 
+连续速度接口为`ChassisSubmitVelocityCommand()`：
+
+| 参数 | 当前值 | 作用 |
+|---|---:|---|
+| `CHASSIS_VELOCITY_MAX_LINEAR_MM_S` | 200 mm/s | 上位机vx绝对值上限 |
+| `CHASSIS_VELOCITY_MAX_ANGULAR_RAD_S` | 0.8 rad/s | 上位机wz绝对值上限 |
+| `CHASSIS_VELOCITY_COMMAND_TIMEOUT_MS` | 300 ms | 未刷新后平滑停车到CANCELLED |
+| `CHASSIS_VELOCITY_LINEAR_ZERO_MM_S` | 0.5 mm/s | vx零值归一化阈值 |
+| `CHASSIS_VELOCITY_ANGULAR_ZERO_RAD_S` | 0.005 rad/s | wz零值及IMU直行保持判定阈值 |
+
+每次刷新必须使用更大的`command_id`。`wz=0`且`vx!=0`时，首次命令捕获
+当前Yaw并持续复用同一目标；非零`wz`不叠加航向保持，转回零`wz`平移时
+重新捕获当前Yaw。左右轮联合超限时通过`velocity_wheel_scale`同比例缩小，
+不能分别削顶改变曲率。当前尚无USB速度包，接口只供未来协议桥调用。
+
 主要 Watch：
 
 - `state/command_id/command_type/last_submit_result`
@@ -81,6 +129,11 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 - `heading_target_deg/heading_error_deg/heading_pid_*`
 - `target_angle_deg/actual_angle_deg/turn_pid_*`
 - `left_target_m_s/right_target_m_s/left_speed_m_s/right_speed_m_s`
+- `velocity_target_vx_mm_s/velocity_actual_vx_mm_s`
+- `velocity_target_wz_rad_s/velocity_actual_wz_rad_s`
+- `velocity_heading_hold_active/velocity_command_tick`
+- `velocity_refresh_count/velocity_timeout_count/velocity_heading_capture_count`
+- `velocity_wheel_scale`
 - `fault/motor_offline_count/imu_fault_count/direction_fault_count`
 
 ### 里程计 Y 误差
@@ -100,23 +153,33 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 抓取流程通用参数在 `app_config.h`，A区实际点位/profile 在
 `app_fruit_task_config.h`。当前点位：
 
-| 点位 | `q1/q2/q3` | ID1相对小臂 | 观察坐标 |
+| 点位 | 工具中心 `x/y/z` | 世界绝对俯仰 | 解析关节参考 |
 |---|---|---|---|
-| A左点1 | `[90,31.64,-111.21] deg` | `-41.5 deg` | `[0,-451.6,-73.3] mm` |
-| A右点2 | `[-90,33.88,-105.85] deg` | `-41.5 deg` | `[0,431.0,-76.9] mm` |
+| 业务点1，物理左侧 | `[0,400,-100] mm` | `-90 deg` | `[90,32.86,-101.44] deg` |
+| 业务点2，物理右侧 | `[0,-400,-100] mm` | `-90 deg` | `[-90,32.86,-101.44] deg` |
 
-观察坐标当前只用于 Watch，其 Y 符号与左右业务名不一致。坐标规划启用前
-需要重新实机确认；不要为匹配文字左右而直接修改已经验证的关节角。
+坐标与绝对俯仰直接参与工具中心IK。物理左侧固定为 `Y>0`：点1对应
+`q1=+90 deg`；物理右侧固定为 `Y<0`：点2对应 `q1=-90 deg`。
 
-低位底座预对准由 `APP_ARM_PICK_BASE_AIM_MAX_ABS_Q1_DEG=89.5` 限制，
-完整抓取命令再到 `+/-90 deg`。不要直接把预对准改为 `+/-90`，否则可能
-在低位跨过 `X=0` 并触发跨区保护。
+底座预对准由 `APP_ARM_PICK_BASE_AIM_MAX_ABS_Q1_DEG=89.5` 限制。同一条联合
+命令让三台达妙同步到对应底座角和 `[q2,q3]=[80,-90]`，并让ID1同步到
+相对俯仰 `-80 deg`；此时夹爪绝对俯仰为 `-90 deg`，不会贴住相对角
+`-90 deg` 软件下限。工具中心命令随后以 `200 mm/s` 请求速度到
+`+/-90 deg` 侧的抓取坐标；底层关节速度和加速度安全上限保持不变。
+不要直接把预对准改为 `+/-90`，否则可能跨过 `X=0` 并触发跨区保护。
 
-A左放置：`[90,90,-100] -> +135 -> +180 -> [180,120,-70]`；
-A右放置：`[-90,90,-100] -> -135 -> -180 -> [-180,120,-70]`。
+点1放置：`[90,90,-100] -> +135 -> +180 -> [q1反馈,120,-70]`；
+点2放置：`[-90,90,-100] -> -135 -> -180 -> [q1反馈,120,-70]`。
 释放 ID1 相对小臂均为 `-45 deg`。ID2张开后保持 `q2=120 deg`，小臂
 从 `q3=-70 deg` 再上抬10deg到 `q3=-80 deg`，随后分别经 `+90/-90`
-返回 `q1=0`，最后恢复转运姿态 `[0,90,-100]`。
+返回 `q1=0` 并立即结束放置，不再额外恢复 `[0,90,-100]`。下一次抓取的
+底座预对准会同时进入 `[q2,q3]=[80,-90]` 准备姿态。释放与释放后抬臂
+不重复提交后方 `q1=+180/-180`，而是保留定向旋转完成后的底座实际反馈角。
+
+正式抓取与当前左右专项测试都必须调用 `AppArmFlowBuildPickStaging()`；
+不要在某个测试状态机中复制反馈 `q2/q3` 后只覆盖 `q1`。实机已经证明，
+从释放回正姿态 `[0,120,-80]` 只转到底座 `-89.5 deg`，下一条右侧直线会
+在首采样点因 `X>2 mm` 且 `q2>120 deg` 被前方栏框保护拒绝。
 
 放置参数以完整 `App_Arm_Place_Profile_s` 提交。更改某侧时应同时核对：
 
@@ -125,7 +188,6 @@ A右放置：`[-90,90,-100] -> -135 -> -180 -> [-180,120,-70]`。
 - 释放三轴位姿和ID1相对俯仰；
 - 释放反馈等待超时；
 - ID2释放后的小臂净空位姿；
-- 恢复三轴位姿；
 - 返回前方的引导角和终点角。
 
 ## 主臂几何和安全
@@ -140,12 +202,16 @@ A右放置：`[-90,90,-100] -> -135 -> -180 -> [-180,120,-70]`。
 | `ARM_TOOL_PITCH_AXIS_TO_CENTER_MM` | 117 mm | ID1轴到夹爪中心 |
 | `ARM_SAFE_Q1/Q2/Q3_DEG` | `[0,90,-60]` | HOME关节目标 |
 | `ARM_Q1_SOFT_MIN/MAX_DEG` | `[-180,180]` | 关节命令软限位 |
-| `ARM_Q2_SOFT_MIN/MAX_DEG` | `[25,180]` | 大臂软限位 |
+| `ARM_Q2_SOFT_MIN/MAX_DEG` | `[3,180]` | 大臂普通运动软限位；`0..3 deg`仅允许单向脱困 |
 | `ARM_Q3_SOFT_MIN/MAX_DEG` | `[-190,-35]` | 小臂软限位 |
 
 连杆长度必须测转轴中心到转轴中心，不要用 HOME 坐标补偿杆长误差。
 负 X、跨区高度和前方栏框限制仍由 `ARM_REAR_*`、
 `ARM_FRONT_BARRIER_*` 参数控制，不要为了让单个点通过而放宽软限位。
+
+完整上电顺序固定为 `q2大臂+q3小臂同步 -> q1底座 -> ID1/ID2`。Watch 中
+`g_arm_dm_debug.auto_init.step=1, axis=4` 表示联合臂阶段，`step=2, axis=1`
+表示底座阶段；两阶段完成后才进入 `ARM_BOOT_WAIT_TOOL` 初始化双舵机。
 
 ## ID1 和 ID2
 
@@ -155,15 +221,20 @@ A右放置：`[-90,90,-100] -> -135 -> -180 -> [-180,120,-70]`。
 |---|---:|---|
 | `ARM_TOOL_PITCH_NEUTRAL_POS` | 500 | ID1与小臂同向 |
 | `ARM_TOOL_PITCH_DIRECTION` | `-1.0` | 目标和反馈换算共用方向 |
-| `ARM_GRIPPER_DEFAULT_POS` | 550 | 上电、等待和张开位置 |
+| `ARM_TOOL_PITCH_SERVO_MIN/MAX_POS` | `[115,875]` | ID1允许控制值范围 |
+| `ARM_TOOL_PITCH_RELATIVE_MIN/MAX_DEG` | `[-90,92.4]` | ID1相对小臂软件角范围 |
+| `ARM_GRIPPER_DEFAULT_POS` | 450 | 上电、等待和张开位置 |
 | `ARM_GRIPPER_CLOSE_POS` | 660 | 探测闭合目标 |
+| `ARM_GRIPPER_FEEDBACK_RECOVERY_TIMEOUT_MS` | 500 ms | ID2张开/回等待位的短时反馈恢复窗口 |
 | `ARM_GRIPPER_RELIEF_STEP_POS` | 10 | 每次向张开方向回退量 |
 | `ARM_GRIPPER_RELIEF_MAX_ATTEMPTS` | 4 | 最多回退4次，累计最多40 |
 | `ARM_GRIPPER_RELIEF_ATTEMPT_TIMEOUT_MS` | 400 ms | 单次回退等待上限 |
 
 4 次均不能跟随时进入 `ARM_GRIPPER_FORCED_HELD` 并继续业务，不再进入会
 卡死采摘任务的夹爪故障。这个状态只表示“容错按抓住处理”，不证明一定
-抓到水果。持续离线、通信和初始化错误仍会使机械臂流程失败。
+抓到水果。ID2在张开或回等待位期间若反馈短时失效，会保持原目标并等待最多
+`500 ms`；只有新鲜反馈恢复且确认到位后才继续放置，持续失联或原动作总截止
+时间到期仍会使机械臂流程失败，不会把“无反馈”误判为释放成功。
 
 主要 Watch：
 
@@ -171,6 +242,9 @@ A右放置：`[-90,90,-100] -> -135 -> -180 -> [-180,120,-70]`。
 - `g_arm_tool_debug.gripper_relief_attempt_count`
 - `g_arm_tool_debug.gripper_forced_held_count`
 - `g_arm_tool_debug.gripper_timeout_count`
+- `g_arm_tool_debug.gripper_feedback_lost_tick`
+- `g_arm_tool_debug.gripper_feedback_dropout_count`
+- `g_arm_tool_debug.gripper_feedback_recovery_count`
 - `g_arm_tool_debug.servo_feedback_valid[1]`
 - `g_arm_tool_debug.servo_online[1]`
 

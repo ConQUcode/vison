@@ -19,7 +19,8 @@
 
 /*
  * 三自由度运动学说明：
- * q1为底座偏航，q2为大臂绝对俯仰。
+ * q1为底座电机偏航，正角对应机械臂朝物理左侧（世界Y正方向）旋转；
+ * q2为大臂绝对俯仰。
  * q3采用机械定义：q3 = -两杆物理内夹角。
  * 两杆物理夹角90deg时q3=-90deg，两杆完全伸直180deg时q3=-180deg。
  * 标准二连杆内部有向转角q3_math = -180deg - q3。
@@ -137,7 +138,7 @@ void ArmForwardKinematics3DOF(float q1_deg,
                   ARM_LINK_2_MM * cosf(q23);
     local_x = ARM_SHOULDER_OFFSET_FORWARD_MM + link_radial;
     local_y = ARM_SHOULDER_OFFSET_LEFT_MM;
-    /* 将肩部固定偏移和连杆径向位置随q1旋转到小车坐标系。 */
+    /* q1正方向朝Y正侧；local_y正值表示肩轴向物理左侧安装。 */
     position->x_mm = local_x * cosf(q1) - local_y * sinf(q1);
     position->y_mm = local_x * sinf(q1) + local_y * cosf(q1);
     position->z_mm = ARM_BASE_HEIGHT_MM +
@@ -150,6 +151,7 @@ uint8_t ArmKinematicsSelfTest(float *error_mm)
     Arm_Position_s position;
     Arm_Position_s expected;
     float error;
+    float max_error;
 
     /*
      * 运动学自检必须使用固定的已知解析姿态，不能复用可调的上电待机
@@ -161,8 +163,8 @@ uint8_t ArmKinematicsSelfTest(float *error_mm)
      * (LINK_2, 0, BASE_HEIGHT + LINK_1)。
      */
     ArmForwardKinematics3DOF(0.0f, 90.0f, -90.0f, &position);
-    expected.x_mm = ARM_LINK_2_MM;
-    expected.y_mm = 0.0f;
+    expected.x_mm = ARM_SHOULDER_OFFSET_FORWARD_MM + ARM_LINK_2_MM;
+    expected.y_mm = ARM_SHOULDER_OFFSET_LEFT_MM;
     expected.z_mm = ARM_BASE_HEIGHT_MM + ARM_LINK_1_MM;
     error = sqrtf(
         (position.x_mm - expected.x_mm) *
@@ -171,10 +173,47 @@ uint8_t ArmKinematicsSelfTest(float *error_mm)
             (position.y_mm - expected.y_mm) +
         (position.z_mm - expected.z_mm) *
             (position.z_mm - expected.z_mm));
-    if (error_mm != NULL) {
-        *error_mm = error;
+    max_error = error;
+
+    /* 实机坐标约定：q1=+90deg朝物理左侧，即世界Y正方向。 */
+    ArmForwardKinematics3DOF(90.0f, 90.0f, -90.0f, &position);
+    expected.x_mm = -ARM_SHOULDER_OFFSET_LEFT_MM;
+    expected.y_mm = ARM_SHOULDER_OFFSET_FORWARD_MM + ARM_LINK_2_MM;
+    expected.z_mm = ARM_BASE_HEIGHT_MM + ARM_LINK_1_MM;
+    error = sqrtf(
+        (position.x_mm - expected.x_mm) *
+            (position.x_mm - expected.x_mm) +
+        (position.y_mm - expected.y_mm) *
+            (position.y_mm - expected.y_mm) +
+        (position.z_mm - expected.z_mm) *
+            (position.z_mm - expected.z_mm));
+    if (!isfinite(error)) {
+        max_error = INFINITY;
+    } else if (error > max_error) {
+        max_error = error;
     }
-    return isfinite(error) && error <= 0.01f;
+
+    /* q1=-90deg必须镜像到物理右侧，即世界Y负方向。 */
+    ArmForwardKinematics3DOF(-90.0f, 90.0f, -90.0f, &position);
+    expected.x_mm = ARM_SHOULDER_OFFSET_LEFT_MM;
+    expected.y_mm = -(ARM_SHOULDER_OFFSET_FORWARD_MM + ARM_LINK_2_MM);
+    expected.z_mm = ARM_BASE_HEIGHT_MM + ARM_LINK_1_MM;
+    error = sqrtf(
+        (position.x_mm - expected.x_mm) *
+            (position.x_mm - expected.x_mm) +
+        (position.y_mm - expected.y_mm) *
+            (position.y_mm - expected.y_mm) +
+        (position.z_mm - expected.z_mm) *
+            (position.z_mm - expected.z_mm));
+    if (!isfinite(error)) {
+        max_error = INFINITY;
+    } else if (error > max_error) {
+        max_error = error;
+    }
+    if (error_mm != NULL) {
+        *error_mm = max_error;
+    }
+    return isfinite(max_error) && max_error <= 0.01f;
 }
 
 /*
@@ -237,8 +276,7 @@ static Arm_IK_Status_e ArmInverseKinematics3DOFInternal(
         rho * rho -
             ARM_SHOULDER_OFFSET_LEFT_MM * ARM_SHOULDER_OFFSET_LEFT_MM));
     target_azimuth = rho > ARM_KIN_EPSILON ?
-        atan2f(target->y_mm, target->x_mm) :
-        seed_q_deg[0] * ARM_KIN_DEG_TO_RAD;
+        atan2f(target->y_mm, target->x_mm) : 0.0f;
 
     /*
      * 同一空间点可能对应局部径向正/负两个分支，每个分支又有肘上/肘下
@@ -257,10 +295,12 @@ static Arm_IK_Status_e ArmInverseKinematics3DOFInternal(
         local_x = radial_index == 0u ?
             local_x_magnitude : -local_x_magnitude;
         signed_radius = local_x - ARM_SHOULDER_OFFSET_FORWARD_MM;
-        q1_deg = ArmKinematicsWrapTo180(
-            (target_azimuth -
-             atan2f(ARM_SHOULDER_OFFSET_LEFT_MM, local_x)) *
-            ARM_KIN_RAD_TO_DEG);
+        q1_deg = rho > ARM_KIN_EPSILON ?
+            ArmKinematicsWrapTo180(
+                (target_azimuth -
+                 atan2f(ARM_SHOULDER_OFFSET_LEFT_MM, local_x)) *
+                ARM_KIN_RAD_TO_DEG) :
+            seed_q_deg[0];
         cos_q3 = (signed_radius * signed_radius +
                   z_planar * z_planar -
                   ARM_LINK_1_MM * ARM_LINK_1_MM -

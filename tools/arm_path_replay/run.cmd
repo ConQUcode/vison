@@ -6,6 +6,7 @@ if not exist "%~dp0_tmp" mkdir "%~dp0_tmp"
 set "TMP=%~dp0_tmp"
 set "TEMP=%~dp0_tmp"
 "%GCC%" -std=c11 -O2 -Wall -Wextra -Wshadow -Werror ^
+  -I"%ROOT%\Engineer\APPLICATION" ^
   -I"%ROOT%\Engineer\APPLICATION\arm" ^
   "%~dp0arm_path_replay.c" ^
   "%~dp0arm_tool_geometry_host.c" ^

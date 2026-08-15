@@ -16,7 +16,7 @@ uint8_t ArmJointPoseWithinSoftLimits(const float q_deg[3]);
 /** 检查姿态是否允许自动轨迹使用，不包含启动脱困边界。 */
 uint8_t ArmAutoPoseIsSafe(const float q_deg[3]);
 
-/** 组合主臂FK和117mm工具偏移，得到夹爪中心。 */
+/** 组合主臂FK和117mm工具偏移，得到夹爪中心；q1正角朝世界Y正侧。 */
 uint8_t ArmForwardKinematicsToolCenter(
     const float q_deg[3], float tool_pitch_deg,
     Arm_Position_s *tool_center_mm);

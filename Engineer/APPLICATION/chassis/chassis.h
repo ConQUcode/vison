@@ -22,12 +22,14 @@ typedef enum {
 typedef enum {
     CHASSIS_COMMAND_NONE = 0,
     CHASSIS_COMMAND_RELATIVE_STRAIGHT,
-    CHASSIS_COMMAND_RELATIVE_TURN
+    CHASSIS_COMMAND_RELATIVE_TURN,
+    CHASSIS_COMMAND_BODY_VELOCITY
 } Chassis_Command_Type_e;
 
 typedef enum {
     CHASSIS_HEADING_NONE = 0,
-    CHASSIS_HEADING_HOLD_START
+    CHASSIS_HEADING_HOLD_START,
+    CHASSIS_HEADING_HOLD_ZERO_WZ
 } Chassis_Heading_Mode_e;
 
 typedef enum {
@@ -64,6 +66,14 @@ typedef struct {
 
 typedef struct {
     uint32_t command_id;
+    /* 正值表示沿物理车头方向前进，负值表示后退。 */
+    float vx_mm_s;
+    /* 正值表示逻辑Yaw增加；为0且vx非0时自动启用IMU直行保持。 */
+    float wz_rad_s;
+} Chassis_Velocity_Command_s;
+
+typedef struct {
+    uint32_t command_id;
     Chassis_Command_Type_e command_type;
     Chassis_State_e state;
     Chassis_Fault_e fault;
@@ -71,6 +81,10 @@ typedef struct {
     float actual_distance_mm;
     float target_angle_deg;
     float actual_angle_deg;
+    float target_vx_mm_s;
+    float actual_vx_mm_s;
+    float target_wz_rad_s;
+    float actual_wz_rad_s;
 } Chassis_Status_s;
 
 typedef struct {
@@ -155,6 +169,16 @@ typedef struct {
     float imu_gyro_z_rad_s;
     float left_direction_check_start_m;
     float right_direction_check_start_m;
+    uint8_t velocity_heading_hold_active;
+    uint32_t velocity_command_tick;
+    uint32_t velocity_refresh_count;
+    uint32_t velocity_timeout_count;
+    uint32_t velocity_heading_capture_count;
+    float velocity_target_vx_mm_s;
+    float velocity_actual_vx_mm_s;
+    float velocity_target_wz_rad_s;
+    float velocity_actual_wz_rad_s;
+    float velocity_wheel_scale;
 } Chassis_Debug_s;
 
 extern Chassis_Debug_s g_chassis_debug;
@@ -164,6 +188,12 @@ uint8_t ChassisInit(attitude_t *imu);
 /** 提交单条相对运动命令；水果任务只使用 RELATIVE_STRAIGHT。 */
 Chassis_Command_Result_e ChassisSubmitCommand(
     const Chassis_Command_s *command);
+/**
+ * 提交或刷新连续车体速度命令。运行中的速度命令只接受更大的command_id；
+ * wz为0且vx非0时锁定当前IMU航向，命令超时后平滑停车到CANCELLED。
+ */
+Chassis_Command_Result_e ChassisSubmitVelocityCommand(
+    const Chassis_Velocity_Command_s *command);
 uint8_t ChassisGetStatus(Chassis_Status_s *status);
 /** 正常停车并以 CANCELLED 结束当前命令。 */
 void ChassisCancelMotion(void);

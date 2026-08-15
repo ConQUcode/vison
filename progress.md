@@ -1,0 +1,117 @@
+# Progress
+
+## 2026-08-14
+
+- Started source audit for the `-480` one-shot pick/place test and shoulder-first power-on initialization.
+- Confirmed live test baseline and preserved existing dirty worktree changes.
+- Confirmed posture mode currently stops at `HOLDING`; identified the need for a shared A-left place-profile accessor and explicit grip-only states before starting `AppArmFlowStartPlace()`.
+- Confirmed active full-init currently initializes ID1/ID2 first and moves all three DM joints together; selected a shoulder-first q2 -> q3 -> q1 sequence with deferred tool initialization.
+- Identified the posture-mode link guard and direct ID2 close API; selected a shared profile accessor followed by `AppArmFlowStartPlace()`.
+- Verified existing single-axis motion helpers correctly preserve logical q1/q3 while q2 moves and retain timeout/wrong-direction protection; verified deferred Huaner task servicing is a no-op before driver init.
+- Added a shared A-region place-profile accessor and broadened `AppArmFlow` implementation linkage to full-arm and posture-test modes.
+- Added the one-shot posture states for `-480` pitch settling, ID2 close, A-left place, and final `HOLDING`; current source still needs startup sequencing and static review.
+- Re-read the live full-init path and locked the implementation mapping: q2 uses `MOVE_AXIS/WAIT_AXIS`, q3 and q1 use `MOVE_SAFE/WAIT_SAFE`, then the boot state starts ID1/ID2 initialization once.
+- Implemented `ArmToolPrepareDeferredInit()` and changed full-init startup to q2 shoulder -> q3 elbow -> q1 base -> ID1/ID2, reusing the existing single-axis limit, timeout, wrong-direction, and coupling behavior.
+- Removed the now-unused all-axis arrival helper after sequential auto-init replaced the simultaneous HOME command.
+- Corrected the auto-init Watch axis encoding and updated README/HANDOFF/overview/tuning/fruit-flow documentation for `-480`, one-shot close/place, q2-first startup, and the live q2 `10..180 deg` soft range.
+- Completed static validation: no stale `-460`/no-grip text, startup call order and posture states are present, the 141-point source-equivalent path scan passes, and `git diff --check` reports no whitespace errors.
+- Per user constraint, did not run Keil/GCC compilation, flashing, or hardware motion tests.
+
+## 2026-08-15
+
+- Confirmed the post-grip stop is `ARM_COMMAND_DUPLICATE`: posture mode ends at `0xA11C0003`, then the first place command regresses to `0xA11B0001`.
+- Started phase 6 to replace independent application arm command-ID ranges with one shared monotonic allocator.
+- `session-catchup.py` failed because MSYS Python could not determine HOME; continued from the existing planning files and live source state.
+- Audited all application command producers and selected a standalone shared arm command-ID module; chassis IDs remain intentionally separate.
+- Completed interface/integration design: atomic idempotent allocator, submit-time posture IDs, shared flow IDs, Keil APPLICATION group entry, and compact Watch state.
+- Added `app_arm_command_id.c/.h`, migrated all posture and `AppArmFlow` arm IDs, removed both private bases/sequences, and initialized the allocator from the common arm `AppInit()` path.
+- Added the allocator source to the Keil APPLICATION group; XML parsing succeeds and finds exactly one project entry.
+- Static search confirms only the intentionally separate chassis command-ID base remains.
+- Documented the shared allocator ownership rule and `g_app_arm_command_id_debug` in PROJECT_OVERVIEW, HANDOFF, and TUNING_GUIDE.
+- Rechecked every application-layer `ArmSubmit*` call: posture commands retain one allocated ID across BUSY/NOT_READY retries, and every `AppArmFlow` submission obtains its ID from the common allocator.
+- Verified the mailbox accepts any first non-zero ID while its latest ID is zero, so the high-bit seed is valid; later IDs use signed modular ordering and the allocator skips zero on wrap.
+- Final static validation passed: no old arm ID bases/private generator remain, Keil XML parses with exactly one allocator source entry, and `git diff --check` reports no whitespace errors.
+- Per the locked boundary, did not run Keil/GCC compilation, flashing, or hardware motion tests; the modified `Engineer.uvoptx` remains an existing user change and was not edited for this fix.
+- User build exposed `L6218E` for `AppArmCommandIdInit/Next`; live `Engineer.uvprojx` no longer contained the allocator source, consistent with an open/stale Keil project overwriting the earlier external XML edit.
+- Re-added `app_arm_command_id.c` to the active `Engineer` target and ran a Keil incremental build with project-local `TEMP/TMP`: the source compiled, `Engineer.lnp` contains `app_arm_command_id.o`, the map resolves both symbols from that object, and the final image reports 0 errors and 0 warnings. No flashing or hardware motion was performed.
+- Started phase 7: verify a `-5 deg` absolute side-gripper pitch over the full `Y=-340..-480 mm` path, then change full-init from q2 -> q3 -> q1 -> tool to q2+q3 -> q1 -> tool without weakening startup fault protection.
+- Full-path source-equivalent scan rejected `-5 deg` at `[0,-340,-135]` (`relative_pitch about +90.834 deg`, servo position about `121.53`, below the 125 limit), so the conditional pitch change was not applied; current `-10 deg` remained at that phase.
+- Implemented a coupled q2/q3 HOME command with independent arrival-stability and wrong-direction tracking for both axes, shared timeout, and preserved feedback/motor/hard-boundary/CAN fault latching; q1 remains the second DM stage and ID1/ID2 remain deferred until both DM stages complete.
+- Keil incremental build compiled the synchronized initializer and linked `Engineer.axf` with 0 errors and 0 warnings; no flashing or hardware motion was performed.
+- Updated README, PROJECT_OVERVIEW, HANDOFF, TUNING_GUIDE, electrical/lower-controller documentation, and arm configuration comments for q2+q3 -> q1 -> tool startup semantics and the rejected `-5 deg` pitch boundary.
+- Final phase-7 validation passed: no stale sequential q2 -> q3 startup description or auto-init step 3 remains, `APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG` is still `-10.0f`, project XML remains valid with one command-ID source entry, and `git diff --check` reports no whitespace errors.
+- Changed the posture-test absolute pitch to `-7.0f` after a source-equivalent 1 mm scan passed the full path with about `1.538 deg` minimum combined margin; synchronized q2/q3 initialization remains unchanged.
+- Started phase 9/10 after hardware testing showed intermittent post-release lockup and visible Z rise during the side push.
+- Decoded the captured fault as an ID2 release-open feedback dropout: communication later recovered near target, but the tool and place-flow failure latches correctly explained why no return motion followed.
+- Confirmed the live ID1 conversion direction is negative; older planning/docs control-position numbers are mirrored even though their relative-angle feasibility conclusion is unchanged.
+- Implemented bounded ID2 feedback recovery for READY/OPEN motions: short dropouts no longer latch an immediate fault, recovered feedback must still prove arrival, and sustained loss or the existing total action deadline still faults explicitly.
+- Added `gripper_feedback_lost_tick`, dropout count, and recovery count to `g_arm_tool_debug` for hardware Watch diagnosis.
+- Recomputed the current `-7 deg`, `Y=-340..-480 mm`, `z=-135 mm` path from the live geometry: q2 is the first lower-Z constraint under the old 10 deg limit, so the normal q2 limit was reduced to 3 deg while the 0 deg escape/hardware boundary remains unchanged.
+- Confirmed that after the q2 change the next mathematical lower-Z boundary is ID1 relative pitch at about `z=-162.466 mm`; current coordinates remain unchanged at `z=-135 mm`.
+- Corrected the mirrored ID1 control-position values in the planning and tuning documentation and synchronized the q2 range and ID2 recovery behavior in the electrical/tuning documents.
+- The 141-point current-path scan passes after the q2 change: q2 minimum is about `11.794 deg`, q3 remains `-103.080..-67.524 deg`, and ID1 relative pitch remains `58.126..88.462 deg`.
+- `gcc_arm_check.cmd` passed all configured Cortex-M4 `-Wall -Wextra -Wshadow -Werror` syntax checks, including `arm_tool.c`, with no errors.
+- Two native Keil `UV4.exe` incremental-build invocations returned without starting a build or producing a log; existing object/image timestamps did not change, so no Keil result is claimed. `.uvprojx/.uvoptx` hashes were identical before and after.
+- Final static checks report no whitespace errors. No flashing or hardware motion verification was performed.
+- Started phase 11 after the user confirmed ID1 hardware can accept control position115; synchronized the ID1 minimum position to115 and relative-pitch maximum to the equivalent `+92.4 deg`, including the tool startup self-test boundary.
+- Changed the active posture-test path to `[0,-340,-150] -> [0,-480,-150] mm` with absolute pitch `-5 deg` and synchronized all current-mode documentation.
+- Started phase 12: mirror the complete world-Y coordinate definition so physical left is `+Y`, while preserving point identities, q1 signs and physical pick/place routes.
+- Completed phase 12: mirrored the full Y conversion chain and current documentation. The host replay passed all 141 points from `[0,340,-150]` through `[0,480,-150]` with minimum q2 `7.881 deg`, maximum ID1 relative pitch `91.706 deg` and minimum ID1 position `117.893`; A-left/A-right remained q1 `+90/-90 deg`.
+- Expanded `gcc_arm_check.cmd` to include the application flow, fruit task and shared command-ID sources; all eight checked translation units passed ARM GCC syntax validation. No firmware was flashed and no bench motion was performed.
+- The source-equivalent 141-point scan passes with minimum ID1 position about117.893, maximum relative pitch about91.706deg, minimum q2 about7.881deg, and q3 within `-106.155..-70.762deg`.
+- Phase 11 final validation passed: current macros and tool self-test use the synchronized115/+92.4deg boundary, strict Cortex-M4 GCC syntax checks passed, no stale current-mode `-7deg/-135mm` documentation remains, and `git diff --check` reports no whitespace errors. Keil compilation, flashing, and hardware motion were not performed.
+- Started phase 13 for an indefinite left/right mirrored pick-place loop in posture-test mode; preserved the current no-chassis test boundary and all existing user changes.
+- Added structural left/right Y macros, an explicit per-side posture-cycle preparation helper, mirrored profile selection, fresh command IDs per cycle, and Watch counters for total/left/right completed picks.
+- Replaced terminal post-place holding with left/right side switching after the arm has returned to the front; the failure state remains terminal.
+- Extended the host replay verifier to compare all 141 left/right path samples for q1 sign symmetry, identical q2/q3, identical ID1 relative pitch/control value, and equal automatic-workspace acceptance.
+- ARM GCC strict syntax validation passed all eight configured arm/application translation units. The first host replay build caught only a shadowed test variable; after renaming it, the full mirrored-path and existing rear-route replay passed.
+- Updated the top-level README and handoff current-mode section to describe the indefinite left-first/right-second loop and both coordinate paths.
+- Updated PROJECT_OVERVIEW, FRUIT_TASK_FLOW and TUNING_GUIDE so the active mode, profile selection, mirrored coordinates, failure behavior and symmetric limit margins match the new runtime loop.
+- Updated the electrical/lower-controller guide for paired left/right path validation and removed its final stale one-shot-mode description.
+- Re-reviewed the cycle boundary and tightened counter ordering so an invalid active-side value cannot be counted; command IDs are cleared per side and allocated only at their normal submit states.
+- Removed the now-unreachable successful `HOLDING` posture state; normal operation always prepares the opposite side after a completed return-to-front, while `FAILED` remains the only terminal posture state.
+- Final stale-text audit found no remaining one-shot/HOLDING current-mode behavior in application source or maintained documents.
+- Completed phase 13: left-first/right-second indefinite mirrored pick-place is implemented, symmetric software-limit replay and strict ARM syntax checks pass, and all maintained current-mode documents are synchronized. No firmware was flashed and no hardware motion was performed.
+- Started phase 14 read-only diagnosis after hardware testing showed the right cycle stopping immediately after base pre-aim; no motion parameters have been changed.
+- Completed phase 14 diagnosis: the right target IK is valid, but the first Cartesian sample from the left-release return pose fails only the front-barrier workspace check (`X=2.011 mm`, `q2=120.031 deg`), proving a preflight rejection before DM shoulder/elbow motion.
+- Started phase 15 to make posture-test pre-aim enter the same q2/q3/ID1 staging posture as the formal pick flow on every left/right cycle, without relaxing any safety limit.
+- `session-catchup.py` again failed because MSYS Python cannot determine HOME; continued from the live plan/findings/progress files and current Git state, and will not retry this known environment failure.
+- Confirmed the joint-command API and trajectory layer already support synchronized DM q1/q2/q3 plus ID1 relative pitch with full-path safety validation; selected a shared command builder so formal and posture-test pre-aim cannot diverge again.
+- Added `AppArmFlowBuildPickStaging()` and migrated both formal pick and posture-test pre-aim to it; posture mode now submits all three DM staging targets and ID1 relative pitch in one command instead of preserving release q2/q3.
+- Extended `arm_path_replay` with real post-place-to-staging and staging-to-pick transition checks; both sides and the existing rear-route cases pass.
+- First strict GCC invocation was made from the repository root and could not resolve the script's relative `../APPLICATION` paths; no source diagnostic was produced, so validation will be rerun from `Engineer/MDK-ARM`.
+- Reran strict ARM GCC validation from `Engineer/MDK-ARM`; all eight configured translation units passed with warnings treated as errors.
+- First combined documentation patch found a stale expected context in `HANDOFF.md` and was rejected atomically; confirmed no document changed, then switched to file-scoped patches.
+- A second still-cross-file attempt was also rejected by `HANDOFF.md`; no document changed. Stopped combined patches and moved to independent one-anchor edits per file.
+- Updated README and maintained arm/task/tuning/electrical documents with the shared per-side staging boundary and current verification scope.
+- Final validation passed: ARM GCC strict check, both mirrored post-place staging/approach/advance replays, existing rear-route replay, symbol audit and `git diff --check`. Removed only the four newly generated ignored staging-candidate CSV files; no Keil build, flash or hardware motion test was performed.
+- Final display-only searches with spaced patterns were split by native cmd; switched to simple symbol lookups for line references. No implementation or verification result was affected.
+- A final display-only `findstr` status lookup had the same cmd quoting limitation; stopped repeating it. The phase-complete edit itself had already applied successfully.
+- Completed phase 15.
+- Started phase 16 to extract one complete side pick/place operation behind a reusable non-blocking LEFT/RIGHT command API while preserving the current automatic alternating test and leaving USB protocol unchanged.
+- Phase 16 inspection confirmed the verified state machine can be migrated without changing any motion parameter. Locked the public boundary as one non-blocking `Start(side)` plus periodic `Poll()`, with `DONE` after exactly one side and automatic alternation retained only in `app_runtime.c`.
+- Added `app_arm_side_pick_place.c/.h`, moved the complete verified single-side state machine and legacy Watch symbol into it, and reduced posture-test runtime code to a LEFT/RIGHT alternating caller. Added the new source once to the Keil APPLICATION group and strict GCC syntax-check list without modifying `.uvoptx`.
+- Strict ARM GCC syntax validation passed all nine configured translation units, including the new module and runtime caller. Mirrored path replay and rear-route replay passed unchanged; `git diff --check` found no whitespace errors.
+- Synchronized README, HANDOFF, PROJECT_OVERVIEW, FRUIT_TASK_FLOW and TUNING_GUIDE with the reusable LEFT/RIGHT Start/Poll contract and future protocol-bridge boundary. Kept the legacy posture Watch symbol and the numeric value of its existing FAILED state stable; appended new status fields instead of reordering old fields.
+- Completed phase 16. Final strict ARM GCC check, mirrored/rear path replay, single Keil source-entry check, ownership searches and `git diff --check` all passed. No Keil build, flash, or bench motion test was performed in this phase.
+- Started phase 17 for a temporary MG995-only image: TIM8_CH2/PI6 right servo and TIM8_CH3/PI7 left servo, both commanded to 90deg, with arm/chassis/IMU application paths disabled by mode selection.
+- Confirmed the user's CubeMX generation already supplies a correct TIM8/PI6/PI7 peripheral path. Scoped code changes to the MG995 wrapper, application-mode selection, motor-task suppression, Keil source integration and documentation; generated core settings will not be rewritten.
+- Added the MG995 PWM wrapper with explicit right-CH2/PI6 and left-CH3/PI7 ownership, 1000..2000us angle mapping, 1500us startup targets, TIM8 configuration validation and compact Watch state. Switched the current application mode to MG995-only and suppressed all DM/DJI periodic control in that mode.
+- Updated current-mode documentation for the MG995-only image while retaining the verified arm flow as a disabled mode. Expanded the strict GCC check to include the CubeMX TIM/GPIO/ISR/main path as well as the new driver and application code.
+- The first expanded GCC pass confirmed TIM/GPIO/ISR, then stopped only because `main.c` includes the ArmCC-specific RVDS FreeRTOS port. Removed that incompatible cross-compiler check target and selected a native Keil build for the complete image.
+- Strict GCC validation then passed all selected generated/driver/application units. The first native Keil attempt hit the host's known ARMCC temp-name failure and explicitly produced no target; selected the proven target-local `Engineer/tmp` plus `env.exe` full-rebuild path instead of treating the false 0-error footer as success.
+- Completed phase 17. A full Keil rebuild using `MDK-ARM/Engineer/tmp` finished with 0 errors and 0 warnings and produced fresh AXF/HEX/MAP artifacts containing the MG995 driver. Map-level ownership confirms only MG995 initialization remains active and every arm/chassis/IMU/USB/motor application task is a no-op. No firmware was flashed and no physical servo motion was observed by Codex.
+- Started phase 18 to add a firmware-internal continuous chassis `vx/wz` command boundary without modifying the generated USB protocol or current MG995-only application mode.
+- Confirmed the live differential core, M3508 speed/current loops and IMU heading PID can be reused; the missing pieces are a refreshable velocity command type, timeout stop policy, zero-`wz` heading capture and proportional combined wheel limiting.
+- Audited the live start/stop helpers and selected reuse of RUNNING/STOPPING/CANCELLED for velocity streaming. The current GCC helper omits chassis.c and will be extended as part of validation.
+- Added the public BODY_VELOCITY command type, `Chassis_Velocity_Command_s`, refreshable `ChassisSubmitVelocityCommand()` entrypoint, status/Watch fields and bounded velocity configuration.
+- Implemented zero-wz IMU heading capture/hold, direct nonzero-wz control, linear/angular acceleration ramps, proportional combined wheel limiting and 300ms refresh-timeout transition to ramped CANCELLED stopping.
+- Added chassis.c to the strict GCC helper before running validation.
+- Strict Cortex-M4 GCC validation passed with chassis.c included and warnings treated as errors; `git diff --check` reported no whitespace errors beyond existing line-ending notices.
+- Self-reviewed start, refresh, direct-turn-to-heading-hold, timeout and cancel transitions; no separate velocity state is required and existing relative-command terminal behavior remains intact.
+- Updated HANDOFF, PROJECT_OVERVIEW, TUNING_GUIDE, FRUIT_TASK_FLOW and electrical/lower-controller documentation with the internal velocity API, units, IMU zero-wz behavior, timeout, limits, Watch fields and explicit no-protocol boundary.
+- Tightened status semantics so timeout/cancel immediately publishes zero vx/wz targets while the internal ramp decelerates from the current command; initialized the wheel-pair scale Watch to 1.0.
+- Final static audit confirmed the generated protocol still has only FruitDetection/ACK/Heartbeat/Handshake and hash `0x0EBAB184`; current app mode remains MG995-only.
+- Full Keil rebuild with project-local TEMP/TMP compiled chassis.c and completed with 0 errors and 0 warnings. Fresh AXF/HEX/MAP/chassis.o were generated at 21:39; map removal of the unused velocity API is expected in the active no-chassis MG995 image.
+- Completed phase 18. No protocol packet was added, no firmware was flashed, and no chassis hardware motion was performed.
+- Final plan helper could not parse the repository's legacy `[complete]` phase markers and reported 18/0; logged this tooling-format limitation without rewriting the existing plan history. Source/build completion evidence is unaffected.
