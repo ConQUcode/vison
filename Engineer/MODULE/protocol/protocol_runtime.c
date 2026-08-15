@@ -10,9 +10,9 @@
 
 #include <string.h>
 
-#define PROTOCOL_HEARTBEAT_TIMEOUT_MS 3000u
-#define PROTOCOL_RETRY_INTERVAL_MS      100u
-#define PROTOCOL_MAX_RETRIES              3u
+#define PROTOCOL_HEARTBEAT_TIMEOUT_MS CFG_HEARTBEAT_TIMEOUT_MS
+#define PROTOCOL_RETRY_INTERVAL_MS    CFG_RELIABLE_RETRY_INTERVAL_MS
+#define PROTOCOL_RETRY_WARNING_COUNT  CFG_RELIABLE_MAX_RETRIES
 
 typedef struct {
     uint8_t id;
@@ -41,7 +41,8 @@ static void ProtocolRuntimeClearReliable(void)
 
 static void ProtocolRuntimeExpireSession(void)
 {
-    g_protocol_runtime_debug.connection_ready = 0u;
+    g_protocol_runtime_debug.connection_ready =
+        CFG_REQUIRE_HANDSHAKE == 0 ? 1u : 0u;
     g_protocol_runtime_debug.link_online = 0u;
     ProtocolRuntimeClearReliable();
 }
@@ -88,7 +89,9 @@ void on_receive_Handshake(const Packet_Handshake *packet)
 {
     if (packet == NULL || packet->protocol_hash != PROTOCOL_HASH) {
         g_protocol_runtime_debug.handshake_mismatch_count++;
-        ProtocolRuntimeExpireSession();
+        if (CFG_REQUIRE_HANDSHAKE != 0) {
+            ProtocolRuntimeExpireSession();
+        }
         return;
     }
     ProtocolRuntimeClearReliable();
@@ -107,8 +110,11 @@ void on_receive_Handshake(const Packet_Handshake *packet)
 
 void on_receive_Heartbeat(const Packet_Heartbeat *packet)
 {
-    if (packet == NULL ||
-        g_protocol_runtime_debug.connection_ready == 0u) {
+    if (packet == NULL) {
+        return;
+    }
+    ProtocolRuntimeNotifyApplicationRx();
+    if (g_protocol_runtime_debug.connection_ready == 0u) {
         g_protocol_runtime_debug.prehandshake_drop_count++;
         return;
     }
@@ -118,7 +124,7 @@ void on_receive_Heartbeat(const Packet_Heartbeat *packet)
     g_protocol_runtime_debug.heartbeat_age_ms = 0u;
     g_protocol_runtime_debug.link_online = 1u;
     g_protocol_runtime_debug.heartbeat_rx_count++;
-    send_Heartbeat(packet);
+    /* 新版生成FSM已在进入本强回调前原样回传心跳。 */
     if (ProtocolPortLastWriteOk() == 0u) {
         g_protocol_runtime_debug.tx_fail_count++;
     }
@@ -128,8 +134,11 @@ void on_receive_Ack(const Packet_Ack *packet)
 {
     Protocol_Reliable_Slot_s *slot;
 
-    if (packet == NULL ||
-        g_protocol_runtime_debug.connection_ready == 0u) {
+    if (packet == NULL) {
+        return;
+    }
+    ProtocolRuntimeNotifyApplicationRx();
+    if (g_protocol_runtime_debug.connection_ready == 0u) {
         return;
     }
     g_protocol_runtime_debug.ack_rx_count++;
@@ -154,6 +163,8 @@ void ProtocolRuntimeInit(void)
            sizeof(g_protocol_runtime_debug));
     reliable_next_sequence = 0u;
     ProtocolRuntimeClearReliable();
+    g_protocol_runtime_debug.connection_ready =
+        CFG_REQUIRE_HANDSHAKE == 0 ? 1u : 0u;
 }
 
 void ProtocolRuntimeFeedByte(uint8_t byte)
@@ -165,6 +176,20 @@ void ProtocolRuntimeResetConnection(void)
 {
     ProtocolRuntimeExpireSession();
     g_protocol_runtime_debug.connection_reset_count++;
+}
+
+void ProtocolRuntimeNotifyApplicationRx(void)
+{
+    if (CFG_REQUIRE_HANDSHAKE == 0) {
+        g_protocol_runtime_debug.connection_ready = 1u;
+    }
+    if (g_protocol_runtime_debug.connection_ready == 0u) {
+        return;
+    }
+    if (g_protocol_runtime_debug.link_online == 0u) {
+        g_protocol_runtime_debug.session_count++;
+    }
+    g_protocol_runtime_debug.link_online = 1u;
 }
 
 uint8_t ProtocolRuntimeConnectionReady(void)
@@ -237,34 +262,32 @@ static void ProtocolRuntimeServiceReliable(uint32_t now_ms)
         PROTOCOL_RETRY_INTERVAL_MS) {
         return;
     }
-    if (slot->retries >= PROTOCOL_MAX_RETRIES) {
-        reliable_head = (uint8_t)((reliable_head + 1u) %
-                                  PROTOCOL_RUNTIME_FIFO_DEPTH);
-        reliable_count--;
-        g_protocol_runtime_debug.reliable_queue_count = reliable_count;
-        g_protocol_runtime_debug.reliable_drop_count++;
-        return;
-    }
     if (ProtocolRuntimeSendFrame(slot->id, slot->payload,
             slot->payload_len, slot->sequence) != 0u) {
         slot->retries++;
         slot->last_tx_ms = now_ms;
         g_protocol_runtime_debug.reliable_tx_count++;
         g_protocol_runtime_debug.reliable_retry_count++;
+        if (slot->retries >= PROTOCOL_RETRY_WARNING_COUNT) {
+            slot->retries = 0u;
+            g_protocol_runtime_debug.reliable_warning_count++;
+        }
     }
 }
 
 void ProtocolRuntimeTask(uint32_t now_ms)
 {
     g_protocol_runtime_debug.now_ms = now_ms;
-    if (g_protocol_runtime_debug.connection_ready == 0u) {
+    if (g_protocol_runtime_debug.connection_ready == 0u ||
+        g_protocol_runtime_debug.link_online == 0u) {
         g_protocol_runtime_debug.heartbeat_age_ms = 0u;
         return;
     }
     g_protocol_runtime_debug.heartbeat_age_ms =
         (uint32_t)(now_ms -
                    g_protocol_runtime_debug.last_heartbeat_rx_ms);
-    if (g_protocol_runtime_debug.heartbeat_age_ms >=
+    if (CFG_STRICT_HEARTBEAT != 0 &&
+        g_protocol_runtime_debug.heartbeat_age_ms >=
         PROTOCOL_HEARTBEAT_TIMEOUT_MS) {
         g_protocol_runtime_debug.heartbeat_timeout_count++;
         ProtocolRuntimeExpireSession();

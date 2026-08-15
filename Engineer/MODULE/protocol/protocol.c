@@ -20,9 +20,9 @@ typedef enum
     STATE_WAIT_CRC
 } State;
 
-// 单包 payload 解析缓冲区 (最大结构体 payload=4, 最大 wire payload=4)
+// 单包 payload 解析缓冲区 (最大结构体 payload=13, 最大 wire payload=14)
 static State rx_state = STATE_WAIT_HEADER1;
-static uint8_t rx_buffer[4];
+static uint8_t rx_buffer[14];
 static uint16_t rx_cnt = 0;
 static uint8_t rx_data_len = 0;
 static uint8_t rx_id = 0;
@@ -303,16 +303,53 @@ uint8_t calculate_checksum(const uint8_t *data, size_t len)
     }
     return cs;
 }
+// 可靠传输序列号：ROS 端在 reliable 包 payload 末尾追加 1 字节 seq，
+// MCU 收到后存入此变量，ACK 回传时携带该 seq 以区分同 ID 的不同版本。
+static uint8_t g_last_reliable_seq = 0;
+
+static inline void send_reliable_ack(PacketID id)
+{
+    Packet_Ack ack;
+    ack.acked_id = (uint8_t)id;
+    ack.ack_seq = g_last_reliable_seq;
+    send_Ack(&ack);
+}
 
 /* USER CODE BEGIN Private_Variables */
 /* USER CODE END Private_Variables */
 
-// 用户需要实现的回调函数
+// 用户可选实现的回调钩子。
+// 系统消息 (Ack/Heartbeat/Handshake) 的协议行为已由 FSM 内置，
+// 覆盖这些钩子只用于观察，不需要也不应该在其中回包。
 __attribute__((weak)) void on_receive_FruitDetection(const Packet_FruitDetection *pkt)
 {
     (void)pkt;
     /* USER CODE BEGIN on_receive_FruitDetection */
     /* USER CODE END on_receive_FruitDetection */
+}
+__attribute__((weak)) void on_receive_StateMachineCommand(const Packet_StateMachineCommand *pkt)
+{
+    (void)pkt;
+    /* USER CODE BEGIN on_receive_StateMachineCommand */
+    /* USER CODE END on_receive_StateMachineCommand */
+}
+__attribute__((weak)) void on_receive_ExecutionCallback(const Packet_ExecutionCallback *pkt)
+{
+    (void)pkt;
+    /* USER CODE BEGIN on_receive_ExecutionCallback */
+    /* USER CODE END on_receive_ExecutionCallback */
+}
+__attribute__((weak)) void on_receive_ArmTarget(const Packet_ArmTarget *pkt)
+{
+    (void)pkt;
+    /* USER CODE BEGIN on_receive_ArmTarget */
+    /* USER CODE END on_receive_ArmTarget */
+}
+__attribute__((weak)) void on_receive_VelocityCommand(const Packet_VelocityCommand *pkt)
+{
+    (void)pkt;
+    /* USER CODE BEGIN on_receive_VelocityCommand */
+    /* USER CODE END on_receive_VelocityCommand */
 }
 __attribute__((weak)) void on_receive_Ack(const Packet_Ack *pkt)
 {
@@ -323,19 +360,12 @@ __attribute__((weak)) void on_receive_Ack(const Packet_Ack *pkt)
 __attribute__((weak)) void on_receive_Heartbeat(const Packet_Heartbeat *pkt)
 {
     (void)pkt;
-    // Default system behavior: ack the latest heartbeat with the same count.
-    send_Heartbeat(pkt);
     /* USER CODE BEGIN on_receive_Heartbeat */
     /* USER CODE END on_receive_Heartbeat */
 }
 __attribute__((weak)) void on_receive_Handshake(const Packet_Handshake *pkt)
 {
     (void)pkt;
-    // Default system behavior: ack matching protocol hash automatically.
-    if (pkt->protocol_hash == PROTOCOL_HASH)
-    {
-        send_Handshake(pkt);
-    }
     /* USER CODE BEGIN on_receive_Handshake */
     /* USER CODE END on_receive_Handshake */
 }
@@ -411,6 +441,34 @@ void protocol_fsm_feed(uint8_t byte)
                     on_receive_FruitDetection((Packet_FruitDetection *)rx_buffer);
                 }
                 break;
+            case PACKET_ID_STATEMACHINECOMMAND:
+                if (rx_data_len == sizeof(Packet_StateMachineCommand) + 1)
+                {
+                    on_receive_StateMachineCommand((Packet_StateMachineCommand *)rx_buffer);
+                    g_last_reliable_seq = rx_buffer[sizeof(Packet_StateMachineCommand)];
+                    send_reliable_ack(PACKET_ID_STATEMACHINECOMMAND);
+                }
+                break;
+            case PACKET_ID_EXECUTIONCALLBACK:
+                if (rx_data_len == sizeof(Packet_ExecutionCallback))
+                {
+                    on_receive_ExecutionCallback((Packet_ExecutionCallback *)rx_buffer);
+                }
+                break;
+            case PACKET_ID_ARMTARGET:
+                if (rx_data_len == sizeof(Packet_ArmTarget) + 1)
+                {
+                    on_receive_ArmTarget((Packet_ArmTarget *)rx_buffer);
+                    g_last_reliable_seq = rx_buffer[sizeof(Packet_ArmTarget)];
+                    send_reliable_ack(PACKET_ID_ARMTARGET);
+                }
+                break;
+            case PACKET_ID_VELOCITYCOMMAND:
+                if (rx_data_len == sizeof(Packet_VelocityCommand))
+                {
+                    on_receive_VelocityCommand((Packet_VelocityCommand *)rx_buffer);
+                }
+                break;
             case PACKET_ID_ACK:
                 if (rx_data_len == sizeof(Packet_Ack))
                 {
@@ -420,6 +478,8 @@ void protocol_fsm_feed(uint8_t byte)
             case PACKET_ID_HEARTBEAT:
                 if (rx_data_len == sizeof(Packet_Heartbeat))
                 {
+                    // 框架内置：原样回传心跳包作为 ACK
+                    send_Heartbeat((const Packet_Heartbeat *)rx_buffer);
                     on_receive_Heartbeat((Packet_Heartbeat *)rx_buffer);
                 }
                 break;
@@ -445,6 +505,9 @@ void protocol_fsm_feed(uint8_t byte)
 
 // --- 发送函数 ---
 // 外部依赖：用户必须实现 void serial_write(const uint8_t* data, uint16_t len);
+// 注意：协议层会在 protocol_fsm_feed() 的调用上下文中发送回包（心跳/握手/ACK）。
+// 若 protocol_fsm_feed() 在中断中调用，而业务代码也在主循环调用 send_xxx()，
+// 则 serial_write() 必须自行保证可重入/并发安全（如关中断或使用发送队列）。
 extern void serial_write(const uint8_t *data, uint16_t len);
 
 void send_FruitDetection(const Packet_FruitDetection *pkt)
@@ -459,6 +522,78 @@ void send_FruitDetection(const Packet_FruitDetection *pkt)
 
     memcpy(&buffer[idx], pkt, sizeof(Packet_FruitDetection));
     idx += sizeof(Packet_FruitDetection);
+
+    buffer[idx] = calculate_checksum(&buffer[2], idx - 2);
+    idx++;
+
+    serial_write(buffer, idx);
+}
+void send_StateMachineCommand(const Packet_StateMachineCommand *pkt)
+{
+    uint8_t buffer[4 + sizeof(Packet_StateMachineCommand) + 1];
+    uint16_t idx = 0;
+
+    buffer[idx++] = FRAME_HEADER1;
+    buffer[idx++] = FRAME_HEADER2;
+    buffer[idx++] = PACKET_ID_STATEMACHINECOMMAND;
+    buffer[idx++] = sizeof(Packet_StateMachineCommand);
+
+    memcpy(&buffer[idx], pkt, sizeof(Packet_StateMachineCommand));
+    idx += sizeof(Packet_StateMachineCommand);
+
+    buffer[idx] = calculate_checksum(&buffer[2], idx - 2);
+    idx++;
+
+    serial_write(buffer, idx);
+}
+void send_ExecutionCallback(const Packet_ExecutionCallback *pkt)
+{
+    uint8_t buffer[4 + sizeof(Packet_ExecutionCallback) + 1];
+    uint16_t idx = 0;
+
+    buffer[idx++] = FRAME_HEADER1;
+    buffer[idx++] = FRAME_HEADER2;
+    buffer[idx++] = PACKET_ID_EXECUTIONCALLBACK;
+    buffer[idx++] = sizeof(Packet_ExecutionCallback);
+
+    memcpy(&buffer[idx], pkt, sizeof(Packet_ExecutionCallback));
+    idx += sizeof(Packet_ExecutionCallback);
+
+    buffer[idx] = calculate_checksum(&buffer[2], idx - 2);
+    idx++;
+
+    serial_write(buffer, idx);
+}
+void send_ArmTarget(const Packet_ArmTarget *pkt)
+{
+    uint8_t buffer[4 + sizeof(Packet_ArmTarget) + 1];
+    uint16_t idx = 0;
+
+    buffer[idx++] = FRAME_HEADER1;
+    buffer[idx++] = FRAME_HEADER2;
+    buffer[idx++] = PACKET_ID_ARMTARGET;
+    buffer[idx++] = sizeof(Packet_ArmTarget);
+
+    memcpy(&buffer[idx], pkt, sizeof(Packet_ArmTarget));
+    idx += sizeof(Packet_ArmTarget);
+
+    buffer[idx] = calculate_checksum(&buffer[2], idx - 2);
+    idx++;
+
+    serial_write(buffer, idx);
+}
+void send_VelocityCommand(const Packet_VelocityCommand *pkt)
+{
+    uint8_t buffer[4 + sizeof(Packet_VelocityCommand) + 1];
+    uint16_t idx = 0;
+
+    buffer[idx++] = FRAME_HEADER1;
+    buffer[idx++] = FRAME_HEADER2;
+    buffer[idx++] = PACKET_ID_VELOCITYCOMMAND;
+    buffer[idx++] = sizeof(Packet_VelocityCommand);
+
+    memcpy(&buffer[idx], pkt, sizeof(Packet_VelocityCommand));
+    idx += sizeof(Packet_VelocityCommand);
 
     buffer[idx] = calculate_checksum(&buffer[2], idx - 2);
     idx++;
@@ -523,14 +658,5 @@ void send_Handshake(const Packet_Handshake *pkt)
 /* USER CODE BEGIN Code_1 */
 /* USER CODE END Code_1 */
 
-/*
-// --- 建议的消息发送模板 (以 Heartbeat 为例) ---
-// 建议在定时器回调或主循环中以固定频率调用
-
-void heartbeat_timer_callback(void) {
-    static uint32_t hb_count = 0;
-    Packet_Heartbeat pkt;
-    pkt.count = hb_count++;
-    send_Heartbeat(&pkt);
-}
-*/
+// 心跳由 ROS 端周期发起 (间隔 CFG_HEARTBEAT_INTERVAL_MS)，
+// 协议层收到后自动原样回包，MCU 侧无需主动发送心跳。

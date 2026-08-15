@@ -20,11 +20,15 @@ DJI电机周期控制。通过 `g_mg995_servo_debug` 确认初始化和两路目
 左抓取/左放置 -> 返回前方 -> 右抓取/右放置 -> 返回前方 -> 重复
 ```
 
-一侧完整动作已封装在 `app_arm_side_pick_place.c/.h`。未来上位机协议桥只需
-按命令侧别调用一次 `AppArmSidePickPlaceStart(APP_FRUIT_SIDE_LEFT/RIGHT,
-now_ms)`；机械臂应用任务周期调用 `AppArmSidePickPlacePoll()`，直到该侧抓取、
-对应侧释放和返回前方全部完成并返回 `DONE`。左右持续循环只是这个公共
-接口的测试调用者，USB消息和协议哈希本轮未修改。
+一侧完整动作已封装在 `app_arm_side_pick_place.c/.h`。新版上位机协议已同步到
+哈希 `0x2588BA9A`，并增加底盘速度、夹爪/摄像头离散命令、相机坐标机械臂
+目标和执行回调。切到 `APP_MODE_HOST_CONTROL` 后，`VelocityCommand` 会进入
+现有 `vx/wz` 底盘接口，`StateMachineCommand` 可控制ID2夹爪及双MG995；当前
+默认仍为MG995台架模式，不会启动USB、底盘或机械臂。
+
+`ArmTarget` 当前只校验并记录相机坐标和 `z_type`。在摄像头外参和拍照时机械臂
+姿态关联补齐前，不会把相机坐标直接提交给机械臂；协议可靠ACK只表示下位机
+收到该包，不表示目标已经执行。
 
 每次开始当前侧抓取时都先执行同一条联合准备命令：底座到对应
 `q1=+/-89.5 deg`，同时大臂/小臂到 `[q2,q3]=[80,-90] deg`，ID1到

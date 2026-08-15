@@ -84,8 +84,13 @@ void FruitUsbBridgeOnDetection(const Packet_FruitDetection *packet)
     const Protocol_Runtime_Debug_s *protocol = ProtocolRuntimeGetDebug();
     uint32_t now_ms = ProtocolRuntimeNowMs();
 
-    if (packet == NULL ||
-        ProtocolRuntimeConnectionReady() == 0u ||
+    if (packet == NULL) {
+        g_fruit_usb_debug.invalid_count++;
+        FruitUsbBridgeInvalidate();
+        return;
+    }
+    ProtocolRuntimeNotifyApplicationRx();
+    if (ProtocolRuntimeConnectionReady() == 0u ||
         ProtocolRuntimeLinkOnline() == 0u) {
         g_fruit_usb_debug.invalid_count++;
         FruitUsbBridgeInvalidate();

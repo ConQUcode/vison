@@ -52,7 +52,8 @@ Watch 主要使用 `g_app_arm_posture_test_debug`。该模式不运行底盘任�
 `AppArmSidePickPlacePoll(now_ms)`。单侧成功后停在 `DONE`，不会由模块自行
 切换另一侧；当前持续交替仅由 `app_runtime.c` 在收到 `DONE` 后提交下一侧。
 运行中重复提交返回 `BUSY`，非法侧别返回 `INVALID_SIDE`，明确故障锁存
-`FAILED`。本轮没有接入USB消息，也没有修改协议哈希。
+`FAILED`。新版协议尚未定义左右侧完整抓放命令，因此该接口当前仍只供专项
+测试调用；后续增加侧别消息时应直接调用它，不复制内部状态机。
 
 完整上电初始化顺序为 `q2大臂+q3小臂同步 -> q1底座 -> ID1/ID2`。三台
 达妙会先使能并原位保持；q2/q3由同一联合位姿命令驱动，耦合补偿仍生效。
@@ -82,6 +83,7 @@ A区共8个水果，沿行进方向4组、每组左右各1个。启动区边界�
 | `chassis/chassis.c/.h` | 通用相对运动命令执行器 |
 | `chassis/chassis_config.h` | 已验证方向、机械参数、PID和停车边界 |
 | `fruit_usb_bridge.c/.h` | 水果识别观察；当前不驱动静态任务 |
+| `upper_controller_bridge.c/.h` | 新版速度、夹爪、摄像头和ArmTarget协议适配及Watch |
 
 完整 A 区语义和扩展步骤见 `docs/FRUIT_TASK_FLOW.md`。
 
@@ -133,13 +135,15 @@ ID2 默认/张开 `450`，探测闭合 `660`。接触后每次回退 `10`，最�
 正距离固定为物理车头向前。`ChassisGetStatus()` 返回命令 ID、状态、目标、
 实测和故障。取消正常停稳后进入 `CANCELLED`，急停立即锁存 `FAULT`。
 
-未来上位机速度桥调用 `ChassisSubmitVelocityCommand()`，每次提交严格递增的
+上位机速度桥调用 `ChassisSubmitVelocityCommand()`，每次提交严格递增的
 `command_id`、`vx_mm_s` 和 `wz_rad_s`。正`vx`为物理车头前进，正`wz`为
 逻辑Yaw增加。运行中的速度命令允许用新ID刷新；`wz=0`且`vx!=0`时锁定
 当前IMU航向进行直行修正，非零`wz`以上位机目标为主，重新回到零`wz`
 平移时捕获新的当前航向。300ms未刷新会平滑停车到`CANCELLED`，不锁存
-通信故障；电机/IMU离线和急停仍进入`FAULT`。本轮只提供内部接口，没有
-增加USB消息ID或修改协议哈希，当前MG995模式也不会初始化底盘。
+通信故障；电机/IMU离线和急停仍进入`FAULT`。新版 `VelocityCommand` 已由
+`upper_controller_bridge.c` 转换为该公共速度接口；
+只有切到 `APP_MODE_HOST_CONTROL` 才初始化USB、底盘和IMU。当前默认MG995模式
+仍不会初始化底盘。
 
 速度接口初始限制为`|vx|<=200 mm/s`、`|wz|<=0.8 rad/s`。左右轮按
 `vl=vx-wz*L/2`、`vr=vx+wz*L/2`换算；任一轮超过0.35m/s时两侧按相同
@@ -193,7 +197,7 @@ CAN1/CAN2 均为 1 Mbps。机械臂 HOME 为 `q=[0,90,-60] deg`，主臂连杆
 - `ChassisTask`：推进底盘命令状态机。
 - `ArmControlTask`：推进机械臂和 A 区任务调度。
 - `MotorControlTask`：唯一的达妙/DJI周期控制发送任务。
-- `UsbTask`：USB、协议、蜂鸣器、Daemon和水果观察桥。
+- `UsbTask`：USB、协议、蜂鸣器、Daemon以及当前模式对应的业务桥。
 
 不要把电机周期发送重新塞回可能进行长时间路径预检的应用任务。
 
@@ -207,6 +211,7 @@ CAN1/CAN2 均为 1 Mbps。机械臂 HOME 为 `q=[0,90,-60] deg`，主臂连杆
 - `g_arm_dm_debug`：三台达妙反馈、使能和控制发送。
 - `g_fruit_usb_debug`：协议会话和水果识别快照。
 - `g_protocol_runtime_debug`：握手、心跳、会话和可靠发送队列。
+- `g_upper_controller_debug`：新版离散命令、底盘速度提交、执行回调和暂缓的ArmTarget。
 
 机械臂邮箱只接受比上一条更新的命令ID。当前专项姿态测试和
 `AppArmFlow` 已统一调用 `AppArmCommandIdNext()`；后续新增任何固件内部
@@ -215,11 +220,16 @@ CAN1/CAN2 均为 1 Mbps。机械臂 HOME 为 `q=[0,90,-60] deg`，主臂连杆
 
 ## 9. 协议和定位边界
 
-当前生成协议哈希为 `0x0EBAB184`，生成文件是
+当前生成协议哈希为 `0x2588BA9A`，生成文件是
 `protocol.c/.h/PROTOCOL_DOC.md`。`protocol_runtime.*`、
-`protocol_port.*`、`fruit_usb_bridge.*` 是工程维护文件，不能随生成文件
-一起覆盖。`FruitDetection` 仅包含 `fruit_id/status`，目前只更新 Watch，
-不驱动静态任务表，也没有底盘命令、横向误差或机械臂任务字段。
+`protocol_port.*`、`fruit_usb_bridge.*`、`upper_controller_bridge.*` 是工程维护
+文件，不能随生成文件一起覆盖。新版无需强制握手且心跳非严格，生成FSM自动
+回心跳和入站可靠消息ACK；运行层只观察状态，不再重复回心跳。
+
+`VelocityCommand` 已接到底盘连续速度接口；`StateMachineCommand` 已接到ID2
+夹爪和双MG995，并使用 `ExecutionCallback` 报执行/完成。`ArmTarget`当前仅把
+相机坐标米值换算为毫米并记录Watch，固定外参和拍照姿态关联完成前不执行。
+`FruitDetection`仍只更新识别快照，不驱动静态任务表。
 
 底盘直线距离取左右主动轮相对里程平均值，IMU 只闭环航向。
 `g_chassis_debug.y_m` 是积分观察值，不参与横向闭环。后续上位机需要提供
@@ -228,9 +238,10 @@ CAN1/CAN2 均为 1 Mbps。机械臂 HOME 为 `q=[0,90,-60] deg`，主臂连杆
 
 ## 10. 构建和验证边界
 
-本轮长期修复已通过 ARM GCC 严格语法检查和真实循环边界主机回放；
-未运行 Keil 构建、未烧录，也未替代实机硬件验收。
-只执行 `git diff --check`、符号引用和旧接口/旧距离残留搜索。
+新版协议和桥接层已通过 ARM GCC 严格语法检查。当前MG995模式及临时
+`APP_MODE_HOST_CONTROL`模式均通过Keil ArmCC 5全量构建，0错误0警告；
+最终AXF/HEX已恢复为当前MG995默认模式。未烧录，也未进行上位机、底盘、
+夹爪、摄像头或ArmTarget的实机协议验收。
 
 当前先验收底盘保持不动、点1 `[0,400,-100]` 与点2
 `[0,-400,-100]` 完整抓放并持续交替；抓取时ID1绝对俯仰应为 `-90 deg`。

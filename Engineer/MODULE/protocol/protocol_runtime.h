@@ -1,6 +1,6 @@
 /**
  * @file protocol_runtime.h
- * @brief STM32 端协议会话、严格心跳和可靠重试运行层。
+ * @brief STM32端协议会话、心跳观察和可靠重试运行层。
  */
 
 #ifndef PROTOCOL_RUNTIME_H
@@ -32,6 +32,7 @@ typedef struct {
     uint32_t ack_rx_count;
     uint32_t reliable_tx_count;
     uint32_t reliable_retry_count;
+    uint32_t reliable_warning_count;
     uint32_t reliable_drop_count;
     uint32_t prehandshake_drop_count;
     uint32_t connection_reset_count;
@@ -48,6 +49,8 @@ void ProtocolRuntimeTask(uint32_t now_ms);
 void ProtocolRuntimeFeedByte(uint8_t byte);
 /** USB 断开时撤销会话并清空可靠队列。 */
 void ProtocolRuntimeResetConnection(void);
+/** 业务回调收到一帧合法协议包时调用，用于非强制握手模式建立在线状态。 */
+void ProtocolRuntimeNotifyApplicationRx(void);
 uint8_t ProtocolRuntimeConnectionReady(void);
 uint8_t ProtocolRuntimeLinkOnline(void);
 uint32_t ProtocolRuntimeNowMs(void);

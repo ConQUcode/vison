@@ -195,3 +195,16 @@
 - The API must be non-blocking. `Start(side, now_ms)` validates and accepts one task; the existing 1 ms arm application task owns `Poll(now_ms)` until `DONE/FAILED`. A blocking function would stall FreeRTOS servicing, CAN feedback and servo communication.
 - Current posture-test auto alternation must become a caller of the same public API rather than remain embedded inside the one-side state machine. This preserves the current hardware test while making a later USB protocol bridge a thin command adapter.
 - Busy submission must not reset command IDs, active side, flow state or profile. Invalid side and latched failure must return explicit results without moving hardware.
+
+## Phase 19 upper-controller protocol sync
+
+- The three user-updated generated files are `protocol.h`, `protocol.c`, and `PROTOCOL_DOC.md`; the new wire hash is `0x2588BA9A`.
+- New inbound application messages are reliable `StateMachineCommand`, reliable `ArmTarget`, and non-reliable `VelocityCommand`; `ExecutionCallback` is the lower-controller outbound completion message.
+- The generated FSM now sends heartbeat replies and reliable inbound ACKs itself. The existing strong heartbeat callback also sends a reply, so an unmodified replacement would produce duplicate heartbeat frames.
+- The new configuration sets `CFG_REQUIRE_HANDSHAKE=0` and `CFG_STRICT_HEARTBEAT=0`, while the existing runtime hard-codes both as mandatory. The runtime must consume the generated macros instead of preserving the obsolete policy.
+- `VelocityCommand.linear_x` is m/s and maps directly to the existing internal `vx_mm_s` after multiplying by 1000; `angular_z` already uses rad/s.
+- `StateMachineCommand` maps task 0 to ID2 grip/open and task 1 to both mirrored MG995 camera axes look-down/look-up. The packet carries no application command ID, so the bridge must make repeated identical commands idempotent.
+- `ArmTarget` explicitly describes camera-frame meters. Until fixed camera extrinsics and capture-pose association exist, executing it as a base-frame target would be unsafe; this phase only validates and records it.
+- A dedicated host-control app mode is required because the current full-arm mode owns an automatic fruit task and the active MG995 mode intentionally disables USB/chassis/arm. Sharing either mode would create actuator ownership conflicts.
+- The final bridge maps camera commands to mirrored physical angles `-45 deg` down and `+45 deg` up, waits 500 ms after PWM submission, then sends the completed callback; MG995 has no position feedback, so this is a timed completion rather than measured arrival.
+- Both active-mode variants link under ArmCC 5: host-control mode retains `UpperControllerBridgeInit/Task`, strong protocol callbacks and `ChassisSubmitVelocityCommand`; the final rebuilt image is restored to `APP_MODE_MG995_TEST`.

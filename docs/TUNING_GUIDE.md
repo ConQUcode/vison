@@ -120,7 +120,9 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 每次刷新必须使用更大的`command_id`。`wz=0`且`vx!=0`时，首次命令捕获
 当前Yaw并持续复用同一目标；非零`wz`不叠加航向保持，转回零`wz`平移时
 重新捕获当前Yaw。左右轮联合超限时通过`velocity_wheel_scale`同比例缩小，
-不能分别削顶改变曲率。当前尚无USB速度包，接口只供未来协议桥调用。
+不能分别削顶改变曲率。新版USB `VelocityCommand` 已在
+`APP_MODE_HOST_CONTROL`中通过`upper_controller_bridge.c`调用该接口；协议输入
+`linear_x`为m/s，桥内乘1000转换为`vx_mm_s`，`angular_z`保持rad/s。
 
 主要 Watch：
 
@@ -250,11 +252,12 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 
 ## 协议边界
 
-当前生成协议哈希为 `0x0EBAB184`。生成文件为 `protocol.c/.h` 和
+当前生成协议哈希为 `0x2588BA9A`。生成文件为 `protocol.c/.h` 和
 `PROTOCOL_DOC.md`；`protocol_runtime.*`、`protocol_port.*`、
-`fruit_usb_bridge.*` 是工程维护层，更新生成文件时不能覆盖。
+`fruit_usb_bridge.*`、`upper_controller_bridge.*` 是工程维护层，更新生成文件
+时不能覆盖。协议无需强制握手且心跳非严格；生成FSM自动回心跳和可靠入站ACK。
 
-`FruitDetection` 当前只有 `fruit_id/status`，只更新
-`g_fruit_usb_debug`，不直接改变 A 区静态测试表。现有协议没有底盘命令、
-横向误差或机械臂任务字段；未来协议桥应调用相同的
-`ChassisSubmitCommand/ChassisGetStatus` 边界。
+`StateMachineCommand`控制夹爪和双摄像头舵机，摄像头逻辑目标为向下`-45deg`
+或向上`+45deg`，PWM提交后等待500ms再回完成。`VelocityCommand`已接连续底盘
+接口。`ArmTarget`当前只记录相机坐标和`z_type`，未标定外参前不执行机械臂。
+`FruitDetection`仍只更新`g_fruit_usb_debug`，不改变A区静态测试表。

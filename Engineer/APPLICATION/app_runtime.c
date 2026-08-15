@@ -17,7 +17,7 @@
 #include "DJI_motor.h"
 #include "dmmotor.h"
 
-#if APP_CHASSIS_ONE_METER_ENABLED || APP_ARM_ENABLED
+#if APP_CHASSIS_ENABLED
 #include "chassis.h"
 #include "ins_task.h"
 #if APP_CHASSIS_ONE_METER_ENABLED
@@ -33,17 +33,20 @@
 #if APP_ARM_ENABLED
 #include "fruit_usb_bridge.h"
 #endif
+#if APP_HOST_CONTROL_ENABLED
+#include "upper_controller_bridge.h"
+#endif
 #endif
 #if APP_HUANER_FEEDBACK_ENABLED
 #include "huaner_servo.h"
 #endif
-#if APP_MG995_TEST_ENABLED
+#if APP_MG995_ENABLED
 #include "mg995_servo.h"
 #endif
 
 App_Arm_Teach_Debug_s g_app_arm_teach_debug;
 
-#if APP_CHASSIS_ONE_METER_ENABLED || APP_ARM_ENABLED
+#if APP_CHASSIS_ENABLED
 /* INS_Init 返回的姿态快照只由 INS 写、底盘读。 */
 static attitude_t *app_chassis_imu;
 #endif
@@ -261,6 +264,15 @@ void AppInit(void)
     AppArmFlowInit();
     AppFruitTaskInit();
 #endif
+#elif APP_HOST_CONTROL_ENABLED
+    USB_Init();
+    ProtocolRuntimeInit();
+    UpperControllerBridgeInit();
+    BuzzerInit();
+    app_chassis_imu = INS_Init();
+    (void)ChassisInit(app_chassis_imu);
+    (void)Mg995ServoInit();
+    ArmInit();
 #elif APP_ARM_POSTURE_TEST_ENABLED
     AppArmFlowInit();
     AppArmSidePickPlaceInit();
@@ -281,7 +293,7 @@ void AppInit(void)
 
 void AppImuTask(uint32_t now_ms)
 {
-#if APP_CHASSIS_ONE_METER_ENABLED || APP_ARM_ENABLED
+#if APP_CHASSIS_ENABLED
     INS_Task();
     ChassisNotifyImuUpdate(now_ms);
 #else
@@ -291,7 +303,7 @@ void AppImuTask(uint32_t now_ms)
 
 void AppChassisTask(uint32_t now_ms)
 {
-#if APP_CHASSIS_ONE_METER_ENABLED || APP_ARM_ENABLED
+#if APP_CHASSIS_ENABLED
     ChassisTask(now_ms);
 #if APP_CHASSIS_ONE_METER_ENABLED
     AppChassisOneMeterTestTask(now_ms);
@@ -316,6 +328,8 @@ void AppArmTask(uint32_t now_ms)
 #elif APP_ARM_TEACH_POINT_ENABLED
     (void)now_ms;
     AppArmTeachPointUpdate();
+#elif APP_HOST_CONTROL_ENABLED
+    (void)now_ms;
 #endif
 #else
     (void)now_ms;
@@ -344,7 +358,7 @@ void AppMotorControlTask(uint32_t now_ms)
 
 void AppUsbTask(uint32_t now_ms)
 {
-#if APP_ARM_ENABLED || APP_CHASSIS_ONE_METER_ENABLED
+#if APP_USB_ENABLED
     static uint32_t last_daemon_tick;
 
     USB_ProcessTask();
@@ -352,6 +366,9 @@ void AppUsbTask(uint32_t now_ms)
     ProtocolRuntimeTask(now_ms);
 #if APP_ARM_ENABLED
     FruitUsbBridgeTask(now_ms);
+#endif
+#if APP_HOST_CONTROL_ENABLED
+    UpperControllerBridgeTask(now_ms);
 #endif
     BuzzerTask(now_ms);
     if ((uint32_t)(now_ms - last_daemon_tick) >= 10u) {

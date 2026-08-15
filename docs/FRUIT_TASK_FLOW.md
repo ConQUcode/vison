@@ -139,13 +139,15 @@ ID2释放后净空  q1保持实际反馈，q2=120、q3=-80 deg，小臂再上抬
 | 底盘执行器 | `chassis/chassis.c/.h` | 相对直线/转角、连续vx/wz、里程计、IMU PID、超时减速和停稳 |
 | 运行入口 | `app_runtime.c` | 初始化模块并在FreeRTOS包装任务中周期调用 |
 
-当前生成协议哈希为 `0x0EBAB184`，`FruitDetection` 只有
-`fruit_id/status`，只更新 `g_fruit_usb_debug`，不驱动本页静态任务表。
-未来增加上位机底盘桥时，有限距离/转角任务转换为`Chassis_Command_s`，
-连续速度转换为`Chassis_Velocity_Command_s`，并统一读取
-`Chassis_Status_s`，不能绕过底盘执行器直接设置电机目标。连续速度桥需要
-递增命令ID并在300ms内刷新；只给前后速度时发送`wz=0`，下位机将锁定
-当前IMU航向保持直行。当前协议仍没有该消息，本轮未修改协议哈希。
+当前生成协议哈希为 `0x2588BA9A`。`FruitDetection`仍只更新
+`g_fruit_usb_debug`，不驱动本页静态任务表。新版`VelocityCommand`已经由
+`upper_controller_bridge.c`转换为`Chassis_Velocity_Command_s`，桥内生成递增
+命令ID；只给前后速度时`wz=0`，下位机锁定当前IMU航向保持直行。300ms未刷新
+仍由底盘执行器平滑停车，协议桥不直接设置电机目标。
+
+新版`ArmTarget`给出相机坐标系米制XYZ和`z_type`，当前仅校验、换算毫米并记录
+`g_upper_controller_debug`。在固定相机外参和拍照时机械臂姿态关联完成前，
+它不会调用抓取流程；可靠ACK只表示收到消息。
 
 未来增加上位机机械臂任务消息时，协议桥只把侧别映射为一次
 `AppArmSidePickPlaceStart(APP_FRUIT_SIDE_LEFT/RIGHT, now_ms)` 调用；1ms应用
@@ -186,5 +188,6 @@ B/C/D 当前全部视为未配置，不允许回退使用 A 区安全点或释�
 机械臂模式实机依次确认底盘不动、点1完整抓放、点2完整抓放，并持续交替；
 `task_index` 应在 `0/1` 间回绕，`completed_count` 持续递增。恢复场地路线
 后，再按 `585/点1 -> 500/点2 -> 500/点1 -> DONE` 验收。
-本轮 ARM GCC 严格检查和左右真实循环边界主机回放已经通过；未运行Keil
-构建、未烧录、未进行本轮实机验证。
+当前协议同步已通过ARM GCC严格检查；当前MG995模式和临时上位机控制模式
+均通过Keil ArmCC 5全量构建，0错误0警告，最终产物已恢复为MG995模式。
+未烧录、未进行上位机协议或机械动作实机验证。

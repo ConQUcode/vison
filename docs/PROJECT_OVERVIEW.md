@@ -117,12 +117,17 @@ ID1相对俯仰 `-80 deg` 的准备姿态；随后工具中心轨迹以 `200 mm/
 
 ## 上位机协议边界
 
-当前生成协议哈希为 `0x0EBAB184`，生成文件是
+当前生成协议哈希为 `0x2588BA9A`，生成文件是
 `protocol.c/.h/PROTOCOL_DOC.md`；项目维护的 `protocol_runtime.*`、
-`protocol_port.*` 和 `fruit_usb_bridge.*` 不能被生成文件替换。协议包含
-`FruitDetection`、`Ack`、`Heartbeat` 和 `Handshake`，其中
-`FruitDetection` 业务字段只有 `fruit_id/status`，当前只更新
-`g_fruit_usb_debug`，不选择水果任务，也不控制底盘或机械臂。
+`protocol_port.*`、`fruit_usb_bridge.*` 和 `upper_controller_bridge.*` 不能被
+生成文件替换。新版协议无需强制握手且心跳非严格，但下位机仍观察连接状态；
+生成FSM负责心跳回包和入站可靠消息ACK，运行层不得重复回包。
+
+业务消息新增 `StateMachineCommand`、`ExecutionCallback`、`ArmTarget` 和
+`VelocityCommand`。在 `APP_MODE_HOST_CONTROL` 中，速度包转换为
+`vx_mm_s/wz_rad_s`后提交底盘；离散包控制ID2夹爪或双MG995。
+`ArmTarget`的米制相机坐标只进入`g_upper_controller_debug`，在固定外参和
+拍照姿态关联完成前不产生机械臂动作。`FruitDetection`仍只更新水果快照。
 
 ## 夹爪容错
 
@@ -135,7 +140,9 @@ ID2 默认/张开位置为 `450`，探测闭合目标为 `660`。接触后每次
 
 | 模式 | 作用 |
 |---|---|
-| `APP_MODE_ARM_POSTURE_TEST` | 当前默认，HOME后先执行左侧 `[0,340,-150] -> [0,480,-150]`，再执行右侧镜像路径并持续交替抓放 |
+| `APP_MODE_MG995_TEST` | 当前默认，只输出PI6/PI7双路PWM并保持两侧摄像头水平0deg |
+| `APP_MODE_HOST_CONTROL` | USB上位机控制底盘速度、ID2夹爪和双MG995；ArmTarget暂只观察 |
+| `APP_MODE_ARM_POSTURE_TEST` | HOME后先执行左侧 `[0,340,-150] -> [0,480,-150]`，再执行右侧镜像路径并持续交替抓放 |
 | `APP_MODE_ARM` | 底盘原地执行点1/点2无限交替抓放 |
 | `APP_MODE_CHASSIS_ONE_METER` | 应用层通过公共底盘接口复现1m/右转90/1m循环 |
 | `APP_MODE_HUANER_FEEDBACK` | 幻儿舵机反馈专项模式 |
@@ -161,5 +168,7 @@ ID2 默认/张开位置为 `450`，探测闭合目标为 `660`。接触后每次
 
 ## 验证边界
 
-本轮已执行 ARM GCC 严格语法检查和左右真实循环边界的主机轨迹回放；
-未运行 Keil 构建、未烧录，也没有替代实机验收。实时源码始终优先于文档。
+当前协议同步已通过 ARM GCC 严格语法检查；当前MG995模式和临时
+`APP_MODE_HOST_CONTROL`模式均通过Keil ArmCC 5全量构建，均为0错误0警告。
+最终AXF/HEX已恢复为MG995默认模式。未烧录，也没有替代USB、底盘、夹爪或
+摄像头的实机协议验收；实时源码始终优先于文档。

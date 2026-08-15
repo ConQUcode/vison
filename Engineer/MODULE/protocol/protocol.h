@@ -11,21 +11,21 @@
 /* USER CODE END Includes */
 
 // 协议哈希校验码
-#define PROTOCOL_HASH 0x0EBAB184
+#define PROTOCOL_HASH 0x2588BA9A
 
 // 校验算法: CRC8
 #define CHECKSUM_ALGO_CRC8 1
 
 // 握手配置
-#define CFG_REQUIRE_HANDSHAKE 1
+#define CFG_REQUIRE_HANDSHAKE 0
 #define CFG_IGNORE_VERSION_MISMATCH 0
 
-// 心跳配置
-#define CFG_ENABLE_HEARTBEAT 1
-#define CFG_STRICT_HEARTBEAT 1
+// 心跳配置（心跳始终开启，由 ROS 端周期发起，MCU 端由协议层自动回包）
+#define CFG_STRICT_HEARTBEAT 0
+#define CFG_HEARTBEAT_INTERVAL_MS 1000
 #define CFG_HEARTBEAT_TIMEOUT_MS 3000
 
-// 可靠传输配置
+// 可靠传输配置：MAX_RETRIES 是重复告警阈值，消息在收到 ACK 前持续重试
 #define CFG_RELIABLE_RETRY_INTERVAL_MS 100
 #define CFG_RELIABLE_MAX_RETRIES 3
 
@@ -40,6 +40,10 @@
 typedef enum
 {
     PACKET_ID_FRUITDETECTION = 16,
+    PACKET_ID_STATEMACHINECOMMAND = 17,
+    PACKET_ID_EXECUTIONCALLBACK = 18,
+    PACKET_ID_ARMTARGET = 19,
+    PACKET_ID_VELOCITYCOMMAND = 20,
     PACKET_ID_ACK = 253,
     PACKET_ID_HEARTBEAT = 254,
     PACKET_ID_HANDSHAKE = 255,
@@ -51,6 +55,32 @@ typedef struct
     uint8_t fruit_id;
     uint8_t status;
 } Packet_FruitDetection;
+
+typedef struct
+{
+    uint8_t task_id;
+    uint8_t task_status;
+} Packet_StateMachineCommand;
+
+typedef struct
+{
+    uint8_t callback_id;
+    uint8_t callback_status;
+} Packet_ExecutionCallback;
+
+typedef struct
+{
+    float target_x;
+    float target_y;
+    float target_z;
+    uint8_t z_type;
+} Packet_ArmTarget;
+
+typedef struct
+{
+    float linear_x;
+    float angular_z;
+} Packet_VelocityCommand;
 
 typedef struct
 {
@@ -77,6 +107,14 @@ void protocol_fsm_feed(uint8_t byte);
 // 用户可覆盖的接收回调与自动生成的发送函数声明
 void on_receive_FruitDetection(const Packet_FruitDetection *pkt);
 void send_FruitDetection(const Packet_FruitDetection *pkt);
+void on_receive_StateMachineCommand(const Packet_StateMachineCommand *pkt);
+void send_StateMachineCommand(const Packet_StateMachineCommand *pkt);
+void on_receive_ExecutionCallback(const Packet_ExecutionCallback *pkt);
+void send_ExecutionCallback(const Packet_ExecutionCallback *pkt);
+void on_receive_ArmTarget(const Packet_ArmTarget *pkt);
+void send_ArmTarget(const Packet_ArmTarget *pkt);
+void on_receive_VelocityCommand(const Packet_VelocityCommand *pkt);
+void send_VelocityCommand(const Packet_VelocityCommand *pkt);
 void on_receive_Ack(const Packet_Ack *pkt);
 void send_Ack(const Packet_Ack *pkt);
 void on_receive_Heartbeat(const Packet_Heartbeat *pkt);

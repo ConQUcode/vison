@@ -115,3 +115,11 @@
 - Full Keil rebuild with project-local TEMP/TMP compiled chassis.c and completed with 0 errors and 0 warnings. Fresh AXF/HEX/MAP/chassis.o were generated at 21:39; map removal of the unused velocity API is expected in the active no-chassis MG995 image.
 - Completed phase 18. No protocol packet was added, no firmware was flashed, and no chassis hardware motion was performed.
 - Final plan helper could not parse the repository's legacy `[complete]` phase markers and reported 18/0; logged this tooling-format limitation without rewriting the existing plan history. Source/build completion evidence is unaffected.
+- Started phase 19 after the user replaced the three generated upper-controller protocol files.
+- Audited the generated delta and existing protocol runtime, USB port, fruit bridge, chassis velocity API, MG995 interface, application mode gates, and Keil source entries.
+- Locked the integration boundary: generated files remain the wire-format source of truth; add a separate firmware bridge and host-control mode, preserve current MG995-only active mode, and defer all ArmTarget motion until camera extrinsics/capture pose are defined.
+- Added the protocol-policy adaptation, upper-controller bridge, host-control app mode, Keil source entry, and expanded strict syntax check. The first host-mode-specific pass found only an unused refreshed timestamp in `AppArmTask`; patched that isolated conditional branch.
+- Strict ARM GCC checks passed all generated protocol, runtime, bridge, chassis, arm, servo and application translation units, including a second `app_runtime.c` pass forced to host-control mode.
+- Full Keil rebuilds passed with ArmCC 5.06u7 at 0 errors and 0 warnings in both host-control mode and the restored MG995 default mode. The host map proved the velocity callback reaches `ChassisSubmitVelocityCommand` and the bridge Init/Task remain linked.
+- Updated README, HANDOFF, PROJECT_OVERVIEW, TUNING_GUIDE and FRUIT_TASK_FLOW to the new hash, packet set, runtime policy, bridge behavior, ArmTarget deferral and validation boundary.
+- Completed phase 19. Final AXF/HEX are MG995-mode artifacts; no firmware was flashed and no hardware protocol or motion test was performed.

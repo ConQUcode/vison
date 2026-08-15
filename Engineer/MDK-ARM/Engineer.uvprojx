@@ -1320,6 +1320,11 @@
               <FileType>1</FileType>
               <FilePath>..\APPLICATION\fruit_usb_bridge.c</FilePath>
             </File>
+            <File>
+              <FileName>upper_controller_bridge.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APPLICATION\upper_controller_bridge.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
