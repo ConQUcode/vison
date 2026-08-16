@@ -45,6 +45,7 @@
 #endif
 
 App_Arm_Teach_Debug_s g_app_arm_teach_debug;
+App_Arm_Bd_Observation_Debug_s g_app_arm_bd_observation_debug;
 
 #if APP_CHASSIS_ENABLED
 /* INS_Init 返回的姿态快照只由 INS 写、底盘读。 */
@@ -136,8 +137,214 @@ static void AppChassisOneMeterTestTask(uint32_t now_ms)
 }
 #endif
 
+#if APP_ARM_BD_OBSERVATION_TEST_ENABLED
+static void AppArmBdObservationUpdateWatch(
+    const Arm_Host_Status_s *host)
+{
+    float dx;
+    float dy;
+    float dz;
+
+    if (host == NULL) {
+        return;
+    }
+    g_app_arm_bd_observation_debug.host_ready = host->ready;
+    g_app_arm_bd_observation_debug.host_busy = host->busy;
+    g_app_arm_bd_observation_debug.command_state =
+        (uint32_t)(host->active_command_id ==
+            g_app_arm_bd_observation_debug.command_id ?
+            host->active_command_state : host->last_command_state);
+    g_app_arm_bd_observation_debug.fault_code = host->fault_code;
+    g_app_arm_bd_observation_debug.path_preflight_passed =
+        g_arm_motion_debug.path_preflight_passed;
+    g_app_arm_bd_observation_debug.trajectory_progress =
+        host->trajectory_progress;
+    for (uint8_t axis = 0u; axis < 3u; ++axis) {
+        g_app_arm_bd_observation_debug.actual_q_deg[axis] =
+            host->q_feedback_deg[axis];
+    }
+    g_app_arm_bd_observation_debug.actual_center_mm[0] =
+        host->tool_tip_mm.x_mm;
+    g_app_arm_bd_observation_debug.actual_center_mm[1] =
+        host->tool_tip_mm.y_mm;
+    g_app_arm_bd_observation_debug.actual_center_mm[2] =
+        host->tool_tip_mm.z_mm;
+    g_app_arm_bd_observation_debug.actual_tool_pitch_deg =
+        host->tool_pitch_feedback_deg;
+    dx = host->tool_tip_mm.x_mm -
+        g_app_arm_bd_observation_debug.target_center_mm[0];
+    dy = host->tool_tip_mm.y_mm -
+        g_app_arm_bd_observation_debug.target_center_mm[1];
+    dz = host->tool_tip_mm.z_mm -
+        g_app_arm_bd_observation_debug.target_center_mm[2];
+    g_app_arm_bd_observation_debug.center_error_mm =
+        sqrtf(dx * dx + dy * dy + dz * dz);
+    g_app_arm_bd_observation_debug.pitch_error_deg =
+        host->tool_pitch_feedback_deg -
+        g_app_arm_bd_observation_debug.target_tool_pitch_deg;
+}
+
+/** HOME完成后底座与主臂同步收拢转向，再沿侧面进入BD观察位并保持。 */
+static void AppArmBdObservationTask(uint32_t now_ms)
+{
+    Arm_Host_Status_s host;
+    Arm_Joint_Command_s joint_command;
+    Arm_Tool_Center_Command_s center_command;
+    Arm_Command_Result_e result;
+
+    if (ArmGetHostStatus(&host) == 0u) {
+        return;
+    }
+    AppArmBdObservationUpdateWatch(&host);
+    if (host.state == ARM_HOST_STATE_FAULT ||
+        host.state == ARM_HOST_STATE_ESTOP) {
+        g_app_arm_bd_observation_debug.state =
+            (uint8_t)APP_ARM_BD_OBSERVATION_FAILED;
+        g_app_arm_bd_observation_debug.state_tick_ms = now_ms;
+        return;
+    }
+
+    switch ((App_Arm_Bd_Observation_State_e)
+            g_app_arm_bd_observation_debug.state) {
+    case APP_ARM_BD_OBSERVATION_WAIT_READY:
+        if (host.ready == 0u || host.busy != 0u) {
+            break;
+        }
+        if (g_app_arm_bd_observation_debug.base_command_id == 0u) {
+            g_app_arm_bd_observation_debug.base_command_id =
+                AppArmCommandIdNext();
+        }
+        memset(&joint_command, 0, sizeof(joint_command));
+        joint_command.command_id =
+            g_app_arm_bd_observation_debug.base_command_id;
+        joint_command.move_type = ARM_MOVE_LINEAR;
+        memcpy(joint_command.q_deg, host.q_feedback_deg,
+               sizeof(joint_command.q_deg));
+        joint_command.q_deg[ARM_JOINT_BASE_YAW] =
+            APP_ARM_BD_OBSERVATION_BASE_Q1_DEG;
+        joint_command.q_deg[ARM_JOINT_SHOULDER] =
+            APP_ARM_BD_OBSERVATION_STAGING_Q2_DEG;
+        joint_command.q_deg[ARM_JOINT_ELBOW] =
+            APP_ARM_BD_OBSERVATION_STAGING_Q3_DEG;
+        joint_command.tool_relative_pitch_valid = 1u;
+        joint_command.tool_relative_pitch_deg =
+            APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG -
+            ArmToolSmallLinkPitchFromJoint(joint_command.q_deg);
+        g_app_arm_bd_observation_debug.command_id =
+            joint_command.command_id;
+        memcpy(g_app_arm_bd_observation_debug.base_target_q_deg,
+               joint_command.q_deg, sizeof(joint_command.q_deg));
+        g_app_arm_bd_observation_debug.base_tool_relative_pitch_deg =
+            joint_command.tool_relative_pitch_deg;
+        result = ArmSubmitJointCommand(&joint_command);
+        g_app_arm_bd_observation_debug.submit_result = (uint32_t)result;
+        if (result == ARM_COMMAND_OK) {
+            g_app_arm_bd_observation_debug.state =
+                (uint8_t)APP_ARM_BD_OBSERVATION_BASE_SUBMITTED;
+            g_app_arm_bd_observation_debug.state_tick_ms = now_ms;
+        } else if (result != ARM_COMMAND_BUSY &&
+                   result != ARM_COMMAND_NOT_READY) {
+            g_app_arm_bd_observation_debug.state =
+                (uint8_t)APP_ARM_BD_OBSERVATION_FAILED;
+            g_app_arm_bd_observation_debug.state_tick_ms = now_ms;
+        }
+        break;
+
+    case APP_ARM_BD_OBSERVATION_BASE_SUBMITTED:
+        if (host.last_command_id !=
+            g_app_arm_bd_observation_debug.base_command_id) {
+            break;
+        }
+        g_app_arm_bd_observation_debug.submit_result =
+            (uint32_t)host.last_command_result;
+        g_app_arm_bd_observation_debug.command_state =
+            (uint32_t)host.last_command_state;
+        if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+            host.last_command_result == ARM_COMMAND_OK) {
+            g_app_arm_bd_observation_debug.state =
+                (uint8_t)APP_ARM_BD_OBSERVATION_SUBMIT_TARGET;
+            g_app_arm_bd_observation_debug.state_tick_ms = now_ms;
+        } else if (host.last_command_state == ARM_COMMAND_STATE_REJECTED ||
+                   host.last_command_state == ARM_COMMAND_STATE_CANCELLED ||
+                   host.last_command_state == ARM_COMMAND_STATE_FAULTED) {
+            g_app_arm_bd_observation_debug.state =
+                (uint8_t)APP_ARM_BD_OBSERVATION_FAILED;
+            g_app_arm_bd_observation_debug.state_tick_ms = now_ms;
+        }
+        break;
+
+    case APP_ARM_BD_OBSERVATION_SUBMIT_TARGET:
+        if (host.ready == 0u || host.busy != 0u) {
+            break;
+        }
+        if (g_app_arm_bd_observation_debug.target_command_id == 0u) {
+            g_app_arm_bd_observation_debug.target_command_id =
+                AppArmCommandIdNext();
+        }
+        memset(&center_command, 0, sizeof(center_command));
+        center_command.command_id =
+            g_app_arm_bd_observation_debug.target_command_id;
+        center_command.move_type = ARM_MOVE_LINEAR;
+        center_command.target_center_mm.x_mm =
+            APP_ARM_BD_OBSERVATION_X_MM;
+        center_command.target_center_mm.y_mm =
+            APP_ARM_BD_OBSERVATION_Y_MM;
+        center_command.target_center_mm.z_mm =
+            APP_ARM_BD_OBSERVATION_Z_MM;
+        center_command.max_speed_mm_s =
+            APP_ARM_BD_OBSERVATION_SPEED_MM_S;
+        center_command.tool_pitch_valid = 1u;
+        center_command.tool_pitch_deg =
+            APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG;
+        g_app_arm_bd_observation_debug.command_id =
+            center_command.command_id;
+        result = ArmSubmitToolCenterCommand(&center_command);
+        g_app_arm_bd_observation_debug.submit_result = (uint32_t)result;
+        if (result == ARM_COMMAND_OK) {
+            g_app_arm_bd_observation_debug.state =
+                (uint8_t)APP_ARM_BD_OBSERVATION_TARGET_SUBMITTED;
+            g_app_arm_bd_observation_debug.state_tick_ms = now_ms;
+        } else if (result != ARM_COMMAND_BUSY &&
+                   result != ARM_COMMAND_NOT_READY) {
+            g_app_arm_bd_observation_debug.state =
+                (uint8_t)APP_ARM_BD_OBSERVATION_FAILED;
+            g_app_arm_bd_observation_debug.state_tick_ms = now_ms;
+        }
+        break;
+
+    case APP_ARM_BD_OBSERVATION_TARGET_SUBMITTED:
+        if (host.last_command_id !=
+            g_app_arm_bd_observation_debug.target_command_id) {
+            break;
+        }
+        g_app_arm_bd_observation_debug.submit_result =
+            (uint32_t)host.last_command_result;
+        g_app_arm_bd_observation_debug.command_state =
+            (uint32_t)host.last_command_state;
+        if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+            host.last_command_result == ARM_COMMAND_OK) {
+            g_app_arm_bd_observation_debug.state =
+                (uint8_t)APP_ARM_BD_OBSERVATION_HOLDING;
+            g_app_arm_bd_observation_debug.state_tick_ms = now_ms;
+        } else if (host.last_command_state == ARM_COMMAND_STATE_REJECTED ||
+                   host.last_command_state == ARM_COMMAND_STATE_CANCELLED ||
+                   host.last_command_state == ARM_COMMAND_STATE_FAULTED) {
+            g_app_arm_bd_observation_debug.state =
+                (uint8_t)APP_ARM_BD_OBSERVATION_FAILED;
+            g_app_arm_bd_observation_debug.state_tick_ms = now_ms;
+        }
+        break;
+
+    case APP_ARM_BD_OBSERVATION_HOLDING:
+    case APP_ARM_BD_OBSERVATION_FAILED:
+    default:
+        break;
+    }
+}
+#endif
+
 #if APP_ARM_POSTURE_TEST_ENABLED
-/** 当前台架调用者只负责在公共单侧任务完成后提交另一侧。 */
+/** AC区台架测试在公共单侧任务完成后提交另一侧，持续左右交替。 */
 static void AppArmPostureTestTask(uint32_t now_ms)
 {
     App_Arm_Side_Pick_Place_Status_e status =
@@ -278,6 +485,22 @@ void AppInit(void)
     AppArmSidePickPlaceInit();
     (void)AppArmSidePickPlaceStart(APP_FRUIT_SIDE_LEFT, HAL_GetTick());
     ArmInit();
+#elif APP_ARM_BD_OBSERVATION_TEST_ENABLED
+    memset(&g_app_arm_bd_observation_debug, 0,
+           sizeof(g_app_arm_bd_observation_debug));
+    g_app_arm_bd_observation_debug.state =
+        (uint8_t)APP_ARM_BD_OBSERVATION_WAIT_READY;
+    g_app_arm_bd_observation_debug.target_center_mm[0] =
+        APP_ARM_BD_OBSERVATION_X_MM;
+    g_app_arm_bd_observation_debug.target_center_mm[1] =
+        APP_ARM_BD_OBSERVATION_Y_MM;
+    g_app_arm_bd_observation_debug.target_center_mm[2] =
+        APP_ARM_BD_OBSERVATION_Z_MM;
+    g_app_arm_bd_observation_debug.target_tool_pitch_deg =
+        APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG;
+    g_app_arm_bd_observation_debug.target_speed_mm_s =
+        APP_ARM_BD_OBSERVATION_SPEED_MM_S;
+    ArmInit();
 #elif APP_HUANER_FEEDBACK_ENABLED
     if (HuanerServoInit() != 0u) {
         app_huaner_next_id = 1u;
@@ -325,6 +548,8 @@ void AppArmTask(uint32_t now_ms)
 #endif
 #elif APP_ARM_POSTURE_TEST_ENABLED
     AppArmPostureTestTask(now_ms);
+#elif APP_ARM_BD_OBSERVATION_TEST_ENABLED
+    AppArmBdObservationTask(now_ms);
 #elif APP_ARM_TEACH_POINT_ENABLED
     (void)now_ms;
     AppArmTeachPointUpdate();

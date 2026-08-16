@@ -7,23 +7,28 @@
 `Engineer/APPLICATION/app_config.h` 当前为：
 
 ```c
-#define APP_MODE APP_MODE_MG995_TEST
+#define APP_MODE APP_MODE_ARM_BD_OBSERVATION_TEST
 #define APP_ARM_TOOL_CENTER_TEST_ENABLE 1u
 ```
 
-当前只启动 TIM8 的两路MG995 PWM：右侧为 `PI6/TIM8_CH2`，左侧为
-`PI7/TIM8_CH3`。舵机 `90 deg` 定义为摄像头水平 `0 deg`；当前两侧摄像头
-均恢复到水平 `0 deg`，左右舵机均为 `90 deg/1500 us`。机械臂、
-底盘和IMU应用模块不初始化，DM/DJI周期控制入口为空操作。
+当前模式在正常 HOME 后先同步移动到 `q=[-90,120,-48] deg` 的紧凑
+右侧过渡姿态，再以 `150 mm/s` 单次移动到 BD 区右侧树上水果观察位
+并保持。最终夹爪中心为 `[0,-57,210] mm`，世界绝对俯仰为 `-30 deg`；
+两段离线回放最大 `|Y|=231.470 mm`，低于 `260 mm` 限制。该模式不运行
+底盘、不闭合夹爪、不进入AC抓放循环。
 
-切回 `APP_MODE_ARM_POSTURE_TEST` 后，机械臂仍按先左后右、只对Y取负的
+BD左右观察点均已显式保存：LEFT为`q1=+90deg/[0,+57,210]mm`，
+RIGHT为`q1=-90deg/[0,-57,210]mm`。当前
+`APP_ARM_BD_OBSERVATION_ACTIVE_SIDE=RIGHT`，每次离线回放会同时验证两侧。
+
+保留的 `APP_MODE_ARM_POSTURE_TEST` 仍按先左后右、只对Y取负的
 已验证路径运行：
 
 ```text
-左侧=[0,340,-150] -> [0,480,-150] mm
-右侧=[0,-340,-150] -> [0,-480,-150] mm
+左侧=[0,380,-150] -> [0,480,-150] mm
+右侧=[0,-380,-150] -> [0,-480,-150] mm
 两侧世界绝对俯仰=-5 deg
-请求速度=100 mm/s
+接近点=600 mm/s，最后100 mm推进=150 mm/s
 左抓取/A左放置 -> 返回前方 -> 右抓取/A右放置 -> 返回前方 -> 重复
 ```
 
@@ -147,9 +152,10 @@ ID2 默认/张开位置为 `450`，探测闭合目标为 `660`。接触后每次
 
 | 模式 | 作用 |
 |---|---|
-| `APP_MODE_MG995_TEST` | 当前默认，只输出PI6/PI7双路PWM并保持两侧摄像头水平0deg |
+| `APP_MODE_ARM_BD_OBSERVATION_TEST` | 当前默认，HOME后单次到BD右观察位并保持 |
+| `APP_MODE_MG995_TEST` | 只输出PI6/PI7双路PWM并保持两侧摄像头水平0deg |
 | `APP_MODE_HOST_CONTROL` | USB上位机控制底盘速度、ID2夹爪和双MG995；ArmTarget暂只观察 |
-| `APP_MODE_ARM_POSTURE_TEST` | HOME后先执行左侧 `[0,340,-150] -> [0,480,-150]`，再执行右侧镜像路径并持续交替抓放 |
+| `APP_MODE_ARM_POSTURE_TEST` | HOME后先执行左侧 `[0,380,-150] -> [0,480,-150]`，再执行右侧镜像路径并持续交替抓放 |
 | `APP_MODE_ARM` | 底盘原地执行点1/点2无限交替抓放 |
 | `APP_MODE_CHASSIS_ONE_METER` | 应用层通过公共底盘接口复现1m/右转90/1m循环 |
 | `APP_MODE_HUANER_FEEDBACK` | 幻儿舵机反馈专项模式 |
@@ -157,7 +163,8 @@ ID2 默认/张开位置为 `450`，探测闭合目标为 `660`。接触后每次
 
 ## 常用 Watch
 
-- `g_app_arm_posture_test_debug`：点1测试状态、坐标/关节目标与反馈、绝对俯仰误差和命令结果。
+- `g_app_arm_bd_observation_debug`：BD右观察位状态、实际坐标/关节/俯仰、误差和路径预检。
+- `g_app_arm_posture_test_debug`：AC左右抓放状态、坐标/关节目标与反馈、绝对俯仰误差和命令结果。
 - `g_app_arm_command_id_debug`：公共机械臂命令ID种子、最后发放值、发放次数和回绕次数。
 - `g_app_fruit_task_debug`：当前区域、侧别、点位、任务索引、距离和唯一失败来源。
 - `g_chassis_debug`：公共状态、命令ID、目标/实测距离、故障、PID和轮速。
@@ -178,7 +185,8 @@ ID2 默认/张开位置为 `450`，探测闭合目标为 `660`。接触后每次
 ## 验证边界
 
 当前协议、桥接和坐标变换已通过 ARM GCC 严格语法检查，坐标变换29项离线
-检查全部通过；当前MG995模式和临时`APP_MODE_HOST_CONTROL`模式均通过
-Keil ArmCC 5全量构建，均为0错误0警告，host模式MAP确认ArmTarget调用变换
-模块。最终AXF/HEX已恢复为MG995默认模式。未烧录、未标定相机外参，也没有
+检查全部通过；MG995模式和临时`APP_MODE_HOST_CONTROL`模式的历史构建
+均为Keil ArmCC 5全量构建0错误0警告，host模式MAP确认ArmTarget调用变换
+模块。最新AXF/HEX为BD右观察位默认模式，同样0错误0警告。未烧录、
+未标定相机外参，也没有
 替代USB、底盘、夹爪、摄像头或机械臂的实机验收。

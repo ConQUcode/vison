@@ -23,6 +23,11 @@
 #define ARM_AXIS_COUNT  3u
 #define ARM_AXIS_NONE   0xffu
 #define ARM_AUTO_INIT_ARM_AXIS_COUNT 2u
+#if ARM_BOOT_MODE == ARM_BOOT_MODE_TEACH_POINT
+#define ARM_NORMAL_BOOT_ONLY __attribute__((unused))
+#else
+#define ARM_NORMAL_BOOT_ONLY
+#endif
 
 typedef struct {
     DM_MotorInstance *motor;
@@ -88,6 +93,10 @@ static Arm_Command_Mailbox_s arm_command_mailbox;
 static uint8_t ArmCommandPose(const float pose_q_deg[3],
                               float speed_deg_s,
                               uint8_t allow_escape);
+static uint8_t ArmCommandPoseWithAxisSpeeds(
+    const float pose_q_deg[3],
+    const float speed_deg_s[3],
+    uint8_t allow_escape);
 static uint8_t ArmSetJointCommandForPose(uint8_t axis,
                                          float target_deg,
                                          const float pose_q_deg[3],
@@ -424,7 +433,8 @@ static uint8_t ArmAnyTxFault(void)
     return 0u;
 }
 
-static uint8_t ArmAnyPreviouslySeenMotorOffline(uint32_t now_ms)
+static uint8_t ARM_NORMAL_BOOT_ONLY
+ArmAnyPreviouslySeenMotorOffline(uint32_t now_ms)
 {
     uint8_t axis;
 
@@ -645,16 +655,29 @@ static uint8_t ArmCommandPose(const float pose_q_deg[3],
                               float speed_deg_s,
                               uint8_t allow_escape)
 {
+    const float axis_speed_deg_s[3] = {
+        speed_deg_s, speed_deg_s, speed_deg_s
+    };
+
+    return ArmCommandPoseWithAxisSpeeds(
+        pose_q_deg, axis_speed_deg_s, allow_escape);
+}
+
+static uint8_t ArmCommandPoseWithAxisSpeeds(
+    const float pose_q_deg[3],
+    const float speed_deg_s[3],
+    uint8_t allow_escape)
+{
     uint8_t axis;
 
-    if (pose_q_deg == NULL || !isfinite(speed_deg_s) ||
-        speed_deg_s <= 0.0f) {
+    if (pose_q_deg == NULL || speed_deg_s == NULL) {
         return 0u;
     }
     for (axis = 0u; axis < ARM_AXIS_COUNT; ++axis) {
         Arm_Limit_Result_e target_limit;
 
-        if (!isfinite(pose_q_deg[axis])) {
+        if (!isfinite(pose_q_deg[axis]) ||
+            !isfinite(speed_deg_s[axis]) || speed_deg_s[axis] <= 0.0f) {
             return 0u;
         }
         target_limit = ArmCheckLimit(axis, pose_q_deg[axis]);
@@ -666,7 +689,7 @@ static uint8_t ArmCommandPose(const float pose_q_deg[3],
     }
     for (axis = 0u; axis < ARM_AXIS_COUNT; ++axis) {
         if (!ArmSetJointCommandForPose(axis, pose_q_deg[axis], pose_q_deg,
-                                       speed_deg_s, allow_escape)) {
+                                       speed_deg_s[axis], allow_escape)) {
             return 0u;
         }
     }
@@ -1435,7 +1458,7 @@ static void ArmSetBootState(Arm_Boot_State_e state, uint32_t now_ms)
     g_arm_boot_debug.elapsed_ms = 0u;
 }
 
-static void ArmProcessBootSequence(uint32_t now_ms)
+static void ARM_NORMAL_BOOT_ONLY ArmProcessBootSequence(uint32_t now_ms)
 {
     g_arm_boot_debug.elapsed_ms =
         (uint32_t)(now_ms - g_arm_boot_debug.state_tick);
@@ -2044,6 +2067,11 @@ uint8_t ArmBeginJointMove(const float target_q_deg[3])
 
 uint8_t ArmUpdateJointReference(const float reference_q_deg[3])
 {
+    static const float command_speed_deg_s[3] = {
+        ARM_JOINT_Q1_COMMAND_SPEED_DEG_S,
+        ARM_JOINT_Q2_COMMAND_SPEED_DEG_S,
+        ARM_JOINT_Q3_COMMAND_SPEED_DEG_S
+    };
     uint8_t control_mode_ready = g_arm_state.mode == ARM_MODE_READY;
 
 #if ARM_BOOT_MODE == ARM_BOOT_MODE_DM_SINGLE_AXIS_TEST
@@ -2056,7 +2084,8 @@ uint8_t ArmUpdateJointReference(const float reference_q_deg[3])
         !ArmJointPoseWithinSoftLimits(reference_q_deg)) {
         return 0u;
     }
-    return ArmCommandPose(reference_q_deg, ARM_JOINT_COMMAND_SPEED_DEG_S, 0u);
+    return ArmCommandPoseWithAxisSpeeds(
+        reference_q_deg, command_speed_deg_s, 0u);
 }
 
 uint8_t ArmSetJointTargetDeg(float q1_deg, float q2_deg, float q3_deg)

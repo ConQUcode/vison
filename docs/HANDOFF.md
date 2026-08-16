@@ -27,15 +27,29 @@ Engineer/APPLICATION/upper_controller_bridge.c
 当前立即状态：
 
 ```text
-默认APP_MODE              APP_MODE_MG995_TEST
-默认实际运行              仅PI6/PI7双MG995保持摄像头水平0deg
+默认APP_MODE              APP_MODE_ARM_BD_OBSERVATION_TEST
+默认实际运行              HOME后单次到BD右侧树上观察位并保持
+BD活动侧                  APP_ARM_BD_OBSERVATION_SIDE_RIGHT
 相机外参启用              CAMERA_TARGET_DEFAULT_CALIBRATED=0
 ArmTarget坐标算法          已完成并接入观察链
 ArmTarget机械臂动作        明确禁止
-最终AXF/HEX                MG995默认模式，Keil 0错误0警告
+最终AXF/HEX                BD右观察位模式，Keil 0错误0警告
 ```
 
-下一个明确任务是填写末端摄像头标定数据。用户需要提供：
+当前等待实机确认 BD 区右侧树上观察路径：HOME 后同步进入
+`q=[-90,120,-48] deg`，再以 `150 mm/s` 到夹爪中心
+`[0,-57,210] mm`、世界绝对俯仰 `-30 deg`。离线回放得到两段最大
+`|Y|=231.470 mm`，低于 `260 mm` 限制。确认该路径后再继续左右选边、
+机械臂摄像头二次定位、抓取点和放置路线；不得为测试 BD 区覆盖已验证的
+AC 区参数。
+
+BD左右观察点已分别保存在`app_config.h`，不是通过覆盖同一个坐标切换：
+LEFT为`q1=+90deg/[0,+57,210]mm`，RIGHT为
+`q1=-90deg/[0,-57,210]mm`。当前
+`APP_ARM_BD_OBSERVATION_ACTIVE_SIDE=RIGHT`；两侧回放均通过。这里只是
+树上观察位，BD完整抓取点、分段速度和放置profile仍未配置。
+
+另一项保留待办是填写末端摄像头标定数据。用户需要提供：
 
 1. 摄像头装在ID1之前（固定小臂）还是ID1之后（随夹爪俯仰）。
 2. 上位机发送的相机C-X、C-Y、C-Z各自物理方向和单位。
@@ -55,27 +69,41 @@ ArmTarget机械臂动作        明确禁止
 
 ## 1. 当前默认行为
 
-`APP_MODE=APP_MODE_MG995_TEST`。当前只运行两只MG995摄像头水平0deg测试：
+`APP_MODE=APP_MODE_ARM_BD_OBSERVATION_TEST`。当前正常 HOME 后只运行
+BD 区右侧树上水果观察位单次测试：
 
 ```text
-右侧MG995：PI6 / TIM8_CH2 / 1500 us / 舵机90 deg / 摄像头0 deg
-左侧MG995：PI7 / TIM8_CH3 / 1500 us / 舵机90 deg / 摄像头0 deg
-机械臂、底盘、IMU、USB业务：不初始化、不提交动作
+第一段同步关节目标：[-90,120,-48] deg
+第一段ID1相对小臂俯仰：-18 deg
+过渡点夹爪中心：约[0,-225.643,174.610] mm
+第一段工具中心最大|Y|：231.470 mm（限制260 mm）
+最终夹爪中心：[0,-57,210] mm
+最终夹爪世界绝对俯仰：-30 deg
+请求速度：150 mm/s
+执行语义：只提交一次，到位后保持，不运行底盘、夹爪或AC循环
 ```
 
-MG995由 `mg995_servo.c/.h` 控制；`g_mg995_servo_debug.state` 应为
+终点静态IK预检结果约为 `q=[-90.000,168.151,-47.928] deg`，ID1相对
+小臂约 `-66.079 deg`，在可用限位内。实际路径在下位机提交时继续执行全路径
+IK、软限位、工作区和ID1可达性预检；失败时拒绝命令且不自动重试。
+看 `g_app_arm_bd_observation_debug`：`state=4` 表示到位保持，`state=5`
+表示失败，同时查看 `base_target_q_deg`、`base_tool_relative_pitch_deg`、
+`actual_center_mm`、`actual_tool_pitch_deg`、
+`actual_q_deg`、`center_error_mm`、`pitch_error_deg` 和 `path_preflight_passed`。
+
+MG995台架模式仍保留，切到 `APP_MODE_MG995_TEST` 后由
+`mg995_servo.c/.h` 控制；`g_mg995_servo_debug.state` 应为
 `MG995_SERVO_STATE_READY`，`initialized=1`；左右摄像头角度均为`0 deg`，
 两侧均为`pulse_us=1500/angle_deg=90`。
 MG995必须使用独立5~6V大电流供电并与STM32共地。
 
-机械臂侧向夹爪左右镜像交替抓放代码保留；切回
-`APP_MODE_ARM_POSTURE_TEST` 后固定先抓左侧，再抓右侧并持续循环：
+保留的 `APP_MODE_ARM_POSTURE_TEST` 固定先抓AC左侧，再抓右侧并持续循环：
 
 ```text
-左侧：夹爪中心=[0,340,-150] -> [0,480,-150] mm
-右侧：夹爪中心=[0,-340,-150] -> [0,-480,-150] mm
+左侧：夹爪中心=[0,380,-150] -> [0,480,-150] mm
+右侧：夹爪中心=[0,-380,-150] -> [0,-480,-150] mm
 两侧夹爪世界绝对俯仰=-5 deg
-请求速度=100 mm/s
+接近点请求速度=600 mm/s，最后100 mm推进速度=150 mm/s
 左抓取/A左放置 -> 返回前方 -> 右抓取/A右放置 -> 返回前方 -> 重复
 ```
 
@@ -85,12 +113,13 @@ MG995必须使用独立5~6V大电流供电并与STM32共地。
 反馈姿态并覆盖 `q1` 会保留释放后的 `q2/q3=[120,-80] deg`，并在下一侧
 工具中心直线的首个采样点触发前方栏框保护。
 
-Watch 主要使用 `g_app_arm_posture_test_debug`。该模式不运行底盘任务、
-不调用 `AppFruitTask()`，但会闭合ID2并按当前侧显式复用A左/A右放置profile。
+Watch 主要使用 `g_app_arm_posture_test_debug`。该模式现定义为 AC 区专项，
+不运行底盘任务、不调用 `AppFruitTask()`，但会闭合ID2并按当前侧显式复用
+已验证的A左/A右放置profile。
 `active_side=1/2`分别表示左/右；另有总计和左右完成次数。正式点1/点2及
 带底盘任务表未修改，恢复 `APP_MODE_ARM` 后继续使用。
 
-完整单侧动作已经迁入 `app_arm_side_pick_place.c/.h`：调用
+AC区完整单侧动作已经迁入 `app_arm_side_pick_place.c/.h`：调用
 `AppArmSidePickPlaceStart(APP_FRUIT_SIDE_LEFT, now_ms)` 会完成左侧准备、
 接近、推进、抓取、A左释放和回正；RIGHT同理使用镜像路径和A右profile。
 接口为非阻塞命令，1ms机械臂应用任务必须持续调用
@@ -98,7 +127,9 @@ Watch 主要使用 `g_app_arm_posture_test_debug`。该模式不运行底盘任�
 切换另一侧；当前持续交替仅由 `app_runtime.c` 在收到 `DONE` 后提交下一侧。
 运行中重复提交返回 `BUSY`，非法侧别返回 `INVALID_SIDE`，明确故障锁存
 `FAILED`。新版协议尚未定义左右侧完整抓放命令，因此该接口当前仍只供专项
-测试调用；后续增加侧别消息时应直接调用它，不复制内部状态机。
+测试调用；后续增加AC区侧别消息时应直接调用它，不复制内部状态机。BD区
+目前已保存左右两个独立观察位，完整抓取坐标、分段速度和放置profile仍未配置，
+不能覆盖AC参数。
 
 完整上电初始化顺序为 `q2大臂+q3小臂同步 -> q1底座 -> ID1/ID2`。三台
 达妙会先使能并原位保持；q2/q3由同一联合位姿命令驱动，耦合补偿仍生效。
@@ -117,12 +148,12 @@ A区共8个水果，沿行进方向4组、每组左右各1个。启动区边界�
 
 | 文件 | 当前职责 |
 |---|---|
-| `app_runtime.c` | 初始化和FreeRTOS包装入口 |
+| `app_runtime.c` | 初始化、FreeRTOS包装入口和BD右观察位单次状态机 |
 | `MODULE/servo/mg995_servo.c/.h` | TIM8双路MG995角度/PWM控制和Watch |
 | `app_fruit_task.c/.h` | A区静态任务表、区域/侧别/点位和调度失败锁存 |
 | `app_fruit_task_config.h` | A区距离、工具中心抓取点和左右放置参数 |
 | `app_arm_flow.c/.h` | 单次工具中心坐标抓取和显式profile放置 |
-| `app_arm_side_pick_place.c/.h` | 可供上位机调度的LEFT/RIGHT单侧完整抓放命令 |
+| `app_arm_side_pick_place.c/.h` | AC区LEFT/RIGHT单侧完整抓放命令；BD不复用该入口 |
 | `app_arm_command_id.c/.h` | 固件内部机械臂命令ID的唯一分配器 |
 | `arm/` | 主臂、工具、轨迹、运动学和安全保护 |
 | `chassis/chassis.c/.h` | 通用相对运动命令执行器 |
@@ -195,8 +226,8 @@ ID2 默认/张开 `450`，探测闭合 `660`。接触后每次回退 `10`，最�
 平移时捕获新的当前航向。300ms未刷新会平滑停车到`CANCELLED`，不锁存
 通信故障；电机/IMU离线和急停仍进入`FAULT`。新版 `VelocityCommand` 已由
 `upper_controller_bridge.c` 转换为该公共速度接口；
-只有切到 `APP_MODE_HOST_CONTROL` 才初始化USB、底盘和IMU。当前默认MG995模式
-仍不会初始化底盘。
+只有切到 `APP_MODE_HOST_CONTROL` 才初始化USB、底盘和IMU。当前默认
+BD右观察位专项模式也不会初始化底盘。
 
 速度接口初始限制为`|vx|<=200 mm/s`、`|wz|<=0.8 rad/s`。左右轮按
 `vl=vx-wz*L/2`、`vr=vx+wz*L/2`换算；任一轮超过0.35m/s时两侧按相同
@@ -293,12 +324,13 @@ CAN1/CAN2 均为 1 Mbps。机械臂 HOME 为 `q=[0,90,-60] deg`，主臂连杆
 ## 10. 构建和验证边界
 
 新版协议、桥接层和坐标变换已通过 ARM GCC 严格语法检查；坐标变换的29项
-离线检查全部通过。当前MG995模式及临时`APP_MODE_HOST_CONTROL`模式均通过
-Keil ArmCC 5全量构建，0错误0警告，host模式MAP确认ArmTarget调用变换模块；
-最终AXF/HEX已恢复为当前MG995默认模式。未烧录，也未进行相机外参标定、
+离线检查全部通过。MG995模式及临时`APP_MODE_HOST_CONTROL`模式的历史
+构建均为Keil ArmCC 5全量构建0错误0警告，host模式MAP确认ArmTarget
+调用变换模块。最新有效AXF/HEX为 BD 右观察位专项模式，同样0错误0警告。
+未烧录，也未进行相机外参标定、
 拍照姿态关联、上位机、底盘、夹爪、摄像头或ArmTarget实机验收。
 
-当前默认MG995模式不运行底盘或机械臂，只验收PI6/PI7双摄像头舵机水平0deg。
+当前默认 BD 右观察位专项模式不运行底盘或夹爪，用于验收单次到位并保持。
 切到`APP_MODE_ARM`后，才验收底盘保持不动、点1 `[0,400,-100]` 与点2
 `[0,-400,-100]` 完整抓放并持续交替；抓取时ID1绝对俯仰应为`-90 deg`。
 关闭原地交替开关并恢复场地路线后，再按

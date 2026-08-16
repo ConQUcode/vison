@@ -1,5 +1,23 @@
 # Progress
 
+- 2026-08-16：开始阶段23。诊断第一段仅转底座导致工具中心Y从0上升到约326.5mm；将搜索并验证Y全程不超过260mm的同步臂关节过渡姿态。
+- 2026-08-16：源码确认第一段只覆盖q1；锁定最小改动为同步设置过渡q2/q3/ID1并保留第二段工具中心直线状态机。
+
+- 2026-08-16：开始阶段22。将默认固件从打点模式切换为BD左侧观察点执行模式，目标参数保持阶段21验证值不变。
+- 2026-08-16：阶段22模式/点位复核、`git diff --check`和ARM GCC严格检查通过，准备Keil全量重建BD执行固件。
+- 2026-08-16：阶段22完成。Keil全量重建BD执行固件为0错误0警告，AXF/HEX/MAP于22:01更新；未烧录、未执行机械臂实测。
+
+- 2026-08-16：开始阶段21。目标为BD左侧观察点`[0,57,210] mm`、绝对俯仰`-30deg`、底座朝左；保持`APP_MODE_ARM_TEACH_POINT`，先做实时源码与完整轨迹校验。
+- 2026-08-16：已核对实时默认模式、旧BD参数、朝左`q1=+90deg`预对准及打点模式执行边界；确认轨迹层已有全候选动态规划用于径向过零分支连续性。
+- 2026-08-16：已确认BD执行顺序为HOME后先底座朝左、再从真实反馈姿态提交带绝对俯仰的工具中心直线命令；本轮不改该状态机。
+- 2026-08-16：选定现有`tools/arm_path_replay`作为源码等价的完整路径验证入口，拟临时加入BD用例、运行后撤掉临时代码。
+- 2026-08-16：锁定BD直线路径的理论起点为`q=[90,90,-60]deg`、绝对俯仰`-30deg`，并核对实时关节/ID1/相邻采样限制。
+- 2026-08-16：临时BD完整路径回放通过，282点、终点`q=[90.000,168.151,-47.928]deg`；继续提取全程关节、ID1和单步余量。
+- 2026-08-16：完整路径余量通过；撤销临时回放代码并删除专用CSV，正式把BD参数改为`[0,57,210]mm/-30deg`，保持`q1=+90deg`、`150mm/s`和打点模式。
+- 2026-08-16：正式配置/模式复核、`git diff --check`和ARM GCC严格检查均通过；待执行Keil打点固件全量重建。
+- 2026-08-16：首次Keil调用参数与当天成功方式不一致并等待无进展；已只终止本次子进程，定位正确方式为`MDK-ARM/tmp/-cr/-j0`并准备重试。
+- 2026-08-16：阶段21完成。正确参数下Keil全量重建为0错误0警告，AXF/HEX/MAP于21:55更新；最终仍为打点固件，未烧录、未执行BD机械臂运动。
+
 ## 2026-08-14
 
 - Started source audit for the `-480` one-shot pick/place test and shoulder-first power-on initialization.
@@ -129,3 +147,13 @@
 - All 29 offline transform checks passed, including X/Y/Z rotations and left/right symmetry. Strict ARM GCC checks passed every configured unit.
 - Full Keil rebuilds passed with 0 errors and 0 warnings in temporary host-control mode and restored MG995 mode. The host MAP links `on_receive_ArmTarget` to `CameraTargetTransformLatest`; final AXF/HEX are MG995 mode. No flashing or camera/arm hardware validation was performed.
 - Completed phase 20.
+- Phase 23继续：复核关节轨迹和ID1插值语义，确认可用单个同步q1/q2/q3目标实现底座与小臂协同；开始离线搜索满足工具中心Y上限且可连续进入BD目标的过渡姿态。
+- Phase 23实现：BD第一段改为同步目标`q=[90,120,-48]deg`并由ID1保持`-18deg`相对俯仰；现有回放工具新增两段逐采样Y上限和完整IK连续性检查，临时候选搜索源码已删除。
+- Phase 23验证完成：BD两段回放最大`|Y|=231.470mm < 260mm`、最终解`q=[90.000,168.151,-47.928]deg`；原AC回放、ARM GCC严格检查和`git diff --check`均通过。
+- Keil全量重建`arm_bd_coordinated_y260_rebuild_20260816.log`通过，0错误0警告，新AXF/HEX/MAP于22:20生成；未烧录、未做机械臂实机验证。Phase 23完成。
+- Phase 24开始：按用户要求把默认BD观测从左侧镜像到右侧，计划只修改BD方向参数和当前模式文档，复用现有状态机、轨迹安全层与回放约束。
+- Phase 24实现并验证完成：默认BD方向改为`q1=-90deg`、目标`[0,-57,210]mm`；回放最大`|Y|=231.470mm`、最终解`[-90.000,168.151,-47.928]deg`，原AC回放与ARM GCC严格检查通过。
+- Keil全量重建`arm_bd_right_observation_y260_rebuild_20260816.log`通过，0错误0警告，新AXF/HEX/MAP于22:31生成；未烧录、未做机械臂实机验证。Phase 24完成。
+- Phase 25开始：把BD左右观察点整理为显式双点配置，当前选择RIGHT；计划扩展回放为每次同时验证LEFT/RIGHT，并重建可上传固件。
+- Phase 25实现完成：LEFT/RIGHT观察点、q1方向和用途均在`app_config.h`显式注释，状态机通过ACTIVE_SIDE别名读取当前RIGHT；回放改为每次独立验证两侧。
+- 双侧回放、ARM GCC严格检查和`git diff --check`通过；Keil全量重建`arm_bd_dual_points_active_right_rebuild_20260816.log`为0错误0警告，新AXF/HEX/MAP于22:41生成。未烧录，Phase 25完成。

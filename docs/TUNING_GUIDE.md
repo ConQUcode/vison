@@ -11,19 +11,30 @@
 
 | 参数 | 当前值 | 作用 |
 |---|---:|---|
-| `APP_MODE` | `APP_MODE_MG995_TEST` | 当前只测试左右摄像头水平0deg，不运行机械臂、底盘或IMU |
+| `APP_MODE` | `APP_MODE_ARM_BD_OBSERVATION_TEST` | 当前HOME后单次到BD右观察位并保持 |
+| `APP_ARM_BD_OBSERVATION_ACTIVE_SIDE` | `RIGHT` | 当前上传固件执行右观察点 |
+| BD左观察点 | `q1=+90 deg / [0,+57,210] mm` | 已保存并参与每次双侧回放 |
+| BD右观察点 | `q1=-90 deg / [0,-57,210] mm` | 已保存并参与每次双侧回放 |
+| BD当前同步过渡关节 | `[-90,120,-48] deg` | HOME后底座和主臂同步动作，最大 `|Y|=231.470 mm` |
+| BD路径Y限制 | `260 mm` | 两段离线回放均逐点检查工具中心 `|Y|` |
+| BD观察俯仰 | `-30 deg` | 最终夹爪中心线世界绝对俯仰 |
+| BD观察速度 | `150 mm/s` | 首次单点确认速度 |
 | 右侧MG995 | `PI6 / TIM8_CH2 / 1500 us` | 舵机90deg，对应摄像头0deg |
 | 左侧MG995 | `PI7 / TIM8_CH3 / 1500 us` | 舵机90deg，对应摄像头0deg |
-| 左侧定姿路径 | `[0,340,-150] -> [0,480,-150] mm` | 首轮，使用A左放置profile |
-| 右侧定姿路径 | `[0,-340,-150] -> [0,-480,-150] mm` | 只对左侧Y取负，使用A右放置profile |
+| AC左侧定姿路径 | `[0,380,-150] -> [0,480,-150] mm` | 使用A左放置profile |
+| AC右侧定姿路径 | `[0,-380,-150] -> [0,-480,-150] mm` | 只对左侧Y取负，使用A右放置profile |
 | 两侧绝对俯仰 | `-5 deg` | X/Z、速度、等待和夹爪动作完全一致 |
-| 定姿测试速度 | `100 mm/s` | 首次验证使用，不影响正式抓取的 `200 mm/s` |
+| AC定姿速度 | `600/150 mm/s` | 接近点/最后100 mm推进分段速度 |
 | `APP_ARM_TOOL_CENTER_TEST_ENABLE` | `1` | 为正式水果流程和当前A左/A右放置提供共享子流程 |
 
-当前MG995模式只调用 `Mg995ServoInit()`，机械臂、底盘、IMU、USB业务和
-DM/DJI电机周期控制均不运行。观察 `g_mg995_servo_debug`：正常应为
-`state=READY`、`initialized=1`，左右`camera_angle_deg`均为0deg，两侧均为
-`pulse_us=1500/angle_deg=90`。
+当前BD观察位模式不运行底盘或夹爪，也不进入AC循环。观察
+`g_app_arm_bd_observation_debug`：`state=4` 为到位保持，`state=5`
+为失败；重点查看 `actual_center_mm`、`actual_tool_pitch_deg`、`actual_q_deg`、
+`center_error_mm`、`pitch_error_deg` 和 `path_preflight_passed`。
+
+切到 `APP_MODE_MG995_TEST` 后只调用 `Mg995ServoInit()`，机械臂、底盘、
+IMU、USB业务和DM/DJI电机周期控制均不运行。观察
+`g_mg995_servo_debug`：正常应为 `state=READY`、`initialized=1`。
 
 切回 `APP_MODE_ARM_POSTURE_TEST` 后，机械臂才会先完成左抓放并返回前方，
 再完成右抓放并持续交替。只有放置子流程返回 `DONE` 才切换侧别；任何
@@ -36,9 +47,9 @@ DM/DJI电机周期控制均不运行。观察 `g_mg995_servo_debug`：正常应�
 成功完成一侧后状态保持 `DONE`，由调用者决定是否以及何时提交下一侧。
 
 当前绝对俯仰为 `-5 deg`、Z为 `-150 mm`。按实时运动学对
-`|Y|=340..480 mm` 逐毫米镜像预检，两侧q2/q3和ID1结果一致；接近点ID1
-相对俯仰约 `+91.71 deg`、
-控制值约 `117.89`；距当前 `+92.4 deg/115` 软件边界约 `0.69 deg/2.89`。
+`|Y|=380..480 mm` 逐毫米镜像预检，两侧q2/q3和ID1结果一致；接近点ID1
+相对俯仰约 `+82.80 deg`、控制值约 `155.02`，距当前
+`+92.4 deg/115` 软件边界约 `9.60 deg/40.02`。
 终点q2约 `7.88 deg`，距3deg软件下限约 `4.88 deg`。
 
 `APP_ARM_COMMAND_ID_SEED=0xA1100000u` 是固件内部机械臂命令序列的启动
@@ -64,7 +75,7 @@ A区共4组、每组左右各1个水果；当前测试开关为 `1`，底盘原�
 点1/点2完整抓放并无限交替。将开关改为 `0` 后恢复连续3组场地测试，
 距离为 `585/500/500 mm`。两点抓取坐标和放置角也集中在该文件；
 `A_LEFT/A_RIGHT` 分别固定表示物理左侧 `Y>0` 和物理右侧 `Y<0`。
-B/C/D 未配置，不能套用A区参数。
+BD目前只配置左右树上观察位，完整抓放仍不能套用A/AC区参数。
 
 ## 底盘通用接口和方向
 

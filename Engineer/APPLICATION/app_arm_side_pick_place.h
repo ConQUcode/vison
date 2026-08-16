@@ -86,8 +86,9 @@ extern App_Arm_Posture_Test_Debug_s g_app_arm_posture_test_debug;
 void AppArmSidePickPlaceInit(void);
 
 /**
- * 提交一次完整单侧任务。受理后依次完成准备、接近、推进、抓取、对应侧
- * 放置和回正；运行中重复提交返回BUSY，不改变当前任务。
+ * 提交一次AC区完整单侧任务。受理后依次完成准备、接近、推进、抓取、
+ * 对应侧放置和回正；运行中重复提交返回BUSY，不改变当前任务。BD区不得
+ * 直接复用该入口的AC坐标和放置profile，应提供独立配置或独立调用封装。
  */
 App_Arm_Side_Pick_Place_Start_Result_e AppArmSidePickPlaceStart(
     App_Fruit_Side_e side, uint32_t now_ms);

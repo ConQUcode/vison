@@ -266,6 +266,135 @@ static uint8_t staging_pose_safe(const float q_deg[3],
     return 1u;
 }
 
+static int verify_bd_observation_side(
+    float base_q1_deg, const Arm_Position_s *target_center,
+    const char *side_name, const char *csv_name)
+{
+    const float start_q_deg[3] = {0.0f, 90.0f, -60.0f};
+    const float staging_q_deg[3] = {
+        base_q1_deg,
+        APP_ARM_BD_OBSERVATION_STAGING_Q2_DEG,
+        APP_ARM_BD_OBSERVATION_STAGING_Q3_DEG
+    };
+    float relative_pitch_deg = APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG -
+        (staging_q_deg[ARM_JOINT_SHOULDER] +
+         (-180.0f - staging_q_deg[ARM_JOINT_ELBOW]));
+    float max_delta_deg = 0.0f;
+    float max_abs_y_mm = 0.0f;
+    Arm_Position_s staging_center = {0};
+    float final_q_deg[3];
+    uint16_t joint_intervals;
+    uint16_t count;
+    int result;
+
+    if (target_center == NULL || side_name == NULL || csv_name == NULL) {
+        return 30;
+    }
+
+    for (uint8_t joint = 0u; joint < 3u; ++joint) {
+        float delta_deg = joint == ARM_JOINT_BASE_YAW ?
+            fabsf(wrap180(staging_q_deg[joint] - start_q_deg[joint])) :
+            fabsf(staging_q_deg[joint] - start_q_deg[joint]);
+
+        max_delta_deg = fmaxf(max_delta_deg, delta_deg);
+    }
+    joint_intervals = (uint16_t)ceilf(max_delta_deg);
+    if (joint_intervals < 1u) joint_intervals = 1u;
+    for (uint16_t i = 0u; i <= joint_intervals; ++i) {
+        float ratio = (float)i / (float)joint_intervals;
+        float q_deg[3] = {
+            start_q_deg[0] + ratio *
+                wrap180(staging_q_deg[0] - start_q_deg[0]),
+            start_q_deg[1] + ratio *
+                (staging_q_deg[1] - start_q_deg[1]),
+            start_q_deg[2] + ratio *
+                (staging_q_deg[2] - start_q_deg[2])
+        };
+        Arm_Position_s center;
+
+        if (!staging_pose_safe(q_deg, relative_pitch_deg, &center)) {
+            fprintf(stderr,
+                    "FAIL BD staging safety sample=%u q=(%.3f,%.3f,%.3f)\n",
+                    i, q_deg[0], q_deg[1], q_deg[2]);
+            return 31;
+        }
+        if (fabsf(center.y_mm) >
+                APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM + 0.001f) {
+            fprintf(stderr,
+                    "FAIL BD staging Y sample=%u y=%.3f limit=%.3f\n",
+                    i, center.y_mm,
+                    APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM);
+            return 32;
+        }
+        max_abs_y_mm = fmaxf(max_abs_y_mm, fabsf(center.y_mm));
+        staging_center = center;
+    }
+
+    memset(points, 0, sizeof(points));
+    points[0].center = staging_center;
+    count = append_segment(staging_center, *target_center, 1u);
+    if (count == 0u) return 33;
+    for (uint16_t i = 0u; i < count; ++i) {
+        if (fabsf(points[i].center.y_mm) >
+                APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM + 0.001f) {
+            fprintf(stderr,
+                    "FAIL BD linear Y sample=%u y=%.3f limit=%.3f\n",
+                    i, points[i].center.y_mm,
+                    APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM);
+            return 34;
+        }
+        max_abs_y_mm = fmaxf(max_abs_y_mm,
+                             fabsf(points[i].center.y_mm));
+    }
+    result = solve_route(count, APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG,
+                         staging_q_deg, csv_name, final_q_deg);
+    if (result != 0 ||
+        fabsf(wrap180(final_q_deg[ARM_JOINT_BASE_YAW] -
+                      base_q1_deg)) > 0.01f) {
+        fprintf(stderr,
+                "FAIL BD %s linear path result=%d final_q1=%.3f\n",
+                side_name, result, final_q_deg[ARM_JOINT_BASE_YAW]);
+        return 35;
+    }
+    printf("PASS BD %s coordinated staging: q=(%.1f,%.1f,%.1f) "
+           "relative_pitch=%.1f maxAbsY=%.3f limit=%.1f\n",
+           side_name, staging_q_deg[0], staging_q_deg[1],
+           staging_q_deg[2], relative_pitch_deg, max_abs_y_mm,
+           APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM);
+    return 0;
+}
+
+static int verify_bd_observation_transition(void)
+{
+    const Arm_Position_s left_target = {
+        APP_ARM_BD_OBSERVATION_LEFT_X_MM,
+        APP_ARM_BD_OBSERVATION_LEFT_Y_MM,
+        APP_ARM_BD_OBSERVATION_LEFT_Z_MM
+    };
+    const Arm_Position_s right_target = {
+        APP_ARM_BD_OBSERVATION_RIGHT_X_MM,
+        APP_ARM_BD_OBSERVATION_RIGHT_Y_MM,
+        APP_ARM_BD_OBSERVATION_RIGHT_Z_MM
+    };
+    int result;
+
+    if (fabsf(APP_ARM_BD_OBSERVATION_LEFT_BASE_Q1_DEG +
+              APP_ARM_BD_OBSERVATION_RIGHT_BASE_Q1_DEG) > 0.001f ||
+        fabsf(left_target.x_mm - right_target.x_mm) > 0.001f ||
+        fabsf(left_target.y_mm + right_target.y_mm) > 0.001f ||
+        fabsf(left_target.z_mm - right_target.z_mm) > 0.001f) {
+        fprintf(stderr, "FAIL BD left/right configuration is not mirrored\n");
+        return 36;
+    }
+    result = verify_bd_observation_side(
+        APP_ARM_BD_OBSERVATION_LEFT_BASE_Q1_DEG, &left_target,
+        "LEFT", "bd_observation_left_candidates.csv");
+    if (result != 0) return result;
+    return verify_bd_observation_side(
+        APP_ARM_BD_OBSERVATION_RIGHT_BASE_Q1_DEG, &right_target,
+        "RIGHT", "bd_observation_right_candidates.csv");
+}
+
 static int verify_post_place_cycle_transition(void)
 {
     const float start_q_deg[3] = {0.0f, 120.0f, -80.0f};
@@ -541,6 +670,9 @@ int main(void)
     uint16_t count;
     float release_q[3];
     int result;
+
+    result = verify_bd_observation_transition();
+    if (result != 0) return result;
 
     result = verify_post_place_cycle_transition();
     if (result != 0) return result;

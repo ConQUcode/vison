@@ -43,7 +43,7 @@ static void AppArmSidePickPlaceFail(uint32_t now_ms)
     AppArmSidePickPlaceSetStatus(APP_ARM_SIDE_PICK_PLACE_FAILED);
 }
 
-/** 装载一侧镜像抓放参数，并清空本轮ID供提交时重新分配。 */
+/** 装载AC区一侧镜像抓放参数，并清空本轮ID供提交时重新分配。 */
 static uint8_t AppArmSidePickPlacePrepare(App_Fruit_Side_e side)
 {
     App_Arm_Place_Profile_s profile;
@@ -59,6 +59,7 @@ static uint8_t AppArmSidePickPlacePrepare(App_Fruit_Side_e side)
     } else {
         return 0u;
     }
+    /* AC区当前复用已验证的A区左右放置profile；BD区必须独立配置。 */
     if (AppFruitGetPlaceProfile(APP_FRUIT_AREA_A, side, &profile) == 0u) {
         return 0u;
     }
@@ -92,7 +93,7 @@ static uint8_t AppArmSidePickPlacePrepare(App_Fruit_Side_e side)
 }
 
 static Arm_Command_Result_e AppArmSidePickPlaceSubmitCenter(
-    uint32_t command_id, const float center_mm[3])
+    uint32_t command_id, const float center_mm[3], float max_speed_mm_s)
 {
     Arm_Tool_Center_Command_s command;
 
@@ -102,7 +103,7 @@ static Arm_Command_Result_e AppArmSidePickPlaceSubmitCenter(
     command.target_center_mm.x_mm = center_mm[0];
     command.target_center_mm.y_mm = center_mm[1];
     command.target_center_mm.z_mm = center_mm[2];
-    command.max_speed_mm_s = APP_ARM_POSTURE_TEST_SPEED_MM_S;
+    command.max_speed_mm_s = max_speed_mm_s;
     command.tool_pitch_valid = 1u;
     command.tool_pitch_deg =
         g_app_arm_posture_test_debug.target_tool_pitch_deg;
@@ -320,7 +321,8 @@ App_Arm_Side_Pick_Place_Status_e AppArmSidePickPlacePoll(uint32_t now_ms)
         }
         result = AppArmSidePickPlaceSubmitCenter(
             g_app_arm_posture_test_debug.target_command_id,
-            g_app_arm_posture_test_debug.target_center_mm);
+            g_app_arm_posture_test_debug.target_center_mm,
+            APP_ARM_POSTURE_TEST_APPROACH_SPEED_MM_S);
         g_app_arm_posture_test_debug.active_command_id =
             g_app_arm_posture_test_debug.target_command_id;
         g_app_arm_posture_test_debug.submit_result = (uint32_t)result;
@@ -352,7 +354,8 @@ App_Arm_Side_Pick_Place_Status_e AppArmSidePickPlacePoll(uint32_t now_ms)
         }
         result = AppArmSidePickPlaceSubmitCenter(
             g_app_arm_posture_test_debug.advance_command_id,
-            g_app_arm_posture_test_debug.advance_center_mm);
+            g_app_arm_posture_test_debug.advance_center_mm,
+            APP_ARM_POSTURE_TEST_GRIP_ADVANCE_SPEED_MM_S);
         g_app_arm_posture_test_debug.active_command_id =
             g_app_arm_posture_test_debug.advance_command_id;
         g_app_arm_posture_test_debug.submit_result = (uint32_t)result;

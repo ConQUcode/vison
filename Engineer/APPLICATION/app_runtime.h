@@ -41,6 +41,44 @@ typedef struct {
 
 extern App_Arm_Teach_Debug_s g_app_arm_teach_debug;
 
+typedef enum {
+    APP_ARM_BD_OBSERVATION_WAIT_READY = 0,
+    APP_ARM_BD_OBSERVATION_BASE_SUBMITTED,
+    APP_ARM_BD_OBSERVATION_SUBMIT_TARGET,
+    APP_ARM_BD_OBSERVATION_TARGET_SUBMITTED,
+    APP_ARM_BD_OBSERVATION_HOLDING,
+    APP_ARM_BD_OBSERVATION_FAILED
+} App_Arm_Bd_Observation_State_e;
+
+/** BD区左侧树上水果观察位单次测试Watch；角度deg，坐标mm。 */
+typedef struct {
+    uint8_t state;
+    uint8_t host_ready;
+    uint8_t host_busy;
+    uint8_t path_preflight_passed;
+    uint32_t command_id;
+    uint32_t base_command_id;
+    uint32_t target_command_id;
+    uint32_t submit_result;
+    uint32_t command_state;
+    uint32_t fault_code;
+    uint32_t state_tick_ms;
+    float base_target_q_deg[3];
+    float base_tool_relative_pitch_deg;
+    float target_center_mm[3];
+    float target_tool_pitch_deg;
+    float target_speed_mm_s;
+    float actual_center_mm[3];
+    float actual_tool_pitch_deg;
+    float actual_q_deg[3];
+    float center_error_mm;
+    float pitch_error_deg;
+    float trajectory_progress;
+} App_Arm_Bd_Observation_Debug_s;
+
+extern App_Arm_Bd_Observation_Debug_s
+    g_app_arm_bd_observation_debug;
+
 void AppInit(void);
 void AppImuTask(uint32_t now_ms);
 void AppChassisTask(uint32_t now_ms);
