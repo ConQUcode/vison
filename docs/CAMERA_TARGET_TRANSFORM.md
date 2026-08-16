@@ -1,0 +1,101 @@
+# 末端摄像头目标坐标转换
+
+更新时间：2026-08-16
+
+## 1. 当前完成边界
+
+上位机 `ArmTarget.target_x/y/z` 表示水果在摄像头坐标系中的位置，单位为米。
+固件先转换为毫米，再使用拍照时机械臂姿态和固定相机外参计算水果在机械臂
+基座坐标系中的坐标：
+
+```text
+P_B_F = T_B_E(capture_pose) * T_E_C(calibration) * P_C_F
+```
+
+- `B`：机械臂基座系，`+X`车头前方、`+Y`物理左侧、`+Z`向上。
+- `E`：相机安装所依附的机械臂末端参考系。
+- `C`：上位机发送坐标所使用的相机坐标系。
+- `F`：水果目标点。
+
+核心算法位于 `camera_target_transform.c/.h`，配置占位位于
+`camera_target_transform_config.h`。当前 `calibrated=0`，因此单位矩阵和零
+平移只是不可执行的占位值，不会被当成真实标定。
+
+即使变换成功，当前 `ArmTarget` 仍只观察、不提交机械臂动作。原因是当前
+协议没有图像帧ID，无法在线路上证明目标对应哪次拍照姿态；协议也没有指定
+抓取绝对俯仰。可靠ACK仍然只表示下位机收到了包。
+
+## 2. 两种安装参考系
+
+配置 `CAMERA_TARGET_DEFAULT_REFERENCE_FRAME` 必须与实物安装一致：
+
+| 配置 | E系原点 | E系前向 | 适用安装位置 |
+|---|---|---|---|
+| `CAMERA_TARGET_REFERENCE_TOOL_CENTER` | 夹爪中心 | ID1控制后的夹爪绝对俯仰方向 | 摄像头安装在ID1之后，随夹爪俯仰 |
+| `CAMERA_TARGET_REFERENCE_WRIST_PITCH_AXIS` | ID1俯仰轴心 | 小臂绝对俯仰方向 | 摄像头安装在ID1之前，固定在小臂/腕部 |
+
+两种E系均定义为右手系：E-X沿对应末端前向，E-Y为该朝向的水平左侧，
+E-Z补成右手系。机械臂只能提供底座Yaw和末端Pitch，摄像头安装产生的固定
+Roll必须包含在 `R_E_C` 中。
+
+## 3. 明天需要测量的信息
+
+只测摄像头外壳到夹爪的XYZ距离不够。必须确认以下内容：
+
+1. 摄像头位于ID1之前还是之后，以选择E参考系。
+2. 上位机相机坐标的单位和轴方向，例如常见光学系可能是X向右、Y向下、
+   Z向前，但不能按常见值猜测。
+3. 摄像头光心在E系中的坐标 `t_E_C=[tx,ty,tz] mm`。测量基准应是光心，
+   不是镜头外壳边缘。
+4. 相机C-X、C-Y、C-Z三根轴分别指向E系的哪个方向，用于填写旋转矩阵。
+
+固件矩阵方向固定为：
+
+```text
+P_E = R_E_C * P_C + t_E_C
+```
+
+`R_E_C` 的三列依次是相机 `C-X/C-Y/C-Z` 单位轴在E系中的坐标。例如，若
+相机C-Z朝E-X、C-X朝E-Y、C-Y朝E-Z，则三列按该轴映射填写。矩阵必须正交且
+行列式接近 `+1`；把某一轴符号填反造成镜像矩阵时，固件会明确拒绝。
+
+如果用角度描述安装方向，可调用 `CameraTargetBuildExtrinsicFromRpy()`；其
+约定为 `R_E_C=Rz(yaw)*Ry(pitch)*Rx(roll)`，零角表示C/E轴完全重合。对于
+相机光学系这种轴置换，直接填写三列轴方向通常更不易出错。
+
+## 4. 拍照姿态关联
+
+未来图像触发处必须立即调用：
+
+```c
+UpperControllerCaptureCameraPose(capture_id, now_ms);
+```
+
+该接口读取当时三关节反馈、腕点、夹爪中心、小臂绝对俯仰和ID1绝对俯仰，
+生成并保存 `T_B_E`。不能等 `ArmTarget` 到达后再读取“当前姿态”替代拍照
+姿态，因为上位机推理期间机械臂可能已经移动。
+
+当前 `ArmTarget` 没有 `capture_id`，桥只能使用最新快照且仍禁止运动。正式
+闭环前建议把同一个非零帧ID同时带入图像触发和目标包；变换接口已支持
+`expected_capture_id`匹配以及快照最大年龄检查，无需重写矩阵算法。
+
+## 5. 校验和Watch
+
+变换前会拒绝：未初始化、未标定、非有限值、外参过大、旋转矩阵不正交、
+行列式不是 `+1`、姿态无效、参考系不一致、快照ID不匹配、快照过期和目标
+坐标越界。变换后的基座坐标仍必须经过现有工具中心IK、软件限位、工作空间
+和整条路径预检，不能绕过机械臂安全层。
+
+主要观察量：
+
+- `g_camera_target_transform_debug.extrinsic`：当前 `R_E_C/t_E_C`和参考系。
+- `g_camera_target_transform_debug.pose_snapshot`：拍照ID、时刻、关节和`T_B_E`。
+- `g_camera_target_transform_debug.last_result`：相机点、E系点和基座系点。
+- `g_camera_target_transform_debug.last_status`：唯一变换失败原因。
+- `g_upper_controller_debug.arm_target_camera_mm`：上位机原始目标。
+- `g_upper_controller_debug.arm_target_base_mm`：成功时的基座坐标。
+- `g_upper_controller_debug.arm_target_transform_status`：桥接层观察状态。
+
+离线测试位于 `tools/camera_target_transform_test`，覆盖单位矩阵、纯平移、
+绕X/Y/Z 90度、机械臂Yaw/Pitch、左右镜像、反射矩阵、参考系不匹配、帧ID
+不匹配和过期快照。

@@ -1,6 +1,6 @@
 # 当前工程功能
 
-更新时间：2026-08-15
+更新时间：2026-08-16
 
 ## 当前默认运行内容
 
@@ -59,6 +59,8 @@ LEFT/RIGHT循环；未来USB协议桥可提交相同命令，本轮尚未增加�
 | `arm/` | 主臂、轨迹、运动学、工具和安全控制 |
 | `chassis/` | 相对运动和连续vx/wz命令、里程计、IMU闭环、超时停车和停稳 |
 | `fruit_usb_bridge.c/.h` | 水果识别结果校验和观察，不直接驱动任务 |
+| `camera_target_transform.c/.h` | 相机外参、拍照姿态快照及摄像头系到机械臂基座系的刚体点变换 |
+| `upper_controller_bridge.c/.h` | 新版上位机速度、离散执行和ArmTarget适配；当前目标变换后仍禁止运动 |
 
 底盘公共接口为 `ChassisInit`、`ChassisSubmitCommand`、
 `ChassisSubmitVelocityCommand`、`ChassisGetStatus`、`ChassisCancelMotion`
@@ -126,8 +128,13 @@ ID1相对俯仰 `-80 deg` 的准备姿态；随后工具中心轨迹以 `200 mm/
 业务消息新增 `StateMachineCommand`、`ExecutionCallback`、`ArmTarget` 和
 `VelocityCommand`。在 `APP_MODE_HOST_CONTROL` 中，速度包转换为
 `vx_mm_s/wz_rad_s`后提交底盘；离散包控制ID2夹爪或双MG995。
-`ArmTarget`的米制相机坐标只进入`g_upper_controller_debug`，在固定外参和
-拍照姿态关联完成前不产生机械臂动作。`FruitDetection`仍只更新水果快照。
+`ArmTarget`的米制相机坐标会先转换为毫米，再尝试执行
+`P_B=T_B_E*T_E_C*P_C`。算法、旋转矩阵校验、腕部/夹爪两种安装参考系、
+姿态快照和离线测试均已实现；当前外参配置保持`calibrated=0`，且协议没有
+图像帧ID，因此桥只记录明确失败原因，不产生机械臂动作。拍照触发侧必须在
+拍照瞬间调用`UpperControllerCaptureCameraPose(capture_id, now_ms)`，不能在
+目标包到达时读取当前姿态代替。`z_type`只保留任务分类语义，不参与坐标计算。
+具体标定参数和矩阵方向见`docs/CAMERA_TARGET_TRANSFORM.md`。
 
 ## 夹爪容错
 
@@ -160,6 +167,8 @@ ID2 默认/张开位置为 `450`，探测闭合目标为 `660`。接触后每次
 - `g_arm_dm_debug.auto_init`：`step=1, axis=4` 表示大臂/小臂同步HOME，`step=2, axis=1` 表示底座HOME；完成后才启动ID1/ID2。
 - `g_fruit_usb_debug`：水果识别快照；当前不直接控制任务。
 - `g_protocol_runtime_debug`：握手、心跳、会话和可靠发送队列状态。
+- `g_camera_target_transform_debug`：相机外参、拍照姿态、旋转矩阵质量、三层坐标和唯一变换状态。
+- `g_upper_controller_debug`：新版原始相机点、变换后基座点、目标/姿态计数以及底盘和离散命令状态。
 
 所有固件内部机械臂命令必须通过 `AppArmCommandIdNext()` 领取ID。专项测试、
 抓放流程和未来新增流程不得各自建立命令基址或重置私有序列，否则切换流程时
@@ -168,7 +177,8 @@ ID2 默认/张开位置为 `450`，探测闭合目标为 `660`。接触后每次
 
 ## 验证边界
 
-当前协议同步已通过 ARM GCC 严格语法检查；当前MG995模式和临时
-`APP_MODE_HOST_CONTROL`模式均通过Keil ArmCC 5全量构建，均为0错误0警告。
-最终AXF/HEX已恢复为MG995默认模式。未烧录，也没有替代USB、底盘、夹爪或
-摄像头的实机协议验收；实时源码始终优先于文档。
+当前协议、桥接和坐标变换已通过 ARM GCC 严格语法检查，坐标变换29项离线
+检查全部通过；当前MG995模式和临时`APP_MODE_HOST_CONTROL`模式均通过
+Keil ArmCC 5全量构建，均为0错误0警告，host模式MAP确认ArmTarget调用变换
+模块。最终AXF/HEX已恢复为MG995默认模式。未烧录、未标定相机外参，也没有
+替代USB、底盘、夹爪、摄像头或机械臂的实机验收。

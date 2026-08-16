@@ -123,3 +123,9 @@
 - Full Keil rebuilds passed with ArmCC 5.06u7 at 0 errors and 0 warnings in both host-control mode and the restored MG995 default mode. The host map proved the velocity callback reaches `ChassisSubmitVelocityCommand` and the bridge Init/Task remain linked.
 - Updated README, HANDOFF, PROJECT_OVERVIEW, TUNING_GUIDE and FRUIT_TASK_FLOW to the new hash, packet set, runtime policy, bridge behavior, ArmTarget deferral and validation boundary.
 - Completed phase 19. Final AXF/HEX are MG995-mode artifacts; no firmware was flashed and no hardware protocol or motion test was performed.
+- Started phase 20 to implement the complete camera-frame target transform, calibrated extrinsic boundary, capture-time arm pose snapshot and offline math verification while keeping ArmTarget motion disabled.
+- Added a hardware-independent `T_B_E * T_E_C * P_C` module with explicit wrist/tool reference frames, direct matrix and RPY configuration, orthogonality/determinant checks, capture-ID/age guards and compact Watch state.
+- Integrated ArmTarget with the transform observation path and added `UpperControllerCaptureCameraPose()` for the future image trigger; no transform result calls an arm motion API, and the default calibration flag remains zero.
+- All 29 offline transform checks passed, including X/Y/Z rotations and left/right symmetry. Strict ARM GCC checks passed every configured unit.
+- Full Keil rebuilds passed with 0 errors and 0 warnings in temporary host-control mode and restored MG995 mode. The host MAP links `on_receive_ArmTarget` to `CameraTargetTransformLatest`; final AXF/HEX are MG995 mode. No flashing or camera/arm hardware validation was performed.
+- Completed phase 20.

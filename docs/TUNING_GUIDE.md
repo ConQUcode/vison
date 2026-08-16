@@ -1,6 +1,6 @@
 # 参数位置和调参说明
 
-更新时间：2026-08-15
+更新时间：2026-08-16
 
 修改参数后需要重新编译。底盘和机械臂首次动作应架空测试；当前已实测
 方向符号不得凭直觉改动，每次只调整一个参数组。
@@ -149,6 +149,28 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 `lateral_error_mm`，先滤波和限幅，再将其转换为小幅航向修正；底盘内部
 仍负责轮速、航向和停车。外环丢失或数据过期时必须降级为当前航向保持，
 不要直接用累计的 `y_m` 作为绝对横向误差。
+
+## 末端摄像头外参
+
+文件：`Engineer/APPLICATION/camera_target_transform_config.h`
+
+| 参数 | 当前值 | 作用 |
+|---|---:|---|
+| `CAMERA_TARGET_DEFAULT_CALIBRATED` | `0` | 当前未实测；必须保持0，避免占位参数驱动机械臂 |
+| `CAMERA_TARGET_DEFAULT_REFERENCE_FRAME` | `TOOL_CENTER` | 摄像头随ID1运动时使用；若固定在小臂/ID1前则改为`WRIST_PITCH_AXIS` |
+| `CAMERA_TARGET_DEFAULT_T_E_C_X/Y/Z_MM` | `[0,0,0]` | 摄像头光心在所选末端E系中的位置，单位mm |
+| `CAMERA_TARGET_DEFAULT_R_E_C_00..22` | 单位矩阵占位 | 相机三根轴在末端E系中的方向 |
+| `CAMERA_TARGET_DEFAULT_MAX_POSE_AGE_MS` | `5000 ms` | ArmTarget允许使用的最新拍照姿态年龄上限 |
+
+不能只测相机到夹爪的三个距离后就把`CALIBRATED`改为1。还必须确认上位机
+相机坐标的X/Y/Z方向，并填写`R_E_C`；它满足
+`P_E=R_E_C*P_C+t_E_C`，矩阵三列依次为相机C-X/C-Y/C-Z轴在E系中的
+单位方向。固件会拒绝非正交矩阵和行列式不是`+1`的镜像矩阵。
+
+拍照触发处调用`UpperControllerCaptureCameraPose(capture_id, now_ms)`保存
+当时姿态。当前协议`ArmTarget`没有帧ID，不能证明目标和快照一一对应，且
+没有抓取绝对俯仰字段，所以即使变换成功也继续禁止动作。详细坐标系、明日
+测量清单、Watch和离线测试见`docs/CAMERA_TARGET_TRANSFORM.md`。
 
 ## 机械臂点位和放置 profile
 

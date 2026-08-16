@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "arm_host.h"
+#include "camera_target_transform.h"
 #include "chassis.h"
 #include "protocol.h"
 
@@ -49,9 +50,18 @@ typedef struct {
     float arm_target_camera_mm[3];
     uint8_t arm_target_z_type;
     uint8_t arm_target_valid;
+    Camera_Target_Transform_Status_e arm_target_transform_status;
+    float arm_target_reference_mm[3];
+    float arm_target_base_mm[3];
+    uint32_t arm_target_pose_capture_id;
+    uint32_t arm_target_pose_capture_tick_ms;
     uint32_t arm_target_rx_count;
     uint32_t arm_target_deferred_count;
     uint32_t arm_target_invalid_count;
+    uint32_t arm_target_transform_success_count;
+    uint32_t arm_target_transform_fail_count;
+    uint32_t arm_pose_capture_success_count;
+    uint32_t arm_pose_capture_fail_count;
     uint32_t unexpected_callback_rx_count;
 } Upper_Controller_Debug_s;
 
@@ -61,5 +71,12 @@ extern Upper_Controller_Debug_s g_upper_controller_debug;
 void UpperControllerBridgeInit(void);
 /** 由USB应用任务周期调用，重试受理并观察异步夹爪命令终态。 */
 void UpperControllerBridgeTask(uint32_t now_ms);
+/**
+ * Store the current arm feedback as the pose belonging to one camera frame.
+ * This must be called by the future image-capture trigger, not when ArmTarget
+ * arrives after image processing.
+ */
+Camera_Target_Transform_Status_e UpperControllerCaptureCameraPose(
+    uint32_t capture_id, uint32_t now_ms);
 
 #endif

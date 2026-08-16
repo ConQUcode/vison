@@ -1,12 +1,57 @@
 # vison 工程交接文档
 
-更新时间：2026-08-15
+更新时间：2026-08-16
 工程目录：`C:\Users\11737\Desktop\vison`
 Keil 工程：`Engineer\MDK-ARM\Engineer.uvprojx`
 当前分支：`fruit`
 
 实时源码始终优先于本文。继续工作前先查看 `git status`、`app_config.h`、
 当前任务调用链和相关 Watch；不得回退用户已有修改。
+
+## 0. 新会话快速接续
+
+新会话首先读取本文和 `docs/CAMERA_TARGET_TRANSFORM.md`，然后核对：
+
+```text
+git status --short --branch
+Engineer/APPLICATION/app_config.h
+Engineer/APPLICATION/camera_target_transform_config.h
+Engineer/APPLICATION/upper_controller_bridge.c
+```
+
+当前阶段20源码和文档尚未提交，工作区中的相机变换模块、上位机桥、Keil
+工程、严格检查脚本及维护文档属于本轮有效改动，不得回退。当前另外存在
+`Engineer/MDK-ARM/Engineer.uvoptx` 用户改动，本轮没有编辑它，新会话也不得
+为了清理工作区覆盖或还原。
+
+当前立即状态：
+
+```text
+默认APP_MODE              APP_MODE_MG995_TEST
+默认实际运行              仅PI6/PI7双MG995保持摄像头水平0deg
+相机外参启用              CAMERA_TARGET_DEFAULT_CALIBRATED=0
+ArmTarget坐标算法          已完成并接入观察链
+ArmTarget机械臂动作        明确禁止
+最终AXF/HEX                MG995默认模式，Keil 0错误0警告
+```
+
+下一个明确任务是填写末端摄像头标定数据。用户需要提供：
+
+1. 摄像头装在ID1之前（固定小臂）还是ID1之后（随夹爪俯仰）。
+2. 上位机发送的相机C-X、C-Y、C-Z各自物理方向和单位。
+3. 摄像头光心在所选末端E系中的`[tx,ty,tz] mm`。
+4. 图像实际拍摄时机；如果能修改协议，最好提供与目标包一致的非零帧ID。
+
+拿到数据后先只更新`camera_target_transform_config.h`，由三根相机轴方向填写
+`R_E_C`、由光心位置填写`t_E_C`。必须先通过矩阵校验和离线已知点检查，
+最后才把`CAMERA_TARGET_DEFAULT_CALIBRATED`改为1。拍照触发处必须调用
+`UpperControllerCaptureCameraPose(capture_id, now_ms)`；不能在推理结果到达时
+读取当前姿态代替拍照姿态。
+
+当前协议`ArmTarget`没有帧ID，也没有抓取绝对俯仰。即使换算得到基座坐标，
+仍只更新Watch，不调用`AppArmFlowStartPick()`。后续允许真实抓取前还需要依次
+补齐帧关联、抓取俯仰策略、工具中心IK、软件限位和完整路径预检，不得从坐标
+变换模块直接提交电机命令。
 
 ## 1. 当前默认行为
 
@@ -83,9 +128,17 @@ A区共8个水果，沿行进方向4组、每组左右各1个。启动区边界�
 | `chassis/chassis.c/.h` | 通用相对运动命令执行器 |
 | `chassis/chassis_config.h` | 已验证方向、机械参数、PID和停车边界 |
 | `fruit_usb_bridge.c/.h` | 水果识别观察；当前不驱动静态任务 |
+| `camera_target_transform.c/.h` | 外参校验、拍照姿态快照和相机点到机械臂基座点的刚体变换 |
 | `upper_controller_bridge.c/.h` | 新版速度、夹爪、摄像头和ArmTarget协议适配及Watch |
 
 完整 A 区语义和扩展步骤见 `docs/FRUIT_TASK_FLOW.md`。
+
+`ArmTarget`已经进入`P_B=T_B_E*T_E_C*P_C`算法，但默认外参仍明确为
+`calibrated=0`。相机安装可选择ID1轴心/小臂俯仰或夹爪中心/工具绝对俯仰
+两种参考系；外参旋转必须同时描述相机X/Y/Z三根轴方向。未来拍照触发处调用
+`UpperControllerCaptureCameraPose(capture_id, now_ms)`保存拍照时反馈，不能
+在推理结果到达后读取当前机械臂姿态代替。当前协议没有帧ID和抓取俯仰，
+所以即使换算成功也不提交机械臂。详见`docs/CAMERA_TARGET_TRANSFORM.md`。
 
 ## 3. A 区机械臂数据
 
@@ -211,7 +264,8 @@ CAN1/CAN2 均为 1 Mbps。机械臂 HOME 为 `q=[0,90,-60] deg`，主臂连杆
 - `g_arm_dm_debug`：三台达妙反馈、使能和控制发送。
 - `g_fruit_usb_debug`：协议会话和水果识别快照。
 - `g_protocol_runtime_debug`：握手、心跳、会话和可靠发送队列。
-- `g_upper_controller_debug`：新版离散命令、底盘速度提交、执行回调和暂缓的ArmTarget。
+- `g_camera_target_transform_debug`：外参、旋转矩阵质量、拍照姿态、相机/E/基座三层坐标和失败状态。
+- `g_upper_controller_debug`：新版离散命令、底盘速度、执行回调、ArmTarget原始点和换算结果。
 
 机械臂邮箱只接受比上一条更新的命令ID。当前专项姿态测试和
 `AppArmFlow` 已统一调用 `AppArmCommandIdNext()`；后续新增任何固件内部
@@ -227,9 +281,9 @@ CAN1/CAN2 均为 1 Mbps。机械臂 HOME 为 `q=[0,90,-60] deg`，主臂连杆
 回心跳和入站可靠消息ACK；运行层只观察状态，不再重复回心跳。
 
 `VelocityCommand` 已接到底盘连续速度接口；`StateMachineCommand` 已接到ID2
-夹爪和双MG995，并使用 `ExecutionCallback` 报执行/完成。`ArmTarget`当前仅把
-相机坐标米值换算为毫米并记录Watch，固定外参和拍照姿态关联完成前不执行。
-`FruitDetection`仍只更新识别快照，不驱动静态任务表。
+夹爪和双MG995，并使用 `ExecutionCallback` 报执行/完成。`ArmTarget`会执行
+经过强校验的相机点到基座点换算；默认未标定或没有拍照姿态时记录唯一状态，
+成功时也只观察不执行。`FruitDetection`仍只更新识别快照，不驱动静态任务表。
 
 底盘直线距离取左右主动轮相对里程平均值，IMU 只闭环航向。
 `g_chassis_debug.y_m` 是积分观察值，不参与横向闭环。后续上位机需要提供
@@ -238,15 +292,17 @@ CAN1/CAN2 均为 1 Mbps。机械臂 HOME 为 `q=[0,90,-60] deg`，主臂连杆
 
 ## 10. 构建和验证边界
 
-新版协议和桥接层已通过 ARM GCC 严格语法检查。当前MG995模式及临时
-`APP_MODE_HOST_CONTROL`模式均通过Keil ArmCC 5全量构建，0错误0警告；
-最终AXF/HEX已恢复为当前MG995默认模式。未烧录，也未进行上位机、底盘、
-夹爪、摄像头或ArmTarget的实机协议验收。
+新版协议、桥接层和坐标变换已通过 ARM GCC 严格语法检查；坐标变换的29项
+离线检查全部通过。当前MG995模式及临时`APP_MODE_HOST_CONTROL`模式均通过
+Keil ArmCC 5全量构建，0错误0警告，host模式MAP确认ArmTarget调用变换模块；
+最终AXF/HEX已恢复为当前MG995默认模式。未烧录，也未进行相机外参标定、
+拍照姿态关联、上位机、底盘、夹爪、摄像头或ArmTarget实机验收。
 
-当前先验收底盘保持不动、点1 `[0,400,-100]` 与点2
-`[0,-400,-100]` 完整抓放并持续交替；抓取时ID1绝对俯仰应为 `-90 deg`。
-恢复场地路线后按
-`585 mm -> 抓1 -> 500 mm -> 抓2 -> 500 mm -> 抓3 -> DONE` 验收。
+当前默认MG995模式不运行底盘或机械臂，只验收PI6/PI7双摄像头舵机水平0deg。
+切到`APP_MODE_ARM`后，才验收底盘保持不动、点1 `[0,400,-100]` 与点2
+`[0,-400,-100]` 完整抓放并持续交替；抓取时ID1绝对俯仰应为`-90 deg`。
+关闭原地交替开关并恢复场地路线后，再按
+`585 mm -> 抓1 -> 500 mm -> 抓2 -> 500 mm -> 抓3 -> DONE`验收。
 
 ## 11. 工作区注意事项
 

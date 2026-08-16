@@ -26,9 +26,11 @@ DJI电机周期控制。通过 `g_mg995_servo_debug` 确认初始化和两路目
 现有 `vx/wz` 底盘接口，`StateMachineCommand` 可控制ID2夹爪及双MG995；当前
 默认仍为MG995台架模式，不会启动USB、底盘或机械臂。
 
-`ArmTarget` 当前只校验并记录相机坐标和 `z_type`。在摄像头外参和拍照时机械臂
-姿态关联补齐前，不会把相机坐标直接提交给机械臂；协议可靠ACK只表示下位机
-收到该包，不表示目标已经执行。
+`ArmTarget` 已接入完整的 `T_B_E * T_E_C * P_C` 点变换算法，可分别使用
+ID1轴心/小臂俯仰或夹爪中心/ID1绝对俯仰作为摄像头安装参考系。当前外参配置
+明确保持 `calibrated=0`，协议也没有图像帧ID，因此只记录原始相机点和明确的
+变换失败原因，不会提交机械臂；协议可靠ACK只表示下位机收到该包。明日测量
+摄像头光心偏移和三根相机轴方向后的填写方式见坐标转换文档。
 
 每次开始当前侧抓取时都先执行同一条联合准备命令：底座到对应
 `q1=+/-89.5 deg`，同时大臂/小臂到 `[q2,q3]=[80,-90] deg`，ID1到
@@ -42,6 +44,7 @@ DJI电机周期控制。通过 `g_mg995_servo_debug` 确认初始化和两路目
 
 - [当前工程功能](docs/PROJECT_OVERVIEW.md)
 - [A区任务和机械臂流程](docs/FRUIT_TASK_FLOW.md)
+- [末端摄像头目标坐标转换](docs/CAMERA_TARGET_TRANSFORM.md)
 - [参数位置和调参说明](docs/TUNING_GUIDE.md)
 - [下一版本交接](docs/HANDOFF.md)
 - [生成协议定义](Engineer/MODULE/protocol/PROTOCOL_DOC.md)

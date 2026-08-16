@@ -9,9 +9,13 @@
 #include <string.h>
 
 #include "app_arm_command_id.h"
+#include "arm.h"
+#include "arm_tool.h"
+#include "camera_target_transform_config.h"
 #include "mg995_servo.h"
 #include "protocol_port.h"
 #include "protocol_runtime.h"
+#include "stm32f4xx_hal.h"
 
 #define UPPER_TASK_GRIPPER                 0u
 #define UPPER_TASK_CAMERA_GIMBAL           1u
@@ -157,6 +161,7 @@ void UpperControllerBridgeInit(void)
     memset(&upper_pending_discrete, 0,
            sizeof(upper_pending_discrete));
     upper_next_chassis_command_id = UPPER_CHASSIS_COMMAND_ID_SEED;
+    CameraTargetTransformInit();
     g_upper_controller_debug.initialized = 1u;
 }
 
@@ -215,6 +220,9 @@ void on_receive_StateMachineCommand(
 
 void on_receive_ArmTarget(const Packet_ArmTarget *packet)
 {
+    Camera_Target_Transform_Result_s transform_result;
+    Camera_Target_Transform_Status_e transform_status;
+    const Camera_Arm_Pose_Snapshot_s *snapshot;
     uint8_t valid;
 
     ProtocolRuntimeNotifyApplicationRx();
@@ -242,8 +250,94 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
     g_upper_controller_debug.arm_target_camera_mm[2] =
         packet->target_z * 1000.0f;
     g_upper_controller_debug.arm_target_z_type = packet->z_type;
-    /* 相机外参和拍照姿态尚未定义，可靠ACK只表示已收到，不表示执行。 */
+    g_upper_controller_debug.arm_target_reference_mm[0] = NAN;
+    g_upper_controller_debug.arm_target_reference_mm[1] = NAN;
+    g_upper_controller_debug.arm_target_reference_mm[2] = NAN;
+    g_upper_controller_debug.arm_target_base_mm[0] = NAN;
+    g_upper_controller_debug.arm_target_base_mm[1] = NAN;
+    g_upper_controller_debug.arm_target_base_mm[2] = NAN;
+    transform_status = CameraTargetTransformLatest(
+        0u, HAL_GetTick(), CAMERA_TARGET_DEFAULT_MAX_POSE_AGE_MS,
+        g_upper_controller_debug.arm_target_camera_mm,
+        &transform_result);
+    g_upper_controller_debug.arm_target_transform_status =
+        transform_status;
+    snapshot = CameraTargetGetPoseSnapshot();
+    if (snapshot != NULL) {
+        g_upper_controller_debug.arm_target_pose_capture_id =
+            snapshot->capture_id;
+        g_upper_controller_debug.arm_target_pose_capture_tick_ms =
+            snapshot->capture_tick_ms;
+    }
+    if (transform_status == CAMERA_TARGET_STATUS_OK) {
+        memcpy(g_upper_controller_debug.arm_target_reference_mm,
+               transform_result.reference_point_mm,
+               sizeof(g_upper_controller_debug.arm_target_reference_mm));
+        memcpy(g_upper_controller_debug.arm_target_base_mm,
+               transform_result.base_point_mm,
+               sizeof(g_upper_controller_debug.arm_target_base_mm));
+        g_upper_controller_debug.arm_target_transform_success_count++;
+    } else {
+        g_upper_controller_debug.arm_target_transform_fail_count++;
+    }
+    /*
+     * The packet has no capture_id and no requested tool pitch. A successful
+     * calculation remains observation-only; reliable ACK is not motion success.
+     */
     g_upper_controller_debug.arm_target_deferred_count++;
+}
+
+Camera_Target_Transform_Status_e UpperControllerCaptureCameraPose(
+    uint32_t capture_id, uint32_t now_ms)
+{
+    const Arm_State_s *arm = ArmGetState();
+    const Arm_Tool_State_s *tool = ArmToolGetState();
+    const Camera_Target_Extrinsic_s *extrinsic =
+        CameraTargetGetExtrinsic();
+    Camera_Arm_Pose_Snapshot_s snapshot;
+    Camera_Target_Transform_Status_e status;
+    float wrist_origin_b_mm[3];
+    float tool_center_b_mm[3];
+    uint8_t axis;
+
+    if (arm == NULL || tool == NULL || extrinsic == NULL ||
+        arm->kinematics_valid == 0u) {
+        status = CAMERA_TARGET_STATUS_INVALID_POSE;
+        g_upper_controller_debug.arm_pose_capture_fail_count++;
+        g_upper_controller_debug.arm_target_transform_status = status;
+        return status;
+    }
+    for (axis = 0u; axis < 3u; ++axis) {
+        if (arm->motor_online[axis] == 0u) {
+            status = CAMERA_TARGET_STATUS_INVALID_POSE;
+            g_upper_controller_debug.arm_pose_capture_fail_count++;
+            g_upper_controller_debug.arm_target_transform_status = status;
+            return status;
+        }
+    }
+    wrist_origin_b_mm[0] = arm->wrist_center.x_mm;
+    wrist_origin_b_mm[1] = arm->wrist_center.y_mm;
+    wrist_origin_b_mm[2] = arm->wrist_center.z_mm;
+    tool_center_b_mm[0] = arm->tool_tip.x_mm;
+    tool_center_b_mm[1] = arm->tool_tip.y_mm;
+    tool_center_b_mm[2] = arm->tool_tip.z_mm;
+    status = CameraTargetBuildArmPoseSnapshot(
+        extrinsic->reference_frame, capture_id, now_ms,
+        arm->q_feedback_deg, wrist_origin_b_mm, tool_center_b_mm,
+        arm->small_link_pitch_deg, tool->tool_pitch_feedback_deg,
+        &snapshot);
+    if (status == CAMERA_TARGET_STATUS_OK) {
+        status = CameraTargetStorePoseSnapshot(&snapshot);
+    }
+    g_upper_controller_debug.arm_target_transform_status = status;
+    if (status == CAMERA_TARGET_STATUS_OK) {
+        g_upper_controller_debug.arm_target_pose_capture_id = capture_id;
+        g_upper_controller_debug.arm_target_pose_capture_tick_ms = now_ms;
+        g_upper_controller_debug.arm_pose_capture_success_count++;
+    } else {
+        g_upper_controller_debug.arm_pose_capture_fail_count++;
+    }
+    return status;
 }
 
 void on_receive_VelocityCommand(const Packet_VelocityCommand *packet)
