@@ -2595,6 +2595,8 @@ static void ArmProcessCommandMailbox(uint32_t now_ms)
             command.payload.cartesian.tool_yaw_valid;
         cartesian_command.tool_yaw_deg =
             command.payload.cartesian.tool_yaw_deg;
+        cartesian_command.safety_profile =
+            command.payload.cartesian.safety_profile;
         result = ArmExecuteCartesianCommand(&cartesian_command);
     } else if (command.type == ARM_COMMAND_TYPE_REALTIME_CARTESIAN) {
         Arm_Realtime_Cartesian_Target_s realtime_target;
@@ -2681,6 +2683,7 @@ Arm_Command_Result_e ArmSubmitCartesianCommand(
     host_command.payload.cartesian.tool_pitch_deg = command->tool_pitch_deg;
     host_command.payload.cartesian.tool_yaw_valid = command->tool_yaw_valid;
     host_command.payload.cartesian.tool_yaw_deg = command->tool_yaw_deg;
+    host_command.payload.cartesian.safety_profile = command->safety_profile;
     return ArmSubmitCommand(&host_command);
 }
 
@@ -2700,6 +2703,7 @@ Arm_Command_Result_e ArmSubmitToolCenterCommand(
     cartesian.max_speed_mm_s = command->max_speed_mm_s;
     cartesian.tool_pitch_valid = command->tool_pitch_valid;
     cartesian.tool_pitch_deg = command->tool_pitch_deg;
+    cartesian.safety_profile = command->safety_profile;
     return ArmSubmitCartesianCommand(&cartesian);
 }
 

@@ -340,6 +340,8 @@ static uint8_t AppArmFlowSubmitPickCenter(float x_mm, float y_mm,
     command.max_speed_mm_s = max_speed_mm_s;
     command.tool_pitch_valid = 1u;
     command.tool_pitch_deg = tool_pitch_deg;
+    /* 仅AC抓取接近/推进允许低位侧向q1进入+/-115deg。 */
+    command.safety_profile = ARM_CARTESIAN_SAFETY_AC_SIDE_PICK;
     g_app_arm_pick_place_test_debug.pitch_target_deg =
         tool_pitch_deg;
     result = ArmSubmitToolCenterCommand(&command);
@@ -427,8 +429,9 @@ static uint8_t AppArmFlowSubmitRearRotateStaging(uint32_t now_ms)
 }
 
 /**
- * AC抓后专用：底座经后方waypoint转到放置点，同时q2/q3进入释放姿态。
- * waypoint强制底座沿当前侧继续转后方，避免±180deg附近反向抽动。
+ * AC抓后专用：底座转到后方放置点，同时q2/q3进入释放姿态。
+ * 受约束profile下，把原独立REAR_STAGING安全位合并为本命令的中间waypoint，
+ * 减少“到安全位停住 -> 再发底座旋转”的硬停顿。
  */
 static uint8_t AppArmFlowSubmitDirectedReleaseRotation(uint32_t now_ms)
 {
@@ -444,15 +447,55 @@ static uint8_t AppArmFlowSubmitDirectedReleaseRotation(uint32_t now_ms)
     command.tool_relative_pitch_deg =
         app_place_profile.release_tool_relative_pitch_deg;
     command.waypoint_valid = 1u;
-    memcpy(command.waypoint_q_deg, app_place_profile.release_q_deg,
-           sizeof(command.waypoint_q_deg));
-    command.waypoint_q_deg[ARM_JOINT_BASE_YAW] =
-        app_place_profile.rotate_to_place_waypoint_q1_deg;
+    if (app_place_profile.transfer_path_constraints_enabled != 0u) {
+        memcpy(command.waypoint_q_deg, app_place_profile.safe_q_deg,
+               sizeof(command.waypoint_q_deg));
+    } else {
+        memcpy(command.waypoint_q_deg, app_place_profile.release_q_deg,
+               sizeof(command.waypoint_q_deg));
+        command.waypoint_q_deg[ARM_JOINT_BASE_YAW] =
+            app_place_profile.rotate_to_place_waypoint_q1_deg;
+    }
     memcpy(g_app_arm_pick_place_test_debug.target_q_deg, command.q_deg,
            sizeof(command.q_deg));
     g_app_arm_pick_place_test_debug.pitch_target_deg =
         ArmToolSmallLinkPitchFromJoint(command.q_deg) +
         command.tool_relative_pitch_deg;
+    result = ArmSubmitJointCommand(&command);
+    g_app_arm_pick_place_test_debug.active_command_id = command.command_id;
+    g_app_arm_pick_place_test_debug.submit_result = (uint32_t)result;
+    if (result != ARM_COMMAND_OK) {
+        g_app_arm_pick_place_test_debug.command_result = (uint32_t)result;
+        AppArmFlowFail(APP_ARM_PICK_PLACE_FAILURE_COMMAND_SUBMIT,
+                       (uint32_t)result, now_ms);
+        return 0u;
+    }
+    return 1u;
+}
+
+/**
+ * 释放后回前方：先在后方保持q1不变，经release_clearance抬臂作为
+ * 安全waypoint，再在同一条关节命令内转回前方。中间waypoint使用
+ * 轨迹层宽松到位判定，避免release_clearance作为独立命令硬停顿。
+ */
+static uint8_t AppArmFlowSubmitFrontRotationViaReleaseClearance(
+    uint32_t now_ms)
+{
+    Arm_Joint_Command_s command;
+    Arm_Command_Result_e result;
+
+    memset(&command, 0, sizeof(command));
+    command.command_id = AppArmCommandIdNext();
+    command.move_type = ARM_MOVE_LINEAR;
+    memcpy(command.q_deg, app_place_profile.release_clearance_q_deg,
+           sizeof(command.q_deg));
+    command.q_deg[ARM_JOINT_BASE_YAW] =
+        app_place_profile.rotate_to_front_target_q1_deg;
+    command.waypoint_valid = 1u;
+    memcpy(command.waypoint_q_deg, app_place_profile.release_clearance_q_deg,
+           sizeof(command.waypoint_q_deg));
+    memcpy(g_app_arm_pick_place_test_debug.target_q_deg, command.q_deg,
+           sizeof(command.q_deg));
     result = ArmSubmitJointCommand(&command);
     g_app_arm_pick_place_test_debug.active_command_id = command.command_id;
     g_app_arm_pick_place_test_debug.submit_result = (uint32_t)result;
@@ -716,7 +759,7 @@ static uint8_t AppArmFlowTransferSegmentWithinLimits(
 
 /** 按实际关节与ID1反馈复核AC放置准备的Y上限和第一段抬高量。 */
 static uint8_t AppArmFlowTransferPathWithinLimits(
-    float *relative_pitch_deg_out)
+    float *relative_pitch_deg_out, uint8_t require_full_safe_pose)
 {
     const Arm_State_s *arm = ArmGetState();
     const Arm_Tool_State_s *tool = ArmToolGetState();
@@ -805,7 +848,8 @@ static uint8_t AppArmFlowTransferPathWithinLimits(
         g_app_arm_pick_place_test_debug.transfer_reject_reason =
             APP_ARM_TRANSFER_REJECT_Z_RAISE;
     }
-    if (y_safe != 0u && z_safe != 0u) {
+    if (y_safe != 0u && z_safe != 0u &&
+        require_full_safe_pose != 0u) {
         y_safe = AppArmFlowTransferSegmentWithinLimits(
             app_place_profile.transfer_waypoint_q_deg,
             app_place_profile.safe_q_deg, relative_pitch_deg,
@@ -830,6 +874,56 @@ static uint8_t AppArmFlowTransferPathWithinLimits(
 }
 
 /**
+ * AC快速放置：抓取后只要求先朝脱离waypoint运动并完成抬高校验，
+ * 然后在同一条关节route里直接转到后方release。这个脱离点只用于
+ * 避免底座旋转时扫到后方栏框，不再要求完整到达safe_q_deg。
+ */
+static uint8_t AppArmFlowSubmitTransferClearanceToRelease(uint32_t now_ms)
+{
+    Arm_Joint_Command_s command;
+    Arm_Command_Result_e result;
+    float relative_pitch_deg = 0.0f;
+
+    if (!AppArmFlowTransferPathWithinLimits(&relative_pitch_deg, 0u)) {
+        AppArmFlowFail(APP_ARM_PICK_PLACE_FAILURE_COMMAND_SUBMIT,
+                       (uint32_t)ARM_COMMAND_PREFLIGHT_FAILED, now_ms);
+        return 0u;
+    }
+    (void)relative_pitch_deg;
+    memset(&command, 0, sizeof(command));
+    command.command_id = AppArmCommandIdNext();
+    command.move_type = ARM_MOVE_LINEAR;
+    memcpy(command.q_deg, app_place_profile.release_q_deg,
+           sizeof(command.q_deg));
+    command.waypoint_valid = app_place_profile.transfer_waypoint_valid;
+    if (command.waypoint_valid != 0u) {
+        memcpy(command.waypoint_q_deg,
+               app_place_profile.transfer_waypoint_q_deg,
+               sizeof(command.waypoint_q_deg));
+    }
+    command.tool_relative_pitch_valid = 1u;
+    command.tool_relative_pitch_deg =
+        app_place_profile.release_tool_relative_pitch_deg;
+    memcpy(g_app_arm_pick_place_test_debug.target_q_deg, command.q_deg,
+           sizeof(command.q_deg));
+    g_app_arm_pick_place_test_debug.pitch_target_deg =
+        ArmToolSmallLinkPitchFromJoint(command.q_deg) +
+        command.tool_relative_pitch_deg;
+    result = ArmSubmitJointCommand(&command);
+    g_app_arm_pick_place_test_debug.active_command_id = command.command_id;
+    g_app_arm_pick_place_test_debug.submit_result = (uint32_t)result;
+    if (result != ARM_COMMAND_OK) {
+        g_app_arm_pick_place_test_debug.command_result = (uint32_t)result;
+        g_app_arm_pick_place_test_debug.transfer_reject_reason =
+            APP_ARM_TRANSFER_REJECT_COMMAND_SUBMIT;
+        AppArmFlowFail(APP_ARM_PICK_PLACE_FAILURE_COMMAND_SUBMIT,
+                       (uint32_t)result, now_ms);
+        return 0u;
+    }
+    return 1u;
+}
+
+/**
  * 放置准备阶段按profile选择直接到安全姿态，或经显式关节过渡点到达。
  * 轨迹层对每段逐1deg预检；AC约束路径显式带入钳位后的ID1相对俯仰。
  */
@@ -841,7 +935,7 @@ static uint8_t AppArmFlowSubmitTransferViaWaypoint(uint32_t now_ms)
     uint8_t relative_pitch_valid = 0u;
 
     if (app_place_profile.transfer_path_constraints_enabled != 0u &&
-        !AppArmFlowTransferPathWithinLimits(&relative_pitch_deg)) {
+        !AppArmFlowTransferPathWithinLimits(&relative_pitch_deg, 1u)) {
         AppArmFlowFail(APP_ARM_PICK_PLACE_FAILURE_COMMAND_SUBMIT,
                        (uint32_t)ARM_COMMAND_PREFLIGHT_FAILED, now_ms);
         return 0u;
@@ -1007,7 +1101,12 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
 {
     switch (app_place_step) {
     case APP_ARM_PLACE_STEP_SUBMIT_TRANSFER:
-        if (AppArmFlowSubmitTransferViaWaypoint(now_ms)) {
+        if (app_place_profile.transfer_path_constraints_enabled != 0u) {
+            if (AppArmFlowSubmitTransferClearanceToRelease(now_ms)) {
+                AppArmFlowSetPlaceStep(
+                    APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_PLACE, now_ms);
+            }
+        } else if (AppArmFlowSubmitTransferViaWaypoint(now_ms)) {
             AppArmFlowSetPlaceStep(
                 APP_ARM_PLACE_STEP_WAIT_TRANSFER, now_ms);
         }
@@ -1018,10 +1117,7 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
                 host, g_app_arm_pick_place_test_debug.active_command_id,
                 now_ms)) {
             AppArmFlowSetPlaceStep(
-                app_place_profile.transfer_path_constraints_enabled != 0u ?
-                    APP_ARM_PLACE_STEP_SUBMIT_REAR_STAGING :
-                    APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_PLACE,
-                now_ms);
+                APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_PLACE, now_ms);
         }
         break;
 
@@ -1111,7 +1207,10 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
                 host, g_app_arm_pick_place_test_debug.active_command_id,
                 now_ms)) {
             AppArmFlowSetPlaceStep(
-                APP_ARM_PLACE_STEP_SUBMIT_RELEASE_CLEARANCE, now_ms);
+                app_place_profile.transfer_path_constraints_enabled != 0u ?
+                    APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_FRONT :
+                    APP_ARM_PLACE_STEP_SUBMIT_RELEASE_CLEARANCE,
+                now_ms);
         }
         break;
 
@@ -1140,9 +1239,12 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
         break;
 
     case APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_FRONT:
-        if (AppArmFlowSubmitDirectedBaseRotation(
-                app_place_profile.rotate_to_front_waypoint_q1_deg,
-                app_place_profile.rotate_to_front_target_q1_deg, now_ms)) {
+        if ((app_place_profile.transfer_path_constraints_enabled != 0u &&
+             AppArmFlowSubmitFrontRotationViaReleaseClearance(now_ms)) ||
+            (app_place_profile.transfer_path_constraints_enabled == 0u &&
+             AppArmFlowSubmitDirectedBaseRotation(
+                 app_place_profile.rotate_to_front_waypoint_q1_deg,
+                 app_place_profile.rotate_to_front_target_q1_deg, now_ms))) {
             AppArmFlowSetPlaceStep(
                 APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_FRONT, now_ms);
         }

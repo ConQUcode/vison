@@ -214,6 +214,7 @@ typedef struct {
     float tool_pitch_deg;
     uint8_t tool_yaw_valid;
     float tool_yaw_deg;
+    Arm_Cartesian_Safety_Profile_e safety_profile;
 } Arm_Cartesian_Command_s;
 
 /** 夹爪中心稳定命令；调用方无需再填写容易混淆的control_point。 */
@@ -224,6 +225,7 @@ typedef struct {
     float max_speed_mm_s;
     uint8_t tool_pitch_valid;
     float tool_pitch_deg;
+    Arm_Cartesian_Safety_Profile_e safety_profile;
 } Arm_Tool_Center_Command_s;
 
 typedef struct {

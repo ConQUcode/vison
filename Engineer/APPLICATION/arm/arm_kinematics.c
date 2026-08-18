@@ -99,15 +99,24 @@ uint8_t ArmJointPoseWithinSoftLimits(const float q_deg[3])
 
 uint8_t ArmAutoPoseIsSafe(const float q_deg[3])
 {
-    if (!ArmJointPoseWithinSoftLimits(q_deg)) {
+    return ArmAutoPoseIsSafeWithQ1Limits(q_deg, ARM_AUTO_Q1_MIN_DEG,
+                                          ARM_AUTO_Q1_MAX_DEG);
+}
+
+uint8_t ArmAutoPoseIsSafeWithQ1Limits(const float q_deg[3],
+                                      float q1_min_deg,
+                                      float q1_max_deg)
+{
+    if (!ArmJointPoseWithinSoftLimits(q_deg) || !isfinite(q1_min_deg) ||
+        !isfinite(q1_max_deg) || q1_min_deg > q1_max_deg) {
         return 0u;
     }
     /*
      * 自动区域与软限位必须使用同一数值容差。圆弧端点理论上为q1=90deg，
      * 但float三角函数会产生约1e-5deg误差；无容差复查会把边界合法点误拒。
      */
-    return q_deg[0] >= ARM_AUTO_Q1_MIN_DEG - ARM_LIMIT_TOLERANCE_DEG &&
-           q_deg[0] <= ARM_AUTO_Q1_MAX_DEG + ARM_LIMIT_TOLERANCE_DEG &&
+    return q_deg[0] >= q1_min_deg - ARM_LIMIT_TOLERANCE_DEG &&
+           q_deg[0] <= q1_max_deg + ARM_LIMIT_TOLERANCE_DEG &&
            q_deg[1] >= ARM_AUTO_Q2_MIN_DEG - ARM_LIMIT_TOLERANCE_DEG &&
            q_deg[1] <= ARM_AUTO_Q2_MAX_DEG + ARM_LIMIT_TOLERANCE_DEG &&
            q_deg[2] >= ARM_AUTO_Q3_MIN_DEG - ARM_LIMIT_TOLERANCE_DEG &&
@@ -228,6 +237,8 @@ static Arm_IK_Status_e ArmInverseKinematics3DOFInternal(
     uint8_t base_direction_constraint_valid,
     float required_base_direction_deg,
     float base_direction_tolerance_deg,
+    float q1_min_deg,
+    float q1_max_deg,
     float all_q_deg[ARM_TOOL_CENTER_IK_MAX_CANDIDATES][3],
     uint8_t *all_count,
     Arm_IK_Result_s *result)
@@ -252,6 +263,8 @@ static Arm_IK_Status_e ArmInverseKinematics3DOFInternal(
         !isfinite(target->x_mm) || !isfinite(target->y_mm) ||
         !isfinite(target->z_mm) || !isfinite(seed_q_deg[0]) ||
         !isfinite(seed_q_deg[1]) || !isfinite(seed_q_deg[2]) ||
+        !isfinite(q1_min_deg) || !isfinite(q1_max_deg) ||
+        q1_min_deg > q1_max_deg ||
         (base_direction_constraint_valid != 0u &&
          (!isfinite(required_base_direction_deg) ||
           !isfinite(base_direction_tolerance_deg) ||
@@ -351,7 +364,8 @@ static Arm_IK_Status_e ArmInverseKinematics3DOFInternal(
                 continue;
             }
             limited_found = 1u;
-            if (!ArmAutoPoseIsSafe(candidate)) {
+            if (!ArmAutoPoseIsSafeWithQ1Limits(candidate, q1_min_deg,
+                                                q1_max_deg)) {
                 continue;
             }
 
@@ -409,6 +423,8 @@ Arm_IK_Status_e ArmInverseKinematics3DOF(const Arm_Position_s *target,
 {
     return ArmInverseKinematics3DOFInternal(target, seed_q_deg,
                                              0u, 0.0f, 0.0f,
+                                             ARM_AUTO_Q1_MIN_DEG,
+                                             ARM_AUTO_Q1_MAX_DEG,
                                              NULL, NULL, result);
 }
 
@@ -432,6 +448,22 @@ Arm_IK_Status_e ArmInverseKinematicsToolCenterAll(
     const Arm_Position_s *target_center_mm,
     float tool_pitch_deg,
     const float seed_q_deg[3],
+    Arm_Tool_Center_IK_Candidate_s candidates[
+        ARM_TOOL_CENTER_IK_MAX_CANDIDATES],
+    uint8_t *candidate_count)
+{
+    return ArmInverseKinematicsToolCenterAllWithQ1Limits(
+        target_center_mm, tool_pitch_deg, seed_q_deg,
+        ARM_AUTO_Q1_MIN_DEG, ARM_AUTO_Q1_MAX_DEG,
+        candidates, candidate_count);
+}
+
+Arm_IK_Status_e ArmInverseKinematicsToolCenterAllWithQ1Limits(
+    const Arm_Position_s *target_center_mm,
+    float tool_pitch_deg,
+    const float seed_q_deg[3],
+    float q1_min_deg,
+    float q1_max_deg,
     Arm_Tool_Center_IK_Candidate_s candidates[
         ARM_TOOL_CENTER_IK_MAX_CANDIDATES],
     uint8_t *candidate_count)
@@ -485,6 +517,7 @@ Arm_IK_Status_e ArmInverseKinematicsToolCenterAll(
         if (ArmInverseKinematics3DOFInternal(
                 &wrist_candidate, seed_q_deg, 1u, direction_deg,
                 ARM_TOOL_IK_BASE_DIRECTION_TOLERANCE_DEG,
+                q1_min_deg, q1_max_deg,
                 wrist_q_deg, &wrist_count,
                 &wrist_ik) != ARM_IK_OK) {
             best_failure = wrist_ik.status;
@@ -540,6 +573,19 @@ Arm_IK_Status_e ArmInverseKinematicsToolCenter(
     const float seed_q_deg[3],
     Arm_Tool_Center_IK_Result_s *result)
 {
+    return ArmInverseKinematicsToolCenterWithQ1Limits(
+        target_center_mm, tool_pitch_deg, seed_q_deg,
+        ARM_AUTO_Q1_MIN_DEG, ARM_AUTO_Q1_MAX_DEG, result);
+}
+
+Arm_IK_Status_e ArmInverseKinematicsToolCenterWithQ1Limits(
+    const Arm_Position_s *target_center_mm,
+    float tool_pitch_deg,
+    const float seed_q_deg[3],
+    float q1_min_deg,
+    float q1_max_deg,
+    Arm_Tool_Center_IK_Result_s *result)
+{
     Arm_Tool_Center_IK_Candidate_s candidates[
         ARM_TOOL_CENTER_IK_MAX_CANDIDATES];
     Arm_IK_Status_e status;
@@ -552,8 +598,9 @@ Arm_IK_Status_e ArmInverseKinematicsToolCenter(
     }
     memset(result, 0, sizeof(*result));
     memset(candidates, 0, sizeof(candidates));
-    status = ArmInverseKinematicsToolCenterAll(
+    status = ArmInverseKinematicsToolCenterAllWithQ1Limits(
         target_center_mm, tool_pitch_deg, seed_q_deg,
+        q1_min_deg, q1_max_deg,
         candidates, &candidate_count);
     result->status = status;
     result->candidate_count = candidate_count;

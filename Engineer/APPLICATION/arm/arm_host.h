@@ -27,6 +27,12 @@ typedef enum {
 } Arm_Move_Type_e;
 
 typedef enum {
+    ARM_CARTESIAN_SAFETY_NORMAL = 0,
+    /* AC地面侧抓：低位允许底座进入侧后方，但仍限制在+/-115deg内。 */
+    ARM_CARTESIAN_SAFETY_AC_SIDE_PICK
+} Arm_Cartesian_Safety_Profile_e;
+
+typedef enum {
     ARM_COMMAND_OK = 0,
     ARM_COMMAND_BUSY,
     ARM_COMMAND_NOT_READY,
@@ -96,6 +102,7 @@ typedef struct {
     float tool_pitch_deg;     /* 夹爪中心线的世界绝对俯仰角，单位deg。 */
     uint8_t tool_yaw_valid;   /* 兼容保留；当前必须为0，否则返回UNSUPPORTED。 */
     float tool_yaw_deg;       /* 兼容保留，不再控制ID2。 */
+    Arm_Cartesian_Safety_Profile_e safety_profile;
 } Arm_Command_Cartesian_s;
 
 typedef struct {

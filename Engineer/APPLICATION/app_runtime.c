@@ -44,10 +44,177 @@
 
 App_Arm_Teach_Debug_s g_app_arm_teach_debug;
 App_Arm_Bd_Observation_Debug_s g_app_arm_bd_observation_debug;
+App_Arm_Clearance_Test_Debug_s g_app_arm_clearance_test_debug;
+App_Arm_Qr_Pose_Test_Debug_s g_app_arm_qr_pose_test_debug;
 
 #if APP_CHASSIS_ENABLED
 /* INS_Init 返回的姿态快照只由 INS 写、底盘读。 */
 static attitude_t *app_chassis_imu;
+#endif
+
+#if APP_ARM_QR_POSE_TEST_ENABLED
+static void AppArmQrPoseTestLoadTarget(void)
+{
+    Arm_Position_s target_center;
+
+    g_app_arm_qr_pose_test_debug.target_q_deg[ARM_JOINT_BASE_YAW] =
+        APP_ARM_QR_POSE_Q1_DEG;
+    g_app_arm_qr_pose_test_debug.target_q_deg[ARM_JOINT_SHOULDER] =
+        APP_ARM_QR_POSE_Q2_DEG;
+    g_app_arm_qr_pose_test_debug.target_q_deg[ARM_JOINT_ELBOW] =
+        APP_ARM_QR_POSE_Q3_DEG;
+    g_app_arm_qr_pose_test_debug.target_tool_relative_pitch_deg =
+        APP_ARM_QR_POSE_TOOL_REL_PITCH_DEG;
+    g_app_arm_qr_pose_test_debug.target_tool_pitch_deg =
+        ArmToolSmallLinkPitchFromJoint(
+            g_app_arm_qr_pose_test_debug.target_q_deg) +
+        APP_ARM_QR_POSE_TOOL_REL_PITCH_DEG;
+    if (ArmForwardKinematicsToolCenter(
+            g_app_arm_qr_pose_test_debug.target_q_deg,
+            g_app_arm_qr_pose_test_debug.target_tool_pitch_deg,
+            &target_center) != 0u) {
+        g_app_arm_qr_pose_test_debug.target_center_mm[0] =
+            target_center.x_mm;
+        g_app_arm_qr_pose_test_debug.target_center_mm[1] =
+            target_center.y_mm;
+        g_app_arm_qr_pose_test_debug.target_center_mm[2] =
+            target_center.z_mm;
+    }
+}
+
+static void AppArmQrPoseTestUpdateWatch(const Arm_Host_Status_s *host)
+{
+    float dx;
+    float dy;
+    float dz;
+
+    if (host == NULL) {
+        return;
+    }
+    g_app_arm_qr_pose_test_debug.host_ready = host->ready;
+    g_app_arm_qr_pose_test_debug.host_busy = host->busy;
+    g_app_arm_qr_pose_test_debug.command_state =
+        (uint32_t)(host->active_command_id ==
+            g_app_arm_qr_pose_test_debug.command_id ?
+            host->active_command_state : host->last_command_state);
+    g_app_arm_qr_pose_test_debug.command_result =
+        (uint32_t)(host->active_command_id ==
+            g_app_arm_qr_pose_test_debug.command_id ?
+            ARM_COMMAND_OK : host->last_command_result);
+    g_app_arm_qr_pose_test_debug.fault_code = host->fault_code;
+    g_app_arm_qr_pose_test_debug.path_preflight_passed =
+        g_arm_motion_debug.path_preflight_passed;
+    g_app_arm_qr_pose_test_debug.trajectory_progress =
+        host->trajectory_progress;
+    for (uint8_t axis = 0u; axis < 3u; ++axis) {
+        g_app_arm_qr_pose_test_debug.actual_q_deg[axis] =
+            host->q_feedback_deg[axis];
+        g_app_arm_qr_pose_test_debug.q_error_deg[axis] =
+            g_app_arm_qr_pose_test_debug.target_q_deg[axis] -
+            host->q_feedback_deg[axis];
+    }
+    g_app_arm_qr_pose_test_debug.actual_center_mm[0] =
+        host->tool_tip_mm.x_mm;
+    g_app_arm_qr_pose_test_debug.actual_center_mm[1] =
+        host->tool_tip_mm.y_mm;
+    g_app_arm_qr_pose_test_debug.actual_center_mm[2] =
+        host->tool_tip_mm.z_mm;
+    g_app_arm_qr_pose_test_debug.actual_tool_pitch_deg =
+        host->tool_pitch_feedback_deg;
+    dx = host->tool_tip_mm.x_mm -
+        g_app_arm_qr_pose_test_debug.target_center_mm[0];
+    dy = host->tool_tip_mm.y_mm -
+        g_app_arm_qr_pose_test_debug.target_center_mm[1];
+    dz = host->tool_tip_mm.z_mm -
+        g_app_arm_qr_pose_test_debug.target_center_mm[2];
+    g_app_arm_qr_pose_test_debug.center_error_mm =
+        sqrtf(dx * dx + dy * dy + dz * dz);
+    g_app_arm_qr_pose_test_debug.pitch_error_deg =
+        host->tool_pitch_feedback_deg -
+        g_app_arm_qr_pose_test_debug.target_tool_pitch_deg;
+}
+
+/** HOME完成后提交一次二维码识别姿态并保持，不运行底盘和上位机协议。 */
+static void AppArmQrPoseTestTask(uint32_t now_ms)
+{
+    Arm_Host_Status_s host;
+    Arm_Joint_Command_s command;
+    Arm_Command_Result_e result;
+
+    if (ArmGetHostStatus(&host) == 0u) {
+        return;
+    }
+    AppArmQrPoseTestUpdateWatch(&host);
+    if (host.state == ARM_HOST_STATE_FAULT ||
+        host.state == ARM_HOST_STATE_ESTOP) {
+        g_app_arm_qr_pose_test_debug.state =
+            (uint8_t)APP_ARM_QR_POSE_FAILED;
+        g_app_arm_qr_pose_test_debug.state_tick_ms = now_ms;
+        return;
+    }
+
+    switch ((App_Arm_Qr_Pose_Test_State_e)
+            g_app_arm_qr_pose_test_debug.state) {
+    case APP_ARM_QR_POSE_WAIT_READY:
+        if (host.ready == 0u || host.busy != 0u) {
+            break;
+        }
+        if (g_app_arm_qr_pose_test_debug.command_id == 0u) {
+            g_app_arm_qr_pose_test_debug.command_id =
+                AppArmCommandIdNext();
+        }
+        memset(&command, 0, sizeof(command));
+        command.command_id = g_app_arm_qr_pose_test_debug.command_id;
+        command.move_type = ARM_MOVE_LINEAR;
+        memcpy(command.q_deg,
+               g_app_arm_qr_pose_test_debug.target_q_deg,
+               sizeof(command.q_deg));
+        command.tool_relative_pitch_valid = 1u;
+        command.tool_relative_pitch_deg =
+            g_app_arm_qr_pose_test_debug.target_tool_relative_pitch_deg;
+        result = ArmSubmitJointCommand(&command);
+        g_app_arm_qr_pose_test_debug.submit_result = (uint32_t)result;
+        if (result == ARM_COMMAND_OK) {
+            g_app_arm_qr_pose_test_debug.state =
+                (uint8_t)APP_ARM_QR_POSE_SUBMITTED;
+            g_app_arm_qr_pose_test_debug.state_tick_ms = now_ms;
+        } else if (result != ARM_COMMAND_BUSY &&
+                   result != ARM_COMMAND_NOT_READY) {
+            g_app_arm_qr_pose_test_debug.state =
+                (uint8_t)APP_ARM_QR_POSE_FAILED;
+            g_app_arm_qr_pose_test_debug.state_tick_ms = now_ms;
+        }
+        break;
+
+    case APP_ARM_QR_POSE_SUBMITTED:
+        if (host.last_command_id !=
+            g_app_arm_qr_pose_test_debug.command_id) {
+            break;
+        }
+        g_app_arm_qr_pose_test_debug.command_state =
+            (uint32_t)host.last_command_state;
+        g_app_arm_qr_pose_test_debug.command_result =
+            (uint32_t)host.last_command_result;
+        if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+            host.last_command_result == ARM_COMMAND_OK) {
+            g_app_arm_qr_pose_test_debug.state =
+                (uint8_t)APP_ARM_QR_POSE_HOLDING;
+            g_app_arm_qr_pose_test_debug.state_tick_ms = now_ms;
+        } else if (host.last_command_state == ARM_COMMAND_STATE_REJECTED ||
+                   host.last_command_state == ARM_COMMAND_STATE_CANCELLED ||
+                   host.last_command_state == ARM_COMMAND_STATE_FAULTED) {
+            g_app_arm_qr_pose_test_debug.state =
+                (uint8_t)APP_ARM_QR_POSE_FAILED;
+            g_app_arm_qr_pose_test_debug.state_tick_ms = now_ms;
+        }
+        break;
+
+    case APP_ARM_QR_POSE_HOLDING:
+    case APP_ARM_QR_POSE_FAILED:
+    default:
+        break;
+    }
+}
 #endif
 
 #if APP_HUANER_FEEDBACK_ENABLED
@@ -129,6 +296,146 @@ static void AppChassisOneMeterTestTask(uint32_t now_ms)
             app_chassis_test_state = APP_CHASSIS_TEST_STRAIGHT_1;
         }
         break;
+    default:
+        break;
+    }
+}
+#endif
+
+#if APP_ARM_CHASSIS_CLEARANCE_TEST_ENABLED
+static void AppArmClearanceTestLoadTarget(void)
+{
+    g_app_arm_clearance_test_debug.target_q_deg[ARM_JOINT_BASE_YAW] =
+        APP_ARM_CHASSIS_CLEARANCE_Q1_DEG;
+    g_app_arm_clearance_test_debug.target_q_deg[ARM_JOINT_SHOULDER] =
+        APP_ARM_CHASSIS_CLEARANCE_Q2_DEG;
+    g_app_arm_clearance_test_debug.target_q_deg[ARM_JOINT_ELBOW] =
+        APP_ARM_CHASSIS_CLEARANCE_Q3_DEG;
+    g_app_arm_clearance_test_debug.target_tool_relative_pitch_deg =
+        APP_ARM_CHASSIS_CLEARANCE_TOOL_REL_PITCH_DEG;
+    g_app_arm_clearance_test_debug.target_tool_pitch_deg =
+        ArmToolSmallLinkPitchFromJoint(
+            g_app_arm_clearance_test_debug.target_q_deg) +
+        APP_ARM_CHASSIS_CLEARANCE_TOOL_REL_PITCH_DEG;
+}
+
+static void AppArmClearanceTestUpdateWatch(
+    const Arm_Host_Status_s *host)
+{
+    if (host == NULL) {
+        return;
+    }
+    g_app_arm_clearance_test_debug.host_ready = host->ready;
+    g_app_arm_clearance_test_debug.host_busy = host->busy;
+    g_app_arm_clearance_test_debug.command_state =
+        (uint32_t)(host->active_command_id ==
+            g_app_arm_clearance_test_debug.command_id ?
+            host->active_command_state : host->last_command_state);
+    g_app_arm_clearance_test_debug.command_result =
+        (uint32_t)(host->active_command_id ==
+            g_app_arm_clearance_test_debug.command_id ?
+            ARM_COMMAND_OK : host->last_command_result);
+    g_app_arm_clearance_test_debug.fault_code = host->fault_code;
+    g_app_arm_clearance_test_debug.path_preflight_passed =
+        g_arm_motion_debug.path_preflight_passed;
+    g_app_arm_clearance_test_debug.trajectory_progress =
+        host->trajectory_progress;
+    for (uint8_t axis = 0u; axis < 3u; ++axis) {
+        g_app_arm_clearance_test_debug.actual_q_deg[axis] =
+            host->q_feedback_deg[axis];
+        g_app_arm_clearance_test_debug.q_error_deg[axis] =
+            g_app_arm_clearance_test_debug.target_q_deg[axis] -
+            host->q_feedback_deg[axis];
+    }
+    g_app_arm_clearance_test_debug.actual_center_mm[0] =
+        host->tool_tip_mm.x_mm;
+    g_app_arm_clearance_test_debug.actual_center_mm[1] =
+        host->tool_tip_mm.y_mm;
+    g_app_arm_clearance_test_debug.actual_center_mm[2] =
+        host->tool_tip_mm.z_mm;
+    g_app_arm_clearance_test_debug.actual_tool_pitch_deg =
+        host->tool_pitch_feedback_deg;
+}
+
+/** HOME完成后提交一次底盘转弯避让姿态并保持，不运行底盘。 */
+static void AppArmClearanceTestTask(uint32_t now_ms)
+{
+    Arm_Host_Status_s host;
+    Arm_Joint_Command_s command;
+    Arm_Command_Result_e result;
+
+    if (ArmGetHostStatus(&host) == 0u) {
+        return;
+    }
+    AppArmClearanceTestUpdateWatch(&host);
+    if (host.state == ARM_HOST_STATE_FAULT ||
+        host.state == ARM_HOST_STATE_ESTOP) {
+        g_app_arm_clearance_test_debug.state =
+            (uint8_t)APP_ARM_CLEARANCE_FAILED;
+        g_app_arm_clearance_test_debug.state_tick_ms = now_ms;
+        return;
+    }
+
+    switch ((App_Arm_Clearance_Test_State_e)
+            g_app_arm_clearance_test_debug.state) {
+    case APP_ARM_CLEARANCE_WAIT_READY:
+        if (host.ready == 0u || host.busy != 0u) {
+            break;
+        }
+        if (g_app_arm_clearance_test_debug.command_id == 0u) {
+            g_app_arm_clearance_test_debug.command_id =
+                AppArmCommandIdNext();
+        }
+        memset(&command, 0, sizeof(command));
+        command.command_id =
+            g_app_arm_clearance_test_debug.command_id;
+        command.move_type = ARM_MOVE_LINEAR;
+        memcpy(command.q_deg,
+               g_app_arm_clearance_test_debug.target_q_deg,
+               sizeof(command.q_deg));
+        command.tool_relative_pitch_valid = 1u;
+        command.tool_relative_pitch_deg =
+            g_app_arm_clearance_test_debug.target_tool_relative_pitch_deg;
+        result = ArmSubmitJointCommand(&command);
+        g_app_arm_clearance_test_debug.submit_result =
+            (uint32_t)result;
+        if (result == ARM_COMMAND_OK) {
+            g_app_arm_clearance_test_debug.state =
+                (uint8_t)APP_ARM_CLEARANCE_SUBMITTED;
+            g_app_arm_clearance_test_debug.state_tick_ms = now_ms;
+        } else if (result != ARM_COMMAND_BUSY &&
+                   result != ARM_COMMAND_NOT_READY) {
+            g_app_arm_clearance_test_debug.state =
+                (uint8_t)APP_ARM_CLEARANCE_FAILED;
+            g_app_arm_clearance_test_debug.state_tick_ms = now_ms;
+        }
+        break;
+
+    case APP_ARM_CLEARANCE_SUBMITTED:
+        if (host.last_command_id !=
+            g_app_arm_clearance_test_debug.command_id) {
+            break;
+        }
+        g_app_arm_clearance_test_debug.command_state =
+            (uint32_t)host.last_command_state;
+        g_app_arm_clearance_test_debug.command_result =
+            (uint32_t)host.last_command_result;
+        if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+            host.last_command_result == ARM_COMMAND_OK) {
+            g_app_arm_clearance_test_debug.state =
+                (uint8_t)APP_ARM_CLEARANCE_HOLDING;
+            g_app_arm_clearance_test_debug.state_tick_ms = now_ms;
+        } else if (host.last_command_state == ARM_COMMAND_STATE_REJECTED ||
+                   host.last_command_state == ARM_COMMAND_STATE_CANCELLED ||
+                   host.last_command_state == ARM_COMMAND_STATE_FAULTED) {
+            g_app_arm_clearance_test_debug.state =
+                (uint8_t)APP_ARM_CLEARANCE_FAILED;
+            g_app_arm_clearance_test_debug.state_tick_ms = now_ms;
+        }
+        break;
+
+    case APP_ARM_CLEARANCE_HOLDING:
+    case APP_ARM_CLEARANCE_FAILED:
     default:
         break;
     }
@@ -500,6 +807,20 @@ void AppInit(void)
     g_app_arm_bd_observation_debug.target_speed_mm_s =
         APP_ARM_BD_OBSERVATION_SPEED_MM_S;
     ArmInit();
+#elif APP_ARM_CHASSIS_CLEARANCE_TEST_ENABLED
+    memset(&g_app_arm_clearance_test_debug, 0,
+           sizeof(g_app_arm_clearance_test_debug));
+    g_app_arm_clearance_test_debug.state =
+        (uint8_t)APP_ARM_CLEARANCE_WAIT_READY;
+    AppArmClearanceTestLoadTarget();
+    ArmInit();
+#elif APP_ARM_QR_POSE_TEST_ENABLED
+    memset(&g_app_arm_qr_pose_test_debug, 0,
+           sizeof(g_app_arm_qr_pose_test_debug));
+    g_app_arm_qr_pose_test_debug.state =
+        (uint8_t)APP_ARM_QR_POSE_WAIT_READY;
+    AppArmQrPoseTestLoadTarget();
+    ArmInit();
 #elif APP_HUANER_FEEDBACK_ENABLED
     if (HuanerServoInit() != 0u) {
         app_huaner_next_id = 1u;
@@ -549,6 +870,10 @@ void AppArmTask(uint32_t now_ms)
     AppArmPostureTestTask(now_ms);
 #elif APP_ARM_BD_OBSERVATION_TEST_ENABLED
     AppArmBdObservationTask(now_ms);
+#elif APP_ARM_CHASSIS_CLEARANCE_TEST_ENABLED
+    AppArmClearanceTestTask(now_ms);
+#elif APP_ARM_QR_POSE_TEST_ENABLED
+    AppArmQrPoseTestTask(now_ms);
 #elif APP_ARM_TEACH_POINT_ENABLED
     (void)now_ms;
     AppArmTeachPointUpdate();

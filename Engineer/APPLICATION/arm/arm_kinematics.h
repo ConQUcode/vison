@@ -15,6 +15,9 @@ uint8_t ArmKinematicsSelfTest(float *error_mm);
 uint8_t ArmJointPoseWithinSoftLimits(const float q_deg[3]);
 /** 检查姿态是否允许自动轨迹使用，不包含启动脱困边界。 */
 uint8_t ArmAutoPoseIsSafe(const float q_deg[3]);
+uint8_t ArmAutoPoseIsSafeWithQ1Limits(const float q_deg[3],
+                                      float q1_min_deg,
+                                      float q1_max_deg);
 
 /** 组合主臂FK和117mm工具偏移，得到夹爪中心；q1正角朝世界Y正侧。 */
 uint8_t ArmForwardKinematicsToolCenter(
@@ -41,5 +44,22 @@ Arm_IK_Status_e ArmInverseKinematicsToolCenterAll(
     Arm_Tool_Center_IK_Candidate_s candidates[
         ARM_TOOL_CENTER_IK_MAX_CANDIDATES],
     uint8_t *candidate_count);
+Arm_IK_Status_e ArmInverseKinematicsToolCenterAllWithQ1Limits(
+    const Arm_Position_s *target_center_mm,
+    float tool_pitch_deg,
+    const float seed_q_deg[3],
+    float q1_min_deg,
+    float q1_max_deg,
+    Arm_Tool_Center_IK_Candidate_s candidates[
+        ARM_TOOL_CENTER_IK_MAX_CANDIDATES],
+    uint8_t *candidate_count);
+
+Arm_IK_Status_e ArmInverseKinematicsToolCenterWithQ1Limits(
+    const Arm_Position_s *target_center_mm,
+    float tool_pitch_deg,
+    const float seed_q_deg[3],
+    float q1_min_deg,
+    float q1_max_deg,
+    Arm_Tool_Center_IK_Result_s *result);
 
 #endif

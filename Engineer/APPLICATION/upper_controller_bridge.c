@@ -26,6 +26,7 @@
 #define UPPER_TASK_QR_RECOGNITION_POSE     4u
 #define UPPER_TASK_CURRENT_AREA            5u
 #define UPPER_TASK_RETURN_INITIAL_POSE     6u
+#define UPPER_TASK_ARM_RETRACT_POSE        7u
 #define UPPER_TASK_STATUS_PRIMARY          0u
 #define UPPER_TASK_STATUS_SECONDARY        1u
 #define UPPER_TASK_STATUS_AREA_D            3u
@@ -33,8 +34,10 @@
 #define UPPER_CALLBACK_CAMERA_GIMBAL       1u
 #define UPPER_CALLBACK_AC_SIDE_PICK        2u
 #define UPPER_CALLBACK_ARM_TARGET          3u
+#define UPPER_CALLBACK_QR_RECOGNITION_POSE 4u
 #define UPPER_CALLBACK_CURRENT_AREA        5u
 #define UPPER_CALLBACK_RETURN_INITIAL_POSE 6u
+#define UPPER_CALLBACK_ARM_RETRACT_POSE    7u
 #define UPPER_CALLBACK_COMPLETED           0u
 #define UPPER_CALLBACK_EXECUTING           1u
 #define UPPER_ARM_TARGET_MAX_ABS_M        10.0f
@@ -46,6 +49,7 @@
 #define UPPER_ARM_TARGET_GATE_DISCRETE_BUSY    (1u << 1)
 #define UPPER_ARM_TARGET_GATE_PICK_RUNNING     (1u << 2)
 #define UPPER_ARM_TARGET_GATE_SIDE_PICK_RUNNING (1u << 3)
+#define UPPER_ARM_TARGET_GATE_BD_PICK_UNSUPPORTED (1u << 4)
 
 Upper_Controller_Debug_s g_upper_controller_debug;
 Upper_Arm_Target_Debug_s g_arm_target_debug;
@@ -122,7 +126,25 @@ static uint8_t UpperControllerArmTargetGateFlags(void)
         APP_ARM_SIDE_PICK_PLACE_RUNNING) {
         flags |= UPPER_ARM_TARGET_GATE_SIDE_PICK_RUNNING;
     }
+    if (g_upper_controller_debug.observe_area_group !=
+        UPPER_OBSERVE_AREA_AC) {
+        flags |= UPPER_ARM_TARGET_GATE_BD_PICK_UNSUPPORTED;
+    }
     return flags;
+}
+
+static Upper_Observe_Area_Group_e UpperControllerAreaGroup(
+    Upper_Controller_Area_e area)
+{
+    if (area == UPPER_CONTROLLER_AREA_A ||
+        area == UPPER_CONTROLLER_AREA_C) {
+        return UPPER_OBSERVE_AREA_AC;
+    }
+    if (area == UPPER_CONTROLLER_AREA_B ||
+        area == UPPER_CONTROLLER_AREA_D) {
+        return UPPER_OBSERVE_AREA_BD;
+    }
+    return UPPER_OBSERVE_AREA_UNKNOWN;
 }
 
 static uint8_t UpperControllerDiscreteCommandValid(
@@ -147,16 +169,44 @@ static uint8_t UpperControllerDiscreteCommandValid(
     if (packet->task_id == UPPER_TASK_RETURN_INITIAL_POSE) {
         return packet->task_status == UPPER_TASK_STATUS_PRIMARY;
     }
+    if (packet->task_id == UPPER_TASK_ARM_RETRACT_POSE) {
+        return packet->task_status == UPPER_TASK_STATUS_PRIMARY;
+    }
     return 0u;
 }
 
 static void UpperControllerApplyCurrentArea(
     const Packet_StateMachineCommand *packet)
 {
-    g_upper_controller_debug.current_area =
+    Upper_Controller_Area_e new_area =
         (Upper_Controller_Area_e)packet->task_status;
+
+    if (g_upper_controller_debug.current_area_valid != 0u &&
+        g_upper_controller_debug.current_area != new_area &&
+        g_upper_controller_debug.ac_observe_state ==
+            UPPER_AC_OBSERVE_HOLDING) {
+        g_upper_controller_debug.ac_observe_state = UPPER_AC_OBSERVE_IDLE;
+        g_upper_controller_debug.ac_operation_status =
+            (uint8_t)UPPER_AC_OBSERVE_IDLE;
+        g_upper_controller_debug.ac_observe_capture_id = 0u;
+        g_upper_controller_debug.observe_area_group =
+            UPPER_OBSERVE_AREA_UNKNOWN;
+        g_upper_controller_debug.observe_area =
+            UPPER_CONTROLLER_AREA_UNKNOWN;
+    }
+    g_upper_controller_debug.current_area =
+        new_area;
     g_upper_controller_debug.current_area_valid = 1u;
     g_upper_controller_debug.current_area_update_count++;
+    /*
+     * AC区地面水果识别需要左右摄像头提前斜向下看。上位机声明当前
+     * 区域为A/C后，下位机直接复用camera gimbal的向下角度语义，
+     * 同步把左右摄像头置为-45deg；BD区观察/抓取后续单独确认。
+     */
+    if (UpperControllerAreaGroup(new_area) == UPPER_OBSERVE_AREA_AC) {
+        (void)Mg995ServoSetCameraAngles(UPPER_CAMERA_LOOK_DOWN_DEG,
+                                        UPPER_CAMERA_LOOK_DOWN_DEG);
+    }
     upper_current_area_callback_pending = 1u;
     g_upper_controller_debug.current_area_callback_pending = 1u;
 }
@@ -175,12 +225,73 @@ static void UpperControllerServiceCurrentAreaCallback(void)
     g_upper_controller_debug.discrete_complete_count++;
 }
 
-static void UpperControllerRejectUndefinedQrPose(void)
+static void UpperControllerSubmitQrPose(void)
 {
-    /* Protocol v0x740E426B names this command but defines no arm pose. */
-    g_upper_controller_debug.qr_pose_unsupported_count++;
-    g_upper_controller_debug.discrete_invalid_count++;
+    Arm_Joint_Command_s command;
+    Arm_Command_Result_e result;
+
+    if (g_upper_controller_debug.qr_pose_command_id == 0u) {
+        g_upper_controller_debug.qr_pose_command_id =
+            AppArmCommandIdNext();
+    }
+    memset(&command, 0, sizeof(command));
+    command.command_id = g_upper_controller_debug.qr_pose_command_id;
+    command.move_type = ARM_MOVE_LINEAR;
+    command.q_deg[ARM_JOINT_BASE_YAW] = APP_ARM_QR_POSE_Q1_DEG;
+    command.q_deg[ARM_JOINT_SHOULDER] = APP_ARM_QR_POSE_Q2_DEG;
+    command.q_deg[ARM_JOINT_ELBOW] = APP_ARM_QR_POSE_Q3_DEG;
+    command.tool_relative_pitch_valid = 1u;
+    command.tool_relative_pitch_deg =
+        APP_ARM_QR_POSE_TOOL_REL_PITCH_DEG;
+    result = ArmSubmitJointCommand(&command);
+    g_upper_controller_debug.qr_pose_submit_result = result;
+    if (result == ARM_COMMAND_BUSY || result == ARM_COMMAND_NOT_READY) {
+        return;
+    }
+    if (result != ARM_COMMAND_OK) {
+        g_upper_controller_debug.qr_pose_fail_count++;
+        g_upper_controller_debug.discrete_invalid_count++;
+        g_upper_controller_debug.discrete_state = UPPER_DISCRETE_IDLE;
+        g_upper_controller_debug.qr_pose_command_id = 0u;
+        return;
+    }
+    g_upper_controller_debug.qr_pose_start_count++;
+    g_upper_controller_debug.discrete_state = UPPER_DISCRETE_RUNNING;
+    (void)UpperControllerSendCallback(
+        UPPER_CALLBACK_QR_RECOGNITION_POSE,
+        UPPER_CALLBACK_EXECUTING);
+}
+
+static void UpperControllerPollQrPose(void)
+{
+    Arm_Host_Status_s status;
+    uint32_t command_id = g_upper_controller_debug.qr_pose_command_id;
+
+    if (ArmGetHostStatus(&status) == 0u || command_id == 0u) {
+        return;
+    }
+    if (status.last_command_id != command_id) {
+        return;
+    }
+    if (status.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+        status.last_command_result == ARM_COMMAND_OK) {
+        (void)UpperControllerSendCallback(
+            UPPER_CALLBACK_QR_RECOGNITION_POSE,
+            UPPER_CALLBACK_COMPLETED);
+        g_upper_controller_debug.qr_pose_complete_count++;
+        g_upper_controller_debug.discrete_complete_count++;
+    } else if (status.last_command_state != ARM_COMMAND_STATE_REJECTED &&
+               status.last_command_state != ARM_COMMAND_STATE_CANCELLED &&
+               status.last_command_state != ARM_COMMAND_STATE_FAULTED) {
+        return;
+    } else {
+        g_upper_controller_debug.qr_pose_submit_result =
+            status.last_command_result;
+        g_upper_controller_debug.qr_pose_fail_count++;
+        g_upper_controller_debug.discrete_invalid_count++;
+    }
     g_upper_controller_debug.discrete_state = UPPER_DISCRETE_IDLE;
+    g_upper_controller_debug.qr_pose_command_id = 0u;
 }
 
 static uint8_t UpperControllerResetHomeActive(void)
@@ -201,6 +312,8 @@ static void UpperControllerClearTaskStateForReset(uint32_t now_ms)
     upper_current_area_callback_pending = 0u;
     g_upper_controller_debug.current_area_callback_pending = 0u;
     g_upper_controller_debug.gripper_command_id = 0u;
+    g_upper_controller_debug.qr_pose_command_id = 0u;
+    g_upper_controller_debug.arm_retract_command_id = 0u;
     g_upper_controller_debug.camera_motion_start_tick = 0u;
     g_upper_controller_debug.ac_right_pending = 0u;
     g_upper_controller_debug.ac_operation_status =
@@ -450,15 +563,168 @@ static void UpperControllerPollGripperCommand(void)
     g_upper_controller_debug.gripper_command_id = 0u;
 }
 
+static void UpperControllerSubmitArmRetractPose(void)
+{
+    Arm_Joint_Command_s command;
+    Arm_Command_Result_e result;
+
+    if (g_upper_controller_debug.arm_retract_command_id == 0u) {
+        g_upper_controller_debug.arm_retract_command_id =
+            AppArmCommandIdNext();
+    }
+    memset(&command, 0, sizeof(command));
+    command.command_id =
+        g_upper_controller_debug.arm_retract_command_id;
+    command.move_type = ARM_MOVE_LINEAR;
+    command.q_deg[ARM_JOINT_BASE_YAW] =
+        APP_ARM_CHASSIS_CLEARANCE_Q1_DEG;
+    command.q_deg[ARM_JOINT_SHOULDER] =
+        APP_ARM_CHASSIS_CLEARANCE_Q2_DEG;
+    command.q_deg[ARM_JOINT_ELBOW] =
+        APP_ARM_CHASSIS_CLEARANCE_Q3_DEG;
+    command.tool_relative_pitch_valid = 1u;
+    command.tool_relative_pitch_deg =
+        APP_ARM_CHASSIS_CLEARANCE_TOOL_REL_PITCH_DEG;
+    result = ArmSubmitJointCommand(&command);
+    g_upper_controller_debug.arm_retract_submit_result = result;
+    if (result == ARM_COMMAND_BUSY ||
+        result == ARM_COMMAND_NOT_READY) {
+        return;
+    }
+    if (result != ARM_COMMAND_OK) {
+        g_upper_controller_debug.arm_retract_fail_count++;
+        g_upper_controller_debug.discrete_invalid_count++;
+        g_upper_controller_debug.discrete_state = UPPER_DISCRETE_IDLE;
+        g_upper_controller_debug.arm_retract_command_id = 0u;
+        return;
+    }
+    g_upper_controller_debug.arm_retract_start_count++;
+    g_upper_controller_debug.discrete_state = UPPER_DISCRETE_RUNNING;
+    (void)UpperControllerSendCallback(
+        UPPER_CALLBACK_ARM_RETRACT_POSE, UPPER_CALLBACK_EXECUTING);
+}
+
+static void UpperControllerPollArmRetractPose(void)
+{
+    Arm_Host_Status_s status;
+    uint32_t command_id =
+        g_upper_controller_debug.arm_retract_command_id;
+
+    if (ArmGetHostStatus(&status) == 0u || command_id == 0u) {
+        return;
+    }
+    if (status.last_command_id != command_id) {
+        return;
+    }
+    if (status.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+        status.last_command_result == ARM_COMMAND_OK) {
+        (void)UpperControllerSendCallback(
+            UPPER_CALLBACK_ARM_RETRACT_POSE,
+            UPPER_CALLBACK_COMPLETED);
+        g_upper_controller_debug.arm_retract_complete_count++;
+        g_upper_controller_debug.discrete_complete_count++;
+    } else if (status.last_command_state != ARM_COMMAND_STATE_REJECTED &&
+               status.last_command_state != ARM_COMMAND_STATE_CANCELLED &&
+               status.last_command_state != ARM_COMMAND_STATE_FAULTED) {
+        return;
+    } else {
+        g_upper_controller_debug.arm_retract_submit_result =
+            status.last_command_result;
+        g_upper_controller_debug.arm_retract_fail_count++;
+        g_upper_controller_debug.discrete_invalid_count++;
+    }
+    g_upper_controller_debug.discrete_state = UPPER_DISCRETE_IDLE;
+    g_upper_controller_debug.arm_retract_command_id = 0u;
+}
+
 static App_Fruit_Side_e UpperControllerAcSideFromStatus(uint8_t status)
 {
     return status == UPPER_TASK_STATUS_SECONDARY ?
         APP_FRUIT_SIDE_RIGHT : APP_FRUIT_SIDE_LEFT;
 }
 
-static void UpperControllerLoadAcObservationTarget(App_Fruit_Side_e side)
+static float UpperControllerObservationBaseQ1Deg(
+    Upper_Observe_Area_Group_e group, App_Fruit_Side_e side)
 {
-    if (side == APP_FRUIT_SIDE_RIGHT) {
+    if (group == UPPER_OBSERVE_AREA_AC) {
+        return side == APP_FRUIT_SIDE_RIGHT ?
+            APP_ARM_AC_OBSERVATION_RIGHT_BASE_Q1_DEG :
+            APP_ARM_AC_OBSERVATION_LEFT_BASE_Q1_DEG;
+    }
+    return side == APP_FRUIT_SIDE_RIGHT ?
+        APP_ARM_BD_OBSERVATION_RIGHT_BASE_Q1_DEG :
+        APP_ARM_BD_OBSERVATION_LEFT_BASE_Q1_DEG;
+}
+
+static float UpperControllerObservationStagingQ2Deg(
+    Upper_Observe_Area_Group_e group)
+{
+    return group == UPPER_OBSERVE_AREA_AC ?
+        APP_ARM_AC_OBSERVATION_STAGING_Q2_DEG :
+        APP_ARM_BD_OBSERVATION_STAGING_Q2_DEG;
+}
+
+static float UpperControllerObservationStagingQ3Deg(
+    Upper_Observe_Area_Group_e group)
+{
+    return group == UPPER_OBSERVE_AREA_AC ?
+        APP_ARM_AC_OBSERVATION_STAGING_Q3_DEG :
+        APP_ARM_BD_OBSERVATION_STAGING_Q3_DEG;
+}
+
+static float UpperControllerObservationToolPitchDeg(
+    Upper_Observe_Area_Group_e group)
+{
+    return group == UPPER_OBSERVE_AREA_AC ?
+        APP_ARM_AC_OBSERVATION_TOOL_PITCH_DEG :
+        APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG;
+}
+
+static float UpperControllerObservationSpeedMmS(
+    Upper_Observe_Area_Group_e group)
+{
+    return group == UPPER_OBSERVE_AREA_AC ?
+        APP_ARM_AC_OBSERVATION_SPEED_MM_S :
+        APP_ARM_BD_OBSERVATION_SPEED_MM_S;
+}
+
+static uint8_t UpperControllerLoadObservationTarget(App_Fruit_Side_e side)
+{
+    Upper_Controller_Area_e area = g_upper_controller_debug.current_area;
+    Upper_Observe_Area_Group_e group;
+
+    if (g_upper_controller_debug.current_area_valid == 0u) {
+        g_upper_controller_debug.observe_area_group =
+            UPPER_OBSERVE_AREA_UNKNOWN;
+        g_upper_controller_debug.observe_area =
+            UPPER_CONTROLLER_AREA_UNKNOWN;
+        return 0u;
+    }
+    group = UpperControllerAreaGroup(area);
+    if (group == UPPER_OBSERVE_AREA_UNKNOWN) {
+        g_upper_controller_debug.observe_area_group = group;
+        g_upper_controller_debug.observe_area = area;
+        return 0u;
+    }
+    g_upper_controller_debug.observe_area_group = group;
+    g_upper_controller_debug.observe_area = area;
+    if (group == UPPER_OBSERVE_AREA_AC) {
+        if (side == APP_FRUIT_SIDE_RIGHT) {
+            g_upper_controller_debug.ac_observe_target_center_mm[0] =
+                APP_ARM_AC_OBSERVATION_RIGHT_X_MM;
+            g_upper_controller_debug.ac_observe_target_center_mm[1] =
+                APP_ARM_AC_OBSERVATION_RIGHT_Y_MM;
+            g_upper_controller_debug.ac_observe_target_center_mm[2] =
+                APP_ARM_AC_OBSERVATION_RIGHT_Z_MM;
+        } else {
+            g_upper_controller_debug.ac_observe_target_center_mm[0] =
+                APP_ARM_AC_OBSERVATION_LEFT_X_MM;
+            g_upper_controller_debug.ac_observe_target_center_mm[1] =
+                APP_ARM_AC_OBSERVATION_LEFT_Y_MM;
+            g_upper_controller_debug.ac_observe_target_center_mm[2] =
+                APP_ARM_AC_OBSERVATION_LEFT_Z_MM;
+        }
+    } else if (side == APP_FRUIT_SIDE_RIGHT) {
         g_upper_controller_debug.ac_observe_target_center_mm[0] =
             APP_ARM_BD_OBSERVATION_RIGHT_X_MM;
         g_upper_controller_debug.ac_observe_target_center_mm[1] =
@@ -474,7 +740,8 @@ static void UpperControllerLoadAcObservationTarget(App_Fruit_Side_e side)
             APP_ARM_BD_OBSERVATION_LEFT_Z_MM;
     }
     g_upper_controller_debug.ac_observe_target_tool_pitch_deg =
-        APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG;
+        UpperControllerObservationToolPitchDeg(group);
+    return 1u;
 }
 
 static void UpperControllerFailAcObservation(void)
@@ -506,7 +773,12 @@ static void UpperControllerStartAcObservation(uint32_t now_ms)
     g_upper_controller_debug.ac_observe_target_command_id = 0u;
     g_upper_controller_debug.ac_observe_command_id = 0u;
     g_upper_controller_debug.ac_observe_capture_id = 0u;
-    UpperControllerLoadAcObservationTarget(side);
+    if (UpperControllerLoadObservationTarget(side) == 0u) {
+        g_upper_controller_debug.ac_start_result =
+            (uint8_t)ARM_COMMAND_INVALID;
+        UpperControllerFailAcObservation();
+        return;
+    }
     g_upper_controller_debug.ac_start_count++;
     g_upper_controller_debug.ac_observe_start_count++;
     g_upper_controller_debug.ac_observe_state =
@@ -522,6 +794,8 @@ static void UpperControllerPollAcObservation(uint32_t now_ms)
     Arm_Command_Result_e result;
     App_Fruit_Side_e side =
         (App_Fruit_Side_e)g_upper_controller_debug.ac_active_side;
+    Upper_Observe_Area_Group_e group =
+        g_upper_controller_debug.observe_area_group;
 
     if (ArmGetHostStatus(&host) == 0u) {
         return;
@@ -536,7 +810,75 @@ static void UpperControllerPollAcObservation(uint32_t now_ms)
         if (host.ready == 0u || host.busy != 0u) {
             break;
         }
-        {
+        if (group == UPPER_OBSERVE_AREA_AC) {
+            Arm_Joint_Command_s command;
+            Arm_Position_s target_center;
+            Arm_Tool_Center_IK_Result_s ik_result;
+            float waypoint_q_deg[3];
+            float tool_pitch_deg;
+            Arm_IK_Status_e ik_status;
+
+            memset(&command, 0, sizeof(command));
+            memset(&ik_result, 0, sizeof(ik_result));
+            target_center.x_mm =
+                g_upper_controller_debug.ac_observe_target_center_mm[0];
+            target_center.y_mm =
+                g_upper_controller_debug.ac_observe_target_center_mm[1];
+            target_center.z_mm =
+                g_upper_controller_debug.ac_observe_target_center_mm[2];
+            tool_pitch_deg = UpperControllerObservationToolPitchDeg(group);
+            memcpy(waypoint_q_deg, host.q_feedback_deg,
+                   sizeof(waypoint_q_deg));
+            waypoint_q_deg[ARM_JOINT_BASE_YAW] =
+                UpperControllerObservationBaseQ1Deg(group, side);
+            waypoint_q_deg[ARM_JOINT_SHOULDER] =
+                UpperControllerObservationStagingQ2Deg(group);
+            waypoint_q_deg[ARM_JOINT_ELBOW] =
+                UpperControllerObservationStagingQ3Deg(group);
+            /*
+             * 观察姿态原先拆成“关节安全位->工具中心目标”两条命令，会在
+             * 中间安全位等待完整到位。这里先用安全位作为IK seed算出最终
+             * 观察关节角，再把安全位合并为同一条route的waypoint，让轨迹
+             * 层使用中间点宽松到位判定连续切段，减少HOME到观察位卡顿。
+             */
+            ik_status = ArmInverseKinematicsToolCenter(
+                &target_center, tool_pitch_deg, waypoint_q_deg,
+                &ik_result);
+            if (ik_status != ARM_IK_OK) {
+                g_upper_controller_debug.ac_start_result =
+                    (uint8_t)ARM_COMMAND_PREFLIGHT_FAILED;
+                UpperControllerFailAcObservation();
+                break;
+            }
+            command.command_id = AppArmCommandIdNext();
+            command.move_type = ARM_MOVE_LINEAR;
+            memcpy(command.q_deg, ik_result.q_deg,
+                   sizeof(command.q_deg));
+            command.waypoint_valid = 1u;
+            memcpy(command.waypoint_q_deg, waypoint_q_deg,
+                   sizeof(command.waypoint_q_deg));
+            command.tool_relative_pitch_valid = 1u;
+            command.tool_relative_pitch_deg =
+                tool_pitch_deg -
+                ArmToolSmallLinkPitchFromJoint(command.q_deg);
+            result = ArmSubmitJointCommand(&command);
+            g_upper_controller_debug.ac_observe_command_id =
+                command.command_id;
+            g_upper_controller_debug.ac_observe_base_command_id =
+                command.command_id;
+            g_upper_controller_debug.ac_observe_target_command_id =
+                command.command_id;
+            if (result == ARM_COMMAND_OK) {
+                g_upper_controller_debug.ac_observe_state =
+                    UPPER_AC_OBSERVE_TARGET_SUBMITTED;
+                g_upper_controller_debug.ac_operation_status =
+                    (uint8_t)UPPER_AC_OBSERVE_TARGET_SUBMITTED;
+            } else if (result != ARM_COMMAND_BUSY &&
+                       result != ARM_COMMAND_NOT_READY) {
+                g_upper_controller_debug.ac_start_result = (uint8_t)result;
+                UpperControllerFailAcObservation();
+            }
+        } else {
             Arm_Joint_Command_s command;
             float q_deg[3];
 
@@ -545,17 +887,15 @@ static void UpperControllerPollAcObservation(uint32_t now_ms)
             command.move_type = ARM_MOVE_LINEAR;
             memcpy(q_deg, host.q_feedback_deg, sizeof(q_deg));
             q_deg[ARM_JOINT_BASE_YAW] =
-                side == APP_FRUIT_SIDE_RIGHT ?
-                    APP_ARM_BD_OBSERVATION_RIGHT_BASE_Q1_DEG :
-                    APP_ARM_BD_OBSERVATION_LEFT_BASE_Q1_DEG;
+                UpperControllerObservationBaseQ1Deg(group, side);
             q_deg[ARM_JOINT_SHOULDER] =
-                APP_ARM_BD_OBSERVATION_STAGING_Q2_DEG;
+                UpperControllerObservationStagingQ2Deg(group);
             q_deg[ARM_JOINT_ELBOW] =
-                APP_ARM_BD_OBSERVATION_STAGING_Q3_DEG;
+                UpperControllerObservationStagingQ3Deg(group);
             memcpy(command.q_deg, q_deg, sizeof(command.q_deg));
             command.tool_relative_pitch_valid = 1u;
             command.tool_relative_pitch_deg =
-                APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG -
+                UpperControllerObservationToolPitchDeg(group) -
                 ArmToolSmallLinkPitchFromJoint(q_deg);
             result = ArmSubmitJointCommand(&command);
             g_upper_controller_debug.ac_observe_command_id =
@@ -609,9 +949,11 @@ static void UpperControllerPollAcObservation(uint32_t now_ms)
                 g_upper_controller_debug.ac_observe_target_center_mm[1];
             command.target_center_mm.z_mm =
                 g_upper_controller_debug.ac_observe_target_center_mm[2];
-            command.max_speed_mm_s = APP_ARM_BD_OBSERVATION_SPEED_MM_S;
+            command.max_speed_mm_s =
+                UpperControllerObservationSpeedMmS(group);
             command.tool_pitch_valid = 1u;
-            command.tool_pitch_deg = APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG;
+            command.tool_pitch_deg =
+                UpperControllerObservationToolPitchDeg(group);
             result = ArmSubmitToolCenterCommand(&command);
             g_upper_controller_debug.ac_observe_command_id =
                 command.command_id;
@@ -771,7 +1113,10 @@ void UpperControllerBridgeTask(uint32_t now_ms)
             UpperControllerStartAcObservation(now_ms);
         } else if (upper_pending_discrete.task_id ==
                    UPPER_TASK_QR_RECOGNITION_POSE) {
-            UpperControllerRejectUndefinedQrPose();
+            UpperControllerSubmitQrPose();
+        } else if (upper_pending_discrete.task_id ==
+                   UPPER_TASK_ARM_RETRACT_POSE) {
+            UpperControllerSubmitArmRetractPose();
         } else {
             UpperControllerSubmitGripperCommand();
         }
@@ -783,6 +1128,12 @@ void UpperControllerBridgeTask(uint32_t now_ms)
         } else if (upper_pending_discrete.task_id ==
                    UPPER_TASK_AC_SIDE_PICK) {
             UpperControllerPollAcObservation(now_ms);
+        } else if (upper_pending_discrete.task_id ==
+                   UPPER_TASK_QR_RECOGNITION_POSE) {
+            UpperControllerPollQrPose();
+        } else if (upper_pending_discrete.task_id ==
+                   UPPER_TASK_ARM_RETRACT_POSE) {
+            UpperControllerPollArmRetractPose();
         } else {
             UpperControllerPollGripperCommand();
         }

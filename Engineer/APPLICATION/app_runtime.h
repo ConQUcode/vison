@@ -79,6 +79,72 @@ typedef struct {
 extern App_Arm_Bd_Observation_Debug_s
     g_app_arm_bd_observation_debug;
 
+typedef enum {
+    APP_ARM_CLEARANCE_WAIT_READY = 0,
+    APP_ARM_CLEARANCE_SUBMITTED,
+    APP_ARM_CLEARANCE_HOLDING,
+    APP_ARM_CLEARANCE_FAILED
+} App_Arm_Clearance_Test_State_e;
+
+/** 底盘转弯避让姿态单次测试Watch；角度deg，坐标mm。 */
+typedef struct {
+    uint8_t state;
+    uint8_t host_ready;
+    uint8_t host_busy;
+    uint8_t path_preflight_passed;
+    uint32_t command_id;
+    uint32_t submit_result;
+    uint32_t command_state;
+    uint32_t command_result;
+    uint32_t fault_code;
+    uint32_t state_tick_ms;
+    float target_q_deg[3];
+    float target_tool_relative_pitch_deg;
+    float target_tool_pitch_deg;
+    float actual_q_deg[3];
+    float actual_center_mm[3];
+    float actual_tool_pitch_deg;
+    float q_error_deg[3];
+    float trajectory_progress;
+} App_Arm_Clearance_Test_Debug_s;
+
+extern App_Arm_Clearance_Test_Debug_s
+    g_app_arm_clearance_test_debug;
+
+typedef enum {
+    APP_ARM_QR_POSE_WAIT_READY = 0,
+    APP_ARM_QR_POSE_SUBMITTED,
+    APP_ARM_QR_POSE_HOLDING,
+    APP_ARM_QR_POSE_FAILED
+} App_Arm_Qr_Pose_Test_State_e;
+
+/** 二维码识别姿态单次测试Watch；角度deg，坐标mm。 */
+typedef struct {
+    uint8_t state;
+    uint8_t host_ready;
+    uint8_t host_busy;
+    uint8_t path_preflight_passed;
+    uint32_t command_id;
+    uint32_t submit_result;
+    uint32_t command_state;
+    uint32_t command_result;
+    uint32_t fault_code;
+    uint32_t state_tick_ms;
+    float target_q_deg[3];
+    float target_tool_relative_pitch_deg;
+    float target_tool_pitch_deg;
+    float target_center_mm[3];
+    float actual_q_deg[3];
+    float actual_center_mm[3];
+    float actual_tool_pitch_deg;
+    float q_error_deg[3];
+    float center_error_mm;
+    float pitch_error_deg;
+    float trajectory_progress;
+} App_Arm_Qr_Pose_Test_Debug_s;
+
+extern App_Arm_Qr_Pose_Test_Debug_s g_app_arm_qr_pose_test_debug;
+
 void AppInit(void);
 void AppImuTask(uint32_t now_ms);
 void AppChassisTask(uint32_t now_ms);

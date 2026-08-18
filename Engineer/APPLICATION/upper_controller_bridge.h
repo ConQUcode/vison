@@ -33,6 +33,12 @@ typedef enum {
 } Upper_Controller_Area_e;
 
 typedef enum {
+    UPPER_OBSERVE_AREA_UNKNOWN = 0,
+    UPPER_OBSERVE_AREA_AC,
+    UPPER_OBSERVE_AREA_BD
+} Upper_Observe_Area_Group_e;
+
+typedef enum {
     UPPER_AC_OBSERVE_IDLE = 0,
     UPPER_AC_OBSERVE_WAIT_READY,
     UPPER_AC_OBSERVE_BASE_SUBMITTED,
@@ -114,6 +120,8 @@ typedef struct {
     uint32_t ac_observe_fail_count;
     float ac_observe_target_center_mm[3];
     float ac_observe_target_tool_pitch_deg;
+    Upper_Observe_Area_Group_e observe_area_group;
+    Upper_Controller_Area_e observe_area;
     uint8_t arm_target_pick_running;
     uint8_t arm_target_pick_start_result;
     App_Arm_Flow_Status_e arm_target_pick_flow_status;
@@ -127,13 +135,22 @@ typedef struct {
     uint8_t current_area_callback_pending;
     uint32_t current_area_update_count;
     uint32_t qr_pose_request_count;
-    uint32_t qr_pose_unsupported_count;
+    uint32_t qr_pose_command_id;
+    Arm_Command_Result_e qr_pose_submit_result;
+    uint32_t qr_pose_start_count;
+    uint32_t qr_pose_complete_count;
+    uint32_t qr_pose_fail_count;
     Upper_Reset_Home_State_e reset_home_state;
     uint32_t reset_home_command_id;
     Arm_Command_Result_e reset_home_submit_result;
     uint32_t reset_home_request_count;
     uint32_t reset_home_complete_count;
     uint32_t reset_home_fail_count;
+    uint32_t arm_retract_command_id;
+    Arm_Command_Result_e arm_retract_submit_result;
+    uint32_t arm_retract_start_count;
+    uint32_t arm_retract_complete_count;
+    uint32_t arm_retract_fail_count;
     uint32_t execution_callback_tx_count;
     uint32_t execution_callback_tx_fail_count;
     float arm_target_camera_m[3];

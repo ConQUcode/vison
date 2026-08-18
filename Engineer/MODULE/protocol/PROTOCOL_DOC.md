@@ -63,6 +63,7 @@
 |      4      | QR recognition pose       |
 |      5      | current area              |
 |      6      | return initial pose       |
+|      7      | arm retract pose          |
 
 | callback_status | State     |
 | :-------------: | :-------- |
@@ -126,6 +127,7 @@
 |    4    | QR recognition pose       | enter pose          | -               | -               | -               |
 |    5    | current area              | A                   | B               | C               | D               |
 |    6    | return initial pose       | return initial pose | -               | -               | -               |
+|    7    | arm retract pose          | enter pose          | -               | -               | -               |
 
 - **可靠投递**：该消息启用 ACK/重传。ROS 端会在业务结构体 payload 后透明追加 1 字节 reliable seq；该字节参与 `Len` 和校验，但不属于 `Packet_xxx` 业务结构体字段。生成的分发逻辑会先调用 `on_receive_xxx()`，回调返回后再自动 `send_Ack()`。
 - **投递语义**：ROS 节点进程存活期间的链路级 at-least-once。同 ID 消息按 FIFO 发送，ACK 丢失或串口断连重连时 ROS 端会持续重传到收到匹配 ACK；节点进程崩溃后的恢复不在保证范围内。`on_receive_xxx()` 可能被重复调用，回调实现需保证幂等。

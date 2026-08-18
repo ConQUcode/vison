@@ -128,6 +128,9 @@
 /* 普通FK/IK和笛卡尔轨迹仍限制在前方+/-90deg；后方180deg只供明确关节序列。 */
 #define ARM_AUTO_Q1_MIN_DEG                (-90.0f)
 #define ARM_AUTO_Q1_MAX_DEG                  90.0f
+/* 仅供显式标记的AC低位侧抓命令使用；其他自动轨迹仍保持+/-90deg。 */
+#define ARM_AC_SIDE_PICK_Q1_MIN_DEG        (-115.0f)
+#define ARM_AC_SIDE_PICK_Q1_MAX_DEG          115.0f
 /* 自动轨迹沿用3deg正常肩关节下限，不使用0deg~3deg脱困区域。 */
 #define ARM_AUTO_Q2_MIN_DEG ARM_Q2_SOFT_MIN_DEG
 #define ARM_AUTO_Q2_MAX_DEG ARM_Q2_SOFT_MAX_DEG
@@ -161,6 +164,14 @@
 #define ARM_ARRIVAL_ERROR_DEG                 2.0f
 #define ARM_ARRIVAL_SPEED_DEG_S               5.0f
 #define ARM_ARRIVAL_STABLE_MS               120u
+/*
+ * 多段route的中间waypoint只用于避障/绕行，不是最终作业点。
+ * 放宽中间点到位窗口，允许轨迹更早切到下一段，减少抓取后去放置时
+ * 在安全过渡点明显停顿；最终目标仍使用上面的严格到位判定。
+ */
+#define ARM_ROUTE_WAYPOINT_ARRIVAL_ERROR_DEG  12.0f
+#define ARM_ROUTE_WAYPOINT_ARRIVAL_SPEED_DEG_S 100.0f
+#define ARM_ROUTE_WAYPOINT_ARRIVAL_STABLE_MS   0u
 #define ARM_WRONG_DIRECTION_DELTA_DEG          0.5f
 #define ARM_WRONG_DIRECTION_TIME_MS           200u
 #define ARM_TEMPERATURE_HOLD_C                 70.0f

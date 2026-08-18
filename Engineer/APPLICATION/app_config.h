@@ -22,8 +22,12 @@
 #define APP_MODE_HOST_CONTROL            6u
 /* BD闭环观察位：正常HOME后单次移动到左侧高位斜向观察点并保持。 */
 #define APP_MODE_ARM_BD_OBSERVATION_TEST 7u
+/* 底盘转弯避让姿态：正常HOME后大臂保持HOME，小臂向后竖起并保持。 */
+#define APP_MODE_ARM_CHASSIS_CLEARANCE_TEST 8u
+/* 二维码识别姿态：正常HOME后移动到前方低位水平观察姿态并保持。 */
+#define APP_MODE_ARM_QR_POSE_TEST          9u
 
-/* 当前固件切回上位机控制：USB协议控制底盘/夹爪/摄像头/AC闭环观察抓取。 */
+/* 当前固件切回上位机控制；二维码识别姿态由task_id=4触发。 */
 #ifndef APP_MODE
 #define APP_MODE APP_MODE_HOST_CONTROL
 #endif
@@ -67,13 +71,13 @@
 
 /*
  * AC闭环抓取：task_id=2先进入对应侧观察位，ArmTarget换算成功后把
- * 基座系X/Y作为接近点；Z和末端水平俯仰复用AC开环参数，再沿当前侧
- * Y方向低速推进配置距离后闭爪，随后复用AC开环放置profile归位。
+ * 基座系X/Y作为接近点；Z在AC开环抓取高度基础上抬高15mm，夹爪世界
+ * 绝对俯仰固定为-5deg，给ID1正向机械边界保留余量；再沿当前侧Y方向
+ * 低速推进配置距离后闭爪，随后复用AC开环放置profile归位。
  */
 #define APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM \
-    APP_ARM_POSTURE_TEST_Z_MM
-#define APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG \
-    APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG
+    (APP_ARM_POSTURE_TEST_Z_MM + 15.0f)
+#define APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG    (-5.0f)
 #define APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM             15.0f
 #define APP_ARM_AC_CLOSED_LOOP_PLACE_FORWARD_MARGIN_MM 100.0f
 /*
@@ -84,24 +88,44 @@
 #define APP_ARM_AC_CLOSED_LOOP_LEFT_PICK_X_BIAS_MM    40.0f
 #define APP_ARM_AC_CLOSED_LOOP_RIGHT_PICK_X_BIAS_MM  (-40.0f)
 /*
- * AC/BD闭环方案共用的左右观察点，坐标均为夹爪中心mm，不能当作抓取点。
- * +Y/q1=+90deg固定表示物理左侧，-Y/q1=-90deg固定表示物理右侧。
- * 两侧共享q2/q3、绝对俯仰和速度；右侧点由左侧严格镜像，禁止分别调漂。
- * 2026-08-17左右观察姿态均已确认；HOST模式下task_id=2只选择LEFT/RIGHT
- * 观察，不下发几何参数。阶段35的AC左右抓放继续作为开环备选。
+ * AC区闭环左右观察点，坐标均为夹爪中心mm，不能当作抓取点。
+ * HOST模式下必须先收到task_id=5声明当前区域为A/C，再由task_id=2
+ * left/right进入本组观察姿态；后续ArmTarget才允许触发AC地面闭环抓取。
+ */
+#define APP_ARM_AC_OBSERVATION_LEFT_BASE_Q1_DEG         90.0f
+#define APP_ARM_AC_OBSERVATION_LEFT_X_MM                 0.0f
+#define APP_ARM_AC_OBSERVATION_LEFT_Y_MM               150.0f
+#define APP_ARM_AC_OBSERVATION_LEFT_Z_MM               300.0f
+#define APP_ARM_AC_OBSERVATION_RIGHT_BASE_Q1_DEG \
+    (-APP_ARM_AC_OBSERVATION_LEFT_BASE_Q1_DEG)
+#define APP_ARM_AC_OBSERVATION_RIGHT_X_MM \
+    APP_ARM_AC_OBSERVATION_LEFT_X_MM
+#define APP_ARM_AC_OBSERVATION_RIGHT_Y_MM \
+    (-APP_ARM_AC_OBSERVATION_LEFT_Y_MM)
+#define APP_ARM_AC_OBSERVATION_RIGHT_Z_MM \
+    APP_ARM_AC_OBSERVATION_LEFT_Z_MM
+#define APP_ARM_AC_OBSERVATION_STAGING_Q2_DEG            90.0f
+#define APP_ARM_AC_OBSERVATION_STAGING_Q3_DEG          (-80.0f)
+#define APP_ARM_AC_OBSERVATION_TOOL_PITCH_DEG         (-58.0f)
+#define APP_ARM_AC_OBSERVATION_SPEED_MM_S             150.0f
+
+/*
+ * BD区树上水果左右观察点。当前数值先沿用已验证的左右观察姿态，但命名
+ * 与AC独立；后续BD抓取测试只改APP_ARM_BD_OBSERVATION_*，不污染AC。
+ * BD区收到ArmTarget后暂不复用AC地面抓取流程，只保持观测和坐标调试。
  */
 #define APP_ARM_BD_OBSERVATION_SIDE_LEFT                  1u
 #define APP_ARM_BD_OBSERVATION_SIDE_RIGHT                 2u
 #define APP_ARM_BD_OBSERVATION_ACTIVE_SIDE \
     APP_ARM_BD_OBSERVATION_SIDE_LEFT
 
-/* AC/BD左观察点：工具中心[0,+150,300]mm，底座朝左，世界俯仰-58deg。 */
+/* BD左观察点：工具中心[0,+150,300]mm，底座朝左，世界俯仰-58deg。 */
 #define APP_ARM_BD_OBSERVATION_LEFT_BASE_Q1_DEG         90.0f
 #define APP_ARM_BD_OBSERVATION_LEFT_X_MM                 0.0f
 #define APP_ARM_BD_OBSERVATION_LEFT_Y_MM               150.0f
 #define APP_ARM_BD_OBSERVATION_LEFT_Z_MM               300.0f
 
-/* AC/BD右观察点：左观察点的严格镜像。 */
+/* BD右观察点：左观察点的严格镜像。 */
 #define APP_ARM_BD_OBSERVATION_RIGHT_BASE_Q1_DEG \
     (-APP_ARM_BD_OBSERVATION_LEFT_BASE_Q1_DEG)
 #define APP_ARM_BD_OBSERVATION_RIGHT_X_MM \
@@ -118,6 +142,27 @@
 #define APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM             405.0f
 #define APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG         (-58.0f)
 #define APP_ARM_BD_OBSERVATION_SPEED_MM_S             150.0f
+
+/*
+ * 底盘转弯避让姿态V1：HOME后只做单次关节动作，底座居中、大臂保持
+ * HOME(q2=110deg)，小臂后伸到接近竖直(q3=-150deg，small_link约80deg)，
+ * ID1相对小臂保持0deg。若实测仍干涉，再把q3调到-160deg。
+ */
+#define APP_ARM_CHASSIS_CLEARANCE_Q1_DEG              0.0f
+#define APP_ARM_CHASSIS_CLEARANCE_Q2_DEG            110.0f
+#define APP_ARM_CHASSIS_CLEARANCE_Q3_DEG           (-150.0f)
+#define APP_ARM_CHASSIS_CLEARANCE_TOOL_REL_PITCH_DEG  0.0f
+
+/*
+ * 二维码识别姿态V1：底座朝车头，夹爪中心保持在Y=0的车体中轴线上，
+ * 世界绝对俯仰为0deg（水平朝前）。按当前260+260mm主臂和117mm工具长度，
+ * q=[0,72,-54]deg、ID1相对小臂+54deg对应夹爪中心约
+ * [350.2, 0.0, 98.9]mm，满足Z约100mm并给关节/舵机限位保留余量。
+ */
+#define APP_ARM_QR_POSE_Q1_DEG                       0.0f
+#define APP_ARM_QR_POSE_Q2_DEG                      72.0f
+#define APP_ARM_QR_POSE_Q3_DEG                    (-54.0f)
+#define APP_ARM_QR_POSE_TOOL_REL_PITCH_DEG          54.0f
 
 /* 状态机只读取以下活动点别名；切侧时只修改ACTIVE_SIDE。 */
 #if APP_ARM_BD_OBSERVATION_ACTIVE_SIDE == \
@@ -161,7 +206,7 @@
 /* 仅提高水果抓取工具中心轨迹速度，不修改底层全局关节安全限速。 */
 #define APP_ARM_TOOL_CENTER_TEST_SPEED_MM_S           200.0f
 #define APP_ARM_PICK_DWELL_MS                          100u
-#define APP_ARM_POST_GRIP_DWELL_MS                     500u
+#define APP_ARM_POST_GRIP_DWELL_MS                     250u
 /* 俯仰反馈误差不超过2deg并连续稳定200ms后，才允许闭合夹爪。 */
 #define APP_ARM_TOOL_CENTER_PITCH_TOLERANCE_DEG         2.0f
 #define APP_ARM_TOOL_CENTER_PITCH_STABLE_MS            200u
@@ -173,7 +218,9 @@
     APP_MODE != APP_MODE_ARM_POSTURE_TEST && \
     APP_MODE != APP_MODE_MG995_TEST && \
     APP_MODE != APP_MODE_HOST_CONTROL && \
-    APP_MODE != APP_MODE_ARM_BD_OBSERVATION_TEST
+    APP_MODE != APP_MODE_ARM_BD_OBSERVATION_TEST && \
+    APP_MODE != APP_MODE_ARM_CHASSIS_CLEARANCE_TEST && \
+    APP_MODE != APP_MODE_ARM_QR_POSE_TEST
 #error "APP_MODE is invalid"
 #endif
 
@@ -193,6 +240,10 @@
     ((APP_MODE) == APP_MODE_HOST_CONTROL)
 #define APP_ARM_BD_OBSERVATION_TEST_ENABLED \
     ((APP_MODE) == APP_MODE_ARM_BD_OBSERVATION_TEST)
+#define APP_ARM_CHASSIS_CLEARANCE_TEST_ENABLED \
+    ((APP_MODE) == APP_MODE_ARM_CHASSIS_CLEARANCE_TEST)
+#define APP_ARM_QR_POSE_TEST_ENABLED \
+    ((APP_MODE) == APP_MODE_ARM_QR_POSE_TEST)
 #define APP_CHASSIS_ENABLED \
     (APP_CHASSIS_ONE_METER_ENABLED || APP_ARM_ENABLED || \
      APP_HOST_CONTROL_ENABLED)
@@ -204,6 +255,8 @@
 #define APP_ARM_CORE_ENABLED \
     (APP_ARM_ENABLED || APP_ARM_TEACH_POINT_ENABLED || \
      APP_ARM_POSTURE_TEST_ENABLED || APP_HOST_CONTROL_ENABLED || \
-     APP_ARM_BD_OBSERVATION_TEST_ENABLED)
+     APP_ARM_BD_OBSERVATION_TEST_ENABLED || \
+     APP_ARM_CHASSIS_CLEARANCE_TEST_ENABLED || \
+     APP_ARM_QR_POSE_TEST_ENABLED)
 
 #endif
