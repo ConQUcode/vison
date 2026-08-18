@@ -321,12 +321,6 @@ static inline void send_reliable_ack(PacketID id)
 // 用户可选实现的回调钩子。
 // 系统消息 (Ack/Heartbeat/Handshake) 的协议行为已由 FSM 内置，
 // 覆盖这些钩子只用于观察，不需要也不应该在其中回包。
-__attribute__((weak)) void on_receive_FruitDetection(const Packet_FruitDetection *pkt)
-{
-    (void)pkt;
-    /* USER CODE BEGIN on_receive_FruitDetection */
-    /* USER CODE END on_receive_FruitDetection */
-}
 __attribute__((weak)) void on_receive_StateMachineCommand(const Packet_StateMachineCommand *pkt)
 {
     (void)pkt;
@@ -435,12 +429,6 @@ void protocol_fsm_feed(uint8_t byte)
             // 校验通过，分发数据
             switch (rx_id)
             {
-            case PACKET_ID_FRUITDETECTION:
-                if (rx_data_len == sizeof(Packet_FruitDetection))
-                {
-                    on_receive_FruitDetection((Packet_FruitDetection *)rx_buffer);
-                }
-                break;
             case PACKET_ID_STATEMACHINECOMMAND:
                 if (rx_data_len == sizeof(Packet_StateMachineCommand) + 1)
                 {
@@ -510,24 +498,6 @@ void protocol_fsm_feed(uint8_t byte)
 // 则 serial_write() 必须自行保证可重入/并发安全（如关中断或使用发送队列）。
 extern void serial_write(const uint8_t *data, uint16_t len);
 
-void send_FruitDetection(const Packet_FruitDetection *pkt)
-{
-    uint8_t buffer[4 + sizeof(Packet_FruitDetection) + 1];
-    uint16_t idx = 0;
-
-    buffer[idx++] = FRAME_HEADER1;
-    buffer[idx++] = FRAME_HEADER2;
-    buffer[idx++] = PACKET_ID_FRUITDETECTION;
-    buffer[idx++] = sizeof(Packet_FruitDetection);
-
-    memcpy(&buffer[idx], pkt, sizeof(Packet_FruitDetection));
-    idx += sizeof(Packet_FruitDetection);
-
-    buffer[idx] = calculate_checksum(&buffer[2], idx - 2);
-    idx++;
-
-    serial_write(buffer, idx);
-}
 void send_StateMachineCommand(const Packet_StateMachineCommand *pkt)
 {
     uint8_t buffer[4 + sizeof(Packet_StateMachineCommand) + 1];

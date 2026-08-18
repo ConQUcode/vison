@@ -35,8 +35,8 @@
 #define CHASSIS_COMMAND_MIN_TOLERANCE_MM         0.5f
 #define CHASSIS_COMMAND_MAX_TOLERANCE_MM        50.0f
 /* 连续车体速度接口：应用层使用mm/s和rad/s，内部统一换算为SI单位。 */
-#define CHASSIS_VELOCITY_MAX_LINEAR_MM_S       200.0f
-#define CHASSIS_VELOCITY_MAX_ANGULAR_RAD_S       0.80f
+#define CHASSIS_VELOCITY_MAX_LINEAR_MM_S      1000.0f
+#define CHASSIS_VELOCITY_MAX_ANGULAR_RAD_S       1.50f
 #define CHASSIS_VELOCITY_LINEAR_ZERO_MM_S         0.5f
 #define CHASSIS_VELOCITY_ANGULAR_ZERO_RAD_S       0.005f
 #define CHASSIS_VELOCITY_COMMAND_TIMEOUT_MS      300u
@@ -46,7 +46,7 @@
 #define CHASSIS_TEST_MIN_SPEED_M_S             0.060f
 #define CHASSIS_TEST_DECEL_DISTANCE_M           0.250f
 #define CHASSIS_TEST_POSITION_KP                0.80f
-#define CHASSIS_MAX_LINEAR_ACCEL_M_S2           0.35f
+#define CHASSIS_MAX_LINEAR_ACCEL_M_S2           1.00f
 /*
  * 直行航向完整PID。误差单位deg，积分单位deg*s，输出单位rad/s。
  * 积分只在小误差区工作并有限幅，避免启动或受阻时积累过大修正。
@@ -64,14 +64,14 @@
 #define CHASSIS_TURN_KD                          0.180f
 #define CHASSIS_TURN_INTEGRAL_ZONE_DEG          15.0f
 #define CHASSIS_TURN_INTEGRAL_LIMIT_DEG_S       20.0f
-#define CHASSIS_TURN_MAX_RATE_RAD_S               0.80f
-#define CHASSIS_TURN_MAX_ACCEL_RAD_S2             1.50f
+#define CHASSIS_TURN_MAX_RATE_RAD_S               1.50f
+#define CHASSIS_TURN_MAX_ACCEL_RAD_S2             3.00f
 #define CHASSIS_TURN_ERROR_TOLERANCE_DEG           1.50f
 #define CHASSIS_TURN_GYRO_TOLERANCE_RAD_S          0.0873f
 #define CHASSIS_TURN_STABLE_MS                    150u
 #define CHASSIS_TURN_DIRECTION_CHECK_MS           800u
 #define CHASSIS_TURN_DIRECTION_CHECK_DEG            5.0f
-#define CHASSIS_MAX_WHEEL_SPEED_M_S                 0.35f
+#define CHASSIS_MAX_WHEEL_SPEED_M_S                 1.30f
 #define CHASSIS_DISTANCE_TOLERANCE_M             0.010f
 #define CHASSIS_STOP_SPEED_M_S                   0.020f
 #define CHASSIS_EXCESS_DISTANCE_M                1.300f

@@ -702,10 +702,7 @@ static uint8_t ChassisVelocityCommandValid(
     const Chassis_Velocity_Command_s *command)
 {
     return (uint8_t)(command != NULL && command->command_id != 0u &&
-        isfinite(command->vx_mm_s) && isfinite(command->wz_rad_s) &&
-        fabsf(command->vx_mm_s) <= CHASSIS_VELOCITY_MAX_LINEAR_MM_S &&
-        fabsf(command->wz_rad_s) <=
-            CHASSIS_VELOCITY_MAX_ANGULAR_RAD_S);
+        isfinite(command->vx_mm_s) && isfinite(command->wz_rad_s));
 }
 
 uint8_t ChassisInit(attitude_t *imu)
@@ -844,6 +841,14 @@ Chassis_Command_Result_e ChassisSubmitVelocityCommand(
             g_chassis_debug.state == CHASSIS_STATE_RUNNING &&
             g_chassis_debug.command_type ==
                 CHASSIS_COMMAND_BODY_VELOCITY);
+        float requested_vx_mm_s = command->vx_mm_s;
+        float requested_wz_rad_s = command->wz_rad_s;
+        float clamped_vx_mm_s = ChassisClamp(
+            requested_vx_mm_s, -CHASSIS_VELOCITY_MAX_LINEAR_MM_S,
+            CHASSIS_VELOCITY_MAX_LINEAR_MM_S);
+        float clamped_wz_rad_s = ChassisClamp(
+            requested_wz_rad_s, -CHASSIS_VELOCITY_MAX_ANGULAR_RAD_S,
+            CHASSIS_VELOCITY_MAX_ANGULAR_RAD_S);
 
         chassis_latest_command_id = command->command_id;
         g_chassis_debug.command_id = command->command_id;
@@ -854,12 +859,24 @@ Chassis_Command_Result_e ChassisSubmitVelocityCommand(
         g_chassis_debug.tolerance_mm = 0.0f;
         g_chassis_debug.straight_target_distance_m = 0.0f;
         g_chassis_debug.straight_tolerance_m = 0.0f;
+        g_chassis_debug.velocity_requested_vx_mm_s = requested_vx_mm_s;
+        g_chassis_debug.velocity_requested_wz_rad_s = requested_wz_rad_s;
+        if (clamped_vx_mm_s != requested_vx_mm_s) {
+            g_chassis_debug.velocity_linear_clamp_count++;
+        }
+        if (clamped_wz_rad_s != requested_wz_rad_s) {
+            g_chassis_debug.velocity_angular_clamp_count++;
+        }
+        if (clamped_vx_mm_s != requested_vx_mm_s ||
+            clamped_wz_rad_s != requested_wz_rad_s) {
+            g_chassis_debug.velocity_clamp_count++;
+        }
         if (already_running == 0u) {
             g_chassis_debug.velocity_heading_hold_active = 0u;
             ChassisBeginCommand(now_ms);
         }
-        ChassisApplyVelocityTarget(command->vx_mm_s,
-                                   command->wz_rad_s, now_ms);
+        ChassisApplyVelocityTarget(clamped_vx_mm_s,
+                                   clamped_wz_rad_s, now_ms);
         g_chassis_debug.velocity_refresh_count++;
         result = CHASSIS_COMMAND_ACCEPTED;
     }

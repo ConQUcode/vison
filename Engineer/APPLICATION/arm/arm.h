@@ -389,10 +389,10 @@ typedef struct {
  * 大臂使用物理安装角；小臂使用其与大臂之间的物理夹角。
  */
 typedef struct {
-    float shoulder_current_deg;       /* 大臂当前物理角，HOME约-90deg。 */
-    float shoulder_target_deg;        /* 大臂目标物理角，HOME为-90deg。 */
-    float elbow_included_current_deg; /* 当前两杆夹角，HOME约60deg。 */
-    float elbow_included_target_deg;  /* 目标两杆夹角，HOME为60deg。 */
+    float shoulder_current_deg;       /* 大臂当前物理角，HOME约-110deg。 */
+    float shoulder_target_deg;        /* 大臂目标物理角，HOME为-110deg。 */
+    float elbow_included_current_deg; /* 当前两杆夹角，HOME约40deg。 */
+    float elbow_included_target_deg;  /* 目标两杆夹角，HOME为40deg。 */
 } Arm_Home_Joint_Debug_s;
 
 typedef struct {

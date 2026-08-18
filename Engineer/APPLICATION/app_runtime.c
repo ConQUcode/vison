@@ -29,10 +29,8 @@
 #include "arm.h"
 #include "arm_kinematics.h"
 #include "arm_tool.h"
+#include "app_arm_flow.h"
 #include "app_fruit_task.h"
-#if APP_ARM_ENABLED
-#include "fruit_usb_bridge.h"
-#endif
 #if APP_HOST_CONTROL_ENABLED
 #include "upper_controller_bridge.h"
 #endif
@@ -462,7 +460,6 @@ void AppInit(void)
 #elif APP_ARM_ENABLED
     USB_Init();
     ProtocolRuntimeInit();
-    FruitUsbBridgeInit();
     BuzzerInit();
     app_chassis_imu = INS_Init();
     (void)ChassisInit(app_chassis_imu);
@@ -479,6 +476,8 @@ void AppInit(void)
     app_chassis_imu = INS_Init();
     (void)ChassisInit(app_chassis_imu);
     (void)Mg995ServoInit();
+    AppArmFlowInit();
+    AppArmSidePickPlaceInit();
     ArmInit();
 #elif APP_ARM_POSTURE_TEST_ENABLED
     AppArmFlowInit();
@@ -554,7 +553,12 @@ void AppArmTask(uint32_t now_ms)
     (void)now_ms;
     AppArmTeachPointUpdate();
 #elif APP_HOST_CONTROL_ENABLED
-    (void)now_ms;
+    if (AppArmSidePickPlaceGetStatus() ==
+        APP_ARM_SIDE_PICK_PLACE_RUNNING) {
+        (void)AppArmSidePickPlacePoll(now_ms);
+    } else {
+        (void)AppArmFlowPoll(now_ms);
+    }
 #endif
 #else
     (void)now_ms;
@@ -589,9 +593,6 @@ void AppUsbTask(uint32_t now_ms)
     USB_ProcessTask();
     USB_TxTask();
     ProtocolRuntimeTask(now_ms);
-#if APP_ARM_ENABLED
-    FruitUsbBridgeTask(now_ms);
-#endif
 #if APP_HOST_CONTROL_ENABLED
     UpperControllerBridgeTask(now_ms);
 #endif

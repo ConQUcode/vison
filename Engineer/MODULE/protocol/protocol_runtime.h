@@ -56,7 +56,7 @@ uint8_t ProtocolRuntimeLinkOnline(void);
 uint32_t ProtocolRuntimeNowMs(void);
 const Protocol_Runtime_Debug_s *ProtocolRuntimeGetDebug(void);
 
-/** 为后续可靠业务保留；当前 FruitDetection 不调用该接口。 */
+/** 将可靠业务消息加入发送队列。 */
 uint8_t ProtocolRuntimeSendReliable(uint8_t id,
                                     const void *payload,
                                     uint8_t payload_len);

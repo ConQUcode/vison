@@ -222,7 +222,7 @@ uint8_t ProtocolRuntimeSendReliable(uint8_t id,
     if (g_protocol_runtime_debug.connection_ready == 0u ||
         payload == NULL || payload_len == 0u ||
         payload_len > PROTOCOL_RUNTIME_MAX_PAYLOAD_LEN - 1u ||
-        id == PACKET_ID_FRUITDETECTION || id >= PACKET_ID_ACK ||
+        id >= PACKET_ID_ACK ||
         reliable_count >= PROTOCOL_RUNTIME_FIFO_DEPTH) {
         return 0u;
     }

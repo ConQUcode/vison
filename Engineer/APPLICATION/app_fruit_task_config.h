@@ -42,17 +42,17 @@
 #define APP_FRUIT_A_RELEASE_TOOL_RELATIVE_PITCH_DEG       (-45.0f)
 #define APP_FRUIT_A_RELEASE_PITCH_WAIT_TIMEOUT_MS          1500u
 
-/* 点1由Y>0解算到q1=+90deg，沿正角方向继续转到后方。 */
+/* 点1由Y>0解算到q1=+90deg，沿正角方向转到后方并避开+180deg翻边。 */
 #define APP_FRUIT_A_LEFT_SAFE_Q1_DEG                       90.0f
 #define APP_FRUIT_A_LEFT_PLACE_WAYPOINT_Q1_DEG            135.0f
-#define APP_FRUIT_A_LEFT_PLACE_Q1_DEG                      180.0f
+#define APP_FRUIT_A_LEFT_PLACE_Q1_DEG                      178.0f
 #define APP_FRUIT_A_LEFT_FRONT_WAYPOINT_Q1_DEG             90.0f
 #define APP_FRUIT_A_LEFT_FRONT_Q1_DEG                         0.0f
 
-/* 点2由Y<0解算到q1=-90deg，沿负角方向继续转到后方。 */
+/* 点2由Y<0解算到q1=-90deg，沿负角方向转到后方并避开-180deg翻边。 */
 #define APP_FRUIT_A_RIGHT_SAFE_Q1_DEG                    (-90.0f)
 #define APP_FRUIT_A_RIGHT_PLACE_WAYPOINT_Q1_DEG         (-135.0f)
-#define APP_FRUIT_A_RIGHT_PLACE_Q1_DEG                   (-180.0f)
+#define APP_FRUIT_A_RIGHT_PLACE_Q1_DEG                   (-178.0f)
 #define APP_FRUIT_A_RIGHT_FRONT_WAYPOINT_Q1_DEG           (-90.0f)
 #define APP_FRUIT_A_RIGHT_FRONT_Q1_DEG                       0.0f
 

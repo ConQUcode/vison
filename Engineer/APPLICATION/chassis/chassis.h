@@ -174,6 +174,11 @@ typedef struct {
     uint32_t velocity_refresh_count;
     uint32_t velocity_timeout_count;
     uint32_t velocity_heading_capture_count;
+    uint32_t velocity_clamp_count;
+    uint32_t velocity_linear_clamp_count;
+    uint32_t velocity_angular_clamp_count;
+    float velocity_requested_vx_mm_s;
+    float velocity_requested_wz_rad_s;
     float velocity_target_vx_mm_s;
     float velocity_actual_vx_mm_s;
     float velocity_target_wz_rad_s;

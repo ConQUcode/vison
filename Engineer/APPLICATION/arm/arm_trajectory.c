@@ -377,7 +377,8 @@ static uint8_t ArmWorkspacePoseSafe(const float q_deg[3],
                                                       target_point)) {
         return 0u;
     }
-#if ARM_WORKSPACE_SAFETY_ENABLE != 0u
+#if ARM_WORKSPACE_SAFETY_ENABLE != 0u && \
+    ARM_FRONT_BARRIER_SHOULDER_LIMIT_ENABLE != 0u
     /*
      * 正X前方仍有栏框时严格限制大臂；规划器必须先把工具中心绕到
      * X=0侧面，再在侧面完成径向分支转换，不能以“高位”为理由豁免。
@@ -2848,7 +2849,8 @@ void ArmTrajectoryInit(void)
 
 static void ArmCartesianRunPreparedTrajectory(uint32_t now_ms)
 {
-#if ARM_WORKSPACE_SAFETY_ENABLE != 0u
+#if ARM_WORKSPACE_SAFETY_ENABLE != 0u && \
+    ARM_FRONT_BARRIER_SHOULDER_LIMIT_ENABLE != 0u
     Arm_Position_s safety_tool_center;
 #endif
     Arm_Motion_Fault_e tool_pitch_fault;
@@ -2858,7 +2860,8 @@ static void ArmCartesianRunPreparedTrajectory(uint32_t now_ms)
     uint32_t elapsed_ms =
         (uint32_t)(now_ms - arm_cartesian_runtime.trajectory_start_tick);
 
-#if ARM_WORKSPACE_SAFETY_ENABLE != 0u
+#if ARM_WORKSPACE_SAFETY_ENABLE != 0u && \
+    ARM_FRONT_BARRIER_SHOULDER_LIMIT_ENABLE != 0u
     /*
      * 区域保护按当前关节反馈和持续俯仰目标计算。实际舵机反馈有机械滞后，
      * 不能用其瞬时偏差把后方姿态误判成正前方；舵机越界/离线仍由

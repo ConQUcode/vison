@@ -31,6 +31,13 @@ typedef struct {
 static const App_Arm_Place_Profile_s app_fruit_place_a_left = {
     APP_FRUIT_PLACE_PROFILE_A_LEFT,
     1u,
+    0u, /* 公共A左profile直接过渡，不携带AC专用waypoint。 */
+    0u, /* 公共A左profile不启用AC专用Y/Z约束。 */
+    { APP_FRUIT_A_LEFT_SAFE_Q1_DEG, APP_FRUIT_A_TRANSFER_Q2_DEG,
+      APP_FRUIT_A_TRANSFER_Q3_DEG },
+    0.0f,
+    0.0f,
+    0.0f,
     { APP_FRUIT_A_LEFT_SAFE_Q1_DEG, APP_FRUIT_A_TRANSFER_Q2_DEG,
       APP_FRUIT_A_TRANSFER_Q3_DEG },
     APP_FRUIT_A_LEFT_PLACE_WAYPOINT_Q1_DEG,
@@ -48,6 +55,13 @@ static const App_Arm_Place_Profile_s app_fruit_place_a_left = {
 static const App_Arm_Place_Profile_s app_fruit_place_a_right = {
     APP_FRUIT_PLACE_PROFILE_A_RIGHT,
     1u,
+    0u, /* 公共A右profile直接过渡，不携带AC专用waypoint。 */
+    0u, /* 公共A右profile不启用AC专用Y/Z约束。 */
+    { APP_FRUIT_A_RIGHT_SAFE_Q1_DEG, APP_FRUIT_A_TRANSFER_Q2_DEG,
+      APP_FRUIT_A_TRANSFER_Q3_DEG },
+    0.0f,
+    0.0f,
+    0.0f,
     { APP_FRUIT_A_RIGHT_SAFE_Q1_DEG, APP_FRUIT_A_TRANSFER_Q2_DEG,
       APP_FRUIT_A_TRANSFER_Q3_DEG },
     APP_FRUIT_A_RIGHT_PLACE_WAYPOINT_Q1_DEG,

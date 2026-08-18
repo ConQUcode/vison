@@ -9,7 +9,10 @@
 #include <string.h>
 
 #include "app_arm_command_id.h"
+#include "app_arm_side_pick_place.h"
+#include "app_config.h"
 #include "arm.h"
+#include "arm_config.h"
 #include "arm_tool.h"
 #include "camera_target_transform_config.h"
 #include "mg995_servo.h"
@@ -19,20 +22,46 @@
 
 #define UPPER_TASK_GRIPPER                 0u
 #define UPPER_TASK_CAMERA_GIMBAL           1u
+#define UPPER_TASK_AC_SIDE_PICK            2u
+#define UPPER_TASK_QR_RECOGNITION_POSE     4u
+#define UPPER_TASK_CURRENT_AREA            5u
+#define UPPER_TASK_RETURN_INITIAL_POSE     6u
 #define UPPER_TASK_STATUS_PRIMARY          0u
 #define UPPER_TASK_STATUS_SECONDARY        1u
+#define UPPER_TASK_STATUS_AREA_D            3u
 #define UPPER_CALLBACK_GRIPPER             0u
 #define UPPER_CALLBACK_CAMERA_GIMBAL       1u
+#define UPPER_CALLBACK_AC_SIDE_PICK        2u
+#define UPPER_CALLBACK_ARM_TARGET          3u
+#define UPPER_CALLBACK_CURRENT_AREA        5u
+#define UPPER_CALLBACK_RETURN_INITIAL_POSE 6u
 #define UPPER_CALLBACK_COMPLETED           0u
 #define UPPER_CALLBACK_EXECUTING           1u
 #define UPPER_ARM_TARGET_MAX_ABS_M        10.0f
 #define UPPER_ARM_TARGET_MAX_Z_TYPE       15u
 #define UPPER_CHASSIS_COMMAND_ID_SEED 0xC2000000u
+#define UPPER_AC_CAPTURE_ID_SEED      0xAC000000u
+#define UPPER_ARM_TARGET_POSE_AGE_UNKNOWN 0xFFFFFFFFu
+#define UPPER_ARM_TARGET_GATE_AC_NOT_HOLDING   (1u << 0)
+#define UPPER_ARM_TARGET_GATE_DISCRETE_BUSY    (1u << 1)
+#define UPPER_ARM_TARGET_GATE_PICK_RUNNING     (1u << 2)
+#define UPPER_ARM_TARGET_GATE_SIDE_PICK_RUNNING (1u << 3)
 
 Upper_Controller_Debug_s g_upper_controller_debug;
+Upper_Arm_Target_Debug_s g_arm_target_debug;
+
+typedef enum {
+    UPPER_ARM_TARGET_FLOW_IDLE = 0,
+    UPPER_ARM_TARGET_FLOW_PICK,
+    UPPER_ARM_TARGET_FLOW_PLACE
+} Upper_Arm_Target_Flow_State_e;
 
 static Packet_StateMachineCommand upper_pending_discrete;
 static uint32_t upper_next_chassis_command_id;
+static uint32_t upper_next_ac_capture_id;
+static uint8_t upper_current_area_callback_pending;
+static App_Arm_Place_Profile_s upper_arm_target_place_profile;
+static Upper_Arm_Target_Flow_State_e upper_arm_target_flow_state;
 
 static uint8_t UpperControllerSendCallback(uint8_t callback_id,
                                            uint8_t callback_status)
@@ -59,11 +88,278 @@ static uint32_t UpperControllerNextChassisCommandId(void)
     return upper_next_chassis_command_id;
 }
 
+static uint32_t UpperControllerNextAcCaptureId(void)
+{
+    upper_next_ac_capture_id++;
+    if (upper_next_ac_capture_id == 0u) {
+        upper_next_ac_capture_id = 1u;
+    }
+    return upper_next_ac_capture_id;
+}
+
 static uint8_t UpperControllerPacketAllowed(void)
 {
     return (uint8_t)(g_upper_controller_debug.initialized != 0u &&
         ProtocolRuntimeConnectionReady() != 0u &&
         ProtocolRuntimeLinkOnline() != 0u);
+}
+
+static uint8_t UpperControllerArmTargetGateFlags(void)
+{
+    uint8_t flags = 0u;
+
+    if (g_upper_controller_debug.ac_observe_state !=
+        UPPER_AC_OBSERVE_HOLDING) {
+        flags |= UPPER_ARM_TARGET_GATE_AC_NOT_HOLDING;
+    }
+    if (g_upper_controller_debug.discrete_state != UPPER_DISCRETE_IDLE) {
+        flags |= UPPER_ARM_TARGET_GATE_DISCRETE_BUSY;
+    }
+    if (g_upper_controller_debug.arm_target_pick_running != 0u) {
+        flags |= UPPER_ARM_TARGET_GATE_PICK_RUNNING;
+    }
+    if (AppArmSidePickPlaceGetStatus() ==
+        APP_ARM_SIDE_PICK_PLACE_RUNNING) {
+        flags |= UPPER_ARM_TARGET_GATE_SIDE_PICK_RUNNING;
+    }
+    return flags;
+}
+
+static uint8_t UpperControllerDiscreteCommandValid(
+    const Packet_StateMachineCommand *packet)
+{
+    if (packet == NULL) {
+        return 0u;
+    }
+    if (packet->task_id == UPPER_TASK_GRIPPER ||
+        packet->task_id == UPPER_TASK_CAMERA_GIMBAL) {
+        return packet->task_status <= UPPER_TASK_STATUS_SECONDARY;
+    }
+    if (packet->task_id == UPPER_TASK_AC_SIDE_PICK) {
+        return packet->task_status <= UPPER_TASK_STATUS_SECONDARY;
+    }
+    if (packet->task_id == UPPER_TASK_QR_RECOGNITION_POSE) {
+        return packet->task_status == UPPER_TASK_STATUS_PRIMARY;
+    }
+    if (packet->task_id == UPPER_TASK_CURRENT_AREA) {
+        return packet->task_status <= UPPER_TASK_STATUS_AREA_D;
+    }
+    if (packet->task_id == UPPER_TASK_RETURN_INITIAL_POSE) {
+        return packet->task_status == UPPER_TASK_STATUS_PRIMARY;
+    }
+    return 0u;
+}
+
+static void UpperControllerApplyCurrentArea(
+    const Packet_StateMachineCommand *packet)
+{
+    g_upper_controller_debug.current_area =
+        (Upper_Controller_Area_e)packet->task_status;
+    g_upper_controller_debug.current_area_valid = 1u;
+    g_upper_controller_debug.current_area_update_count++;
+    upper_current_area_callback_pending = 1u;
+    g_upper_controller_debug.current_area_callback_pending = 1u;
+}
+
+static void UpperControllerServiceCurrentAreaCallback(void)
+{
+    if (upper_current_area_callback_pending == 0u) {
+        return;
+    }
+    (void)UpperControllerSendCallback(
+        UPPER_CALLBACK_CURRENT_AREA, UPPER_CALLBACK_EXECUTING);
+    (void)UpperControllerSendCallback(
+        UPPER_CALLBACK_CURRENT_AREA, UPPER_CALLBACK_COMPLETED);
+    upper_current_area_callback_pending = 0u;
+    g_upper_controller_debug.current_area_callback_pending = 0u;
+    g_upper_controller_debug.discrete_complete_count++;
+}
+
+static void UpperControllerRejectUndefinedQrPose(void)
+{
+    /* Protocol v0x740E426B names this command but defines no arm pose. */
+    g_upper_controller_debug.qr_pose_unsupported_count++;
+    g_upper_controller_debug.discrete_invalid_count++;
+    g_upper_controller_debug.discrete_state = UPPER_DISCRETE_IDLE;
+}
+
+static uint8_t UpperControllerResetHomeActive(void)
+{
+    return (uint8_t)(
+        g_upper_controller_debug.reset_home_state !=
+            UPPER_RESET_HOME_IDLE &&
+        g_upper_controller_debug.reset_home_state !=
+            UPPER_RESET_HOME_FAILED);
+}
+
+static void UpperControllerClearTaskStateForReset(uint32_t now_ms)
+{
+    memset(&upper_pending_discrete, 0, sizeof(upper_pending_discrete));
+    memset(&upper_arm_target_place_profile, 0,
+           sizeof(upper_arm_target_place_profile));
+    upper_arm_target_flow_state = UPPER_ARM_TARGET_FLOW_IDLE;
+    upper_current_area_callback_pending = 0u;
+    g_upper_controller_debug.current_area_callback_pending = 0u;
+    g_upper_controller_debug.gripper_command_id = 0u;
+    g_upper_controller_debug.camera_motion_start_tick = 0u;
+    g_upper_controller_debug.ac_right_pending = 0u;
+    g_upper_controller_debug.ac_operation_status =
+        (uint8_t)UPPER_AC_OBSERVE_IDLE;
+    g_upper_controller_debug.ac_observe_state = UPPER_AC_OBSERVE_IDLE;
+    g_upper_controller_debug.ac_observe_command_id = 0u;
+    g_upper_controller_debug.ac_observe_base_command_id = 0u;
+    g_upper_controller_debug.ac_observe_target_command_id = 0u;
+    g_upper_controller_debug.ac_observe_capture_id = 0u;
+    g_upper_controller_debug.arm_target_pick_running = 0u;
+    g_upper_controller_debug.arm_target_pick_flow_status =
+        APP_ARM_FLOW_IDLE;
+    g_arm_target_debug.stage = UPPER_ARM_TARGET_DEBUG_IDLE;
+    g_arm_target_debug.gate_flags = 0u;
+    AppArmSidePickPlaceAbort(now_ms);
+    AppArmFlowAbort(now_ms);
+}
+
+static void UpperControllerFailResetHome(void)
+{
+    g_upper_controller_debug.reset_home_fail_count++;
+    g_upper_controller_debug.discrete_invalid_count++;
+    g_upper_controller_debug.reset_home_state =
+        UPPER_RESET_HOME_FAILED;
+    g_upper_controller_debug.discrete_state = UPPER_DISCRETE_IDLE;
+    g_upper_controller_debug.reset_home_command_id = 0u;
+}
+
+static void UpperControllerRequestResetHome(
+    const Packet_StateMachineCommand *packet, uint32_t now_ms)
+{
+    if (UpperControllerResetHomeActive() != 0u) {
+        g_upper_controller_debug.discrete_duplicate_count++;
+        (void)UpperControllerSendCallback(
+            UPPER_CALLBACK_RETURN_INITIAL_POSE,
+            UPPER_CALLBACK_EXECUTING);
+        return;
+    }
+    UpperControllerClearTaskStateForReset(now_ms);
+    upper_pending_discrete = *packet;
+    g_upper_controller_debug.pending_task_id = packet->task_id;
+    g_upper_controller_debug.pending_task_status = packet->task_status;
+    g_upper_controller_debug.reset_home_request_count++;
+    g_upper_controller_debug.reset_home_command_id = 0u;
+    g_upper_controller_debug.reset_home_submit_result = ARM_COMMAND_OK;
+    g_upper_controller_debug.reset_home_state =
+        UPPER_RESET_HOME_SUBMIT_CANCEL;
+    g_upper_controller_debug.discrete_state = UPPER_DISCRETE_RUNNING;
+    (void)UpperControllerSendCallback(
+        UPPER_CALLBACK_RETURN_INITIAL_POSE, UPPER_CALLBACK_EXECUTING);
+}
+
+static void UpperControllerServiceResetHome(void)
+{
+    Arm_Host_Status_s host;
+    Arm_Command_Result_e result;
+
+    switch (g_upper_controller_debug.reset_home_state) {
+    case UPPER_RESET_HOME_SUBMIT_CANCEL:
+    {
+        Arm_Command_s command;
+
+        memset(&command, 0, sizeof(command));
+        command.command_id = AppArmCommandIdNext();
+        command.type = ARM_COMMAND_TYPE_CANCEL_MOTION;
+        result = ArmSubmitCommand(&command);
+        g_upper_controller_debug.reset_home_command_id =
+            command.command_id;
+        g_upper_controller_debug.reset_home_submit_result = result;
+        if (result == ARM_COMMAND_OK) {
+            g_upper_controller_debug.reset_home_state =
+                UPPER_RESET_HOME_WAIT_CANCEL;
+        } else if (result != ARM_COMMAND_BUSY) {
+            UpperControllerFailResetHome();
+        }
+        break;
+    }
+
+    case UPPER_RESET_HOME_WAIT_CANCEL:
+        if (ArmGetHostStatus(&host) == 0u ||
+            host.last_command_id !=
+                g_upper_controller_debug.reset_home_command_id) {
+            break;
+        }
+        if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+            host.last_command_result == ARM_COMMAND_OK) {
+            g_upper_controller_debug.reset_home_state =
+                UPPER_RESET_HOME_SUBMIT_HOME;
+        } else if (host.last_command_state == ARM_COMMAND_STATE_REJECTED ||
+                   host.last_command_state == ARM_COMMAND_STATE_CANCELLED ||
+                   host.last_command_state == ARM_COMMAND_STATE_FAULTED) {
+            g_upper_controller_debug.reset_home_submit_result =
+                host.last_command_result;
+            UpperControllerFailResetHome();
+        }
+        break;
+
+    case UPPER_RESET_HOME_SUBMIT_HOME:
+        if (ArmGetHostStatus(&host) == 0u ||
+            host.ready == 0u || host.busy != 0u) {
+            break;
+        }
+        {
+            Arm_Joint_Command_s command;
+
+            memset(&command, 0, sizeof(command));
+            command.command_id = AppArmCommandIdNext();
+            command.move_type = ARM_MOVE_LINEAR;
+            command.q_deg[ARM_JOINT_BASE_YAW] = ARM_SAFE_Q1_DEG;
+            command.q_deg[ARM_JOINT_SHOULDER] = ARM_SAFE_Q2_DEG;
+            command.q_deg[ARM_JOINT_ELBOW] = ARM_SAFE_Q3_DEG;
+            command.tool_relative_pitch_valid = 1u;
+            command.tool_relative_pitch_deg = 0.0f;
+            result = ArmSubmitJointCommand(&command);
+            g_upper_controller_debug.reset_home_command_id =
+                command.command_id;
+            g_upper_controller_debug.reset_home_submit_result = result;
+            if (result == ARM_COMMAND_OK) {
+                g_upper_controller_debug.reset_home_state =
+                    UPPER_RESET_HOME_WAIT_HOME;
+            } else if (result != ARM_COMMAND_BUSY &&
+                       result != ARM_COMMAND_NOT_READY) {
+                UpperControllerFailResetHome();
+            }
+        }
+        break;
+
+    case UPPER_RESET_HOME_WAIT_HOME:
+        if (ArmGetHostStatus(&host) == 0u ||
+            host.last_command_id !=
+                g_upper_controller_debug.reset_home_command_id) {
+            break;
+        }
+        if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+            host.last_command_result == ARM_COMMAND_OK) {
+            (void)UpperControllerSendCallback(
+                UPPER_CALLBACK_RETURN_INITIAL_POSE,
+                UPPER_CALLBACK_COMPLETED);
+            g_upper_controller_debug.reset_home_complete_count++;
+            g_upper_controller_debug.discrete_complete_count++;
+            g_upper_controller_debug.reset_home_state =
+                UPPER_RESET_HOME_IDLE;
+            g_upper_controller_debug.discrete_state =
+                UPPER_DISCRETE_IDLE;
+            g_upper_controller_debug.reset_home_command_id = 0u;
+        } else if (host.last_command_state == ARM_COMMAND_STATE_REJECTED ||
+                   host.last_command_state == ARM_COMMAND_STATE_CANCELLED ||
+                   host.last_command_state == ARM_COMMAND_STATE_FAULTED) {
+            g_upper_controller_debug.reset_home_submit_result =
+                host.last_command_result;
+            UpperControllerFailResetHome();
+        }
+        break;
+
+    case UPPER_RESET_HOME_IDLE:
+    case UPPER_RESET_HOME_FAILED:
+    default:
+        break;
+    }
 }
 
 static void UpperControllerRunCameraCommand(uint32_t now_ms)
@@ -154,13 +450,302 @@ static void UpperControllerPollGripperCommand(void)
     g_upper_controller_debug.gripper_command_id = 0u;
 }
 
+static App_Fruit_Side_e UpperControllerAcSideFromStatus(uint8_t status)
+{
+    return status == UPPER_TASK_STATUS_SECONDARY ?
+        APP_FRUIT_SIDE_RIGHT : APP_FRUIT_SIDE_LEFT;
+}
+
+static void UpperControllerLoadAcObservationTarget(App_Fruit_Side_e side)
+{
+    if (side == APP_FRUIT_SIDE_RIGHT) {
+        g_upper_controller_debug.ac_observe_target_center_mm[0] =
+            APP_ARM_BD_OBSERVATION_RIGHT_X_MM;
+        g_upper_controller_debug.ac_observe_target_center_mm[1] =
+            APP_ARM_BD_OBSERVATION_RIGHT_Y_MM;
+        g_upper_controller_debug.ac_observe_target_center_mm[2] =
+            APP_ARM_BD_OBSERVATION_RIGHT_Z_MM;
+    } else {
+        g_upper_controller_debug.ac_observe_target_center_mm[0] =
+            APP_ARM_BD_OBSERVATION_LEFT_X_MM;
+        g_upper_controller_debug.ac_observe_target_center_mm[1] =
+            APP_ARM_BD_OBSERVATION_LEFT_Y_MM;
+        g_upper_controller_debug.ac_observe_target_center_mm[2] =
+            APP_ARM_BD_OBSERVATION_LEFT_Z_MM;
+    }
+    g_upper_controller_debug.ac_observe_target_tool_pitch_deg =
+        APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG;
+}
+
+static void UpperControllerFailAcObservation(void)
+{
+    g_upper_controller_debug.ac_fail_count++;
+    g_upper_controller_debug.ac_observe_fail_count++;
+    g_upper_controller_debug.discrete_invalid_count++;
+    g_upper_controller_debug.ac_observe_state = UPPER_AC_OBSERVE_FAILED;
+    g_upper_controller_debug.discrete_state = UPPER_DISCRETE_IDLE;
+}
+
+static void UpperControllerStartAcObservation(uint32_t now_ms)
+{
+    App_Fruit_Side_e side =
+        UpperControllerAcSideFromStatus(upper_pending_discrete.task_status);
+
+    (void)now_ms;
+    if (AppArmSidePickPlaceGetStatus() ==
+            APP_ARM_SIDE_PICK_PLACE_RUNNING ||
+        g_upper_controller_debug.arm_target_pick_running != 0u) {
+        g_upper_controller_debug.discrete_busy_count++;
+        return;
+    }
+    g_upper_controller_debug.ac_right_pending = 0u;
+    g_upper_controller_debug.ac_active_side = (uint8_t)side;
+    g_upper_controller_debug.ac_operation_status =
+        (uint8_t)UPPER_AC_OBSERVE_WAIT_READY;
+    g_upper_controller_debug.ac_observe_base_command_id = 0u;
+    g_upper_controller_debug.ac_observe_target_command_id = 0u;
+    g_upper_controller_debug.ac_observe_command_id = 0u;
+    g_upper_controller_debug.ac_observe_capture_id = 0u;
+    UpperControllerLoadAcObservationTarget(side);
+    g_upper_controller_debug.ac_start_count++;
+    g_upper_controller_debug.ac_observe_start_count++;
+    g_upper_controller_debug.ac_observe_state =
+        UPPER_AC_OBSERVE_WAIT_READY;
+    (void)UpperControllerSendCallback(
+        UPPER_CALLBACK_AC_SIDE_PICK, UPPER_CALLBACK_EXECUTING);
+    g_upper_controller_debug.discrete_state = UPPER_DISCRETE_RUNNING;
+}
+
+static void UpperControllerPollAcObservation(uint32_t now_ms)
+{
+    Arm_Host_Status_s host;
+    Arm_Command_Result_e result;
+    App_Fruit_Side_e side =
+        (App_Fruit_Side_e)g_upper_controller_debug.ac_active_side;
+
+    if (ArmGetHostStatus(&host) == 0u) {
+        return;
+    }
+    if (host.state == ARM_HOST_STATE_FAULT ||
+        host.state == ARM_HOST_STATE_ESTOP) {
+        UpperControllerFailAcObservation();
+        return;
+    }
+    switch (g_upper_controller_debug.ac_observe_state) {
+    case UPPER_AC_OBSERVE_WAIT_READY:
+        if (host.ready == 0u || host.busy != 0u) {
+            break;
+        }
+        {
+            Arm_Joint_Command_s command;
+            float q_deg[3];
+
+            memset(&command, 0, sizeof(command));
+            command.command_id = AppArmCommandIdNext();
+            command.move_type = ARM_MOVE_LINEAR;
+            memcpy(q_deg, host.q_feedback_deg, sizeof(q_deg));
+            q_deg[ARM_JOINT_BASE_YAW] =
+                side == APP_FRUIT_SIDE_RIGHT ?
+                    APP_ARM_BD_OBSERVATION_RIGHT_BASE_Q1_DEG :
+                    APP_ARM_BD_OBSERVATION_LEFT_BASE_Q1_DEG;
+            q_deg[ARM_JOINT_SHOULDER] =
+                APP_ARM_BD_OBSERVATION_STAGING_Q2_DEG;
+            q_deg[ARM_JOINT_ELBOW] =
+                APP_ARM_BD_OBSERVATION_STAGING_Q3_DEG;
+            memcpy(command.q_deg, q_deg, sizeof(command.q_deg));
+            command.tool_relative_pitch_valid = 1u;
+            command.tool_relative_pitch_deg =
+                APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG -
+                ArmToolSmallLinkPitchFromJoint(q_deg);
+            result = ArmSubmitJointCommand(&command);
+            g_upper_controller_debug.ac_observe_command_id =
+                command.command_id;
+            g_upper_controller_debug.ac_observe_base_command_id =
+                command.command_id;
+            if (result == ARM_COMMAND_OK) {
+                g_upper_controller_debug.ac_observe_state =
+                    UPPER_AC_OBSERVE_BASE_SUBMITTED;
+                g_upper_controller_debug.ac_operation_status =
+                    (uint8_t)UPPER_AC_OBSERVE_BASE_SUBMITTED;
+            } else if (result != ARM_COMMAND_BUSY &&
+                       result != ARM_COMMAND_NOT_READY) {
+                g_upper_controller_debug.ac_start_result = (uint8_t)result;
+                UpperControllerFailAcObservation();
+            }
+        }
+        break;
+
+    case UPPER_AC_OBSERVE_BASE_SUBMITTED:
+        if (host.last_command_id !=
+            g_upper_controller_debug.ac_observe_base_command_id) {
+            break;
+        }
+        if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+            host.last_command_result == ARM_COMMAND_OK) {
+            g_upper_controller_debug.ac_observe_state =
+                UPPER_AC_OBSERVE_SUBMIT_TARGET;
+            g_upper_controller_debug.ac_operation_status =
+                (uint8_t)UPPER_AC_OBSERVE_SUBMIT_TARGET;
+        } else if (host.last_command_state == ARM_COMMAND_STATE_REJECTED ||
+                   host.last_command_state == ARM_COMMAND_STATE_CANCELLED ||
+                   host.last_command_state == ARM_COMMAND_STATE_FAULTED) {
+            UpperControllerFailAcObservation();
+        }
+        break;
+
+    case UPPER_AC_OBSERVE_SUBMIT_TARGET:
+        if (host.ready == 0u || host.busy != 0u) {
+            break;
+        }
+        {
+            Arm_Tool_Center_Command_s command;
+
+            memset(&command, 0, sizeof(command));
+            command.command_id = AppArmCommandIdNext();
+            command.move_type = ARM_MOVE_LINEAR;
+            command.target_center_mm.x_mm =
+                g_upper_controller_debug.ac_observe_target_center_mm[0];
+            command.target_center_mm.y_mm =
+                g_upper_controller_debug.ac_observe_target_center_mm[1];
+            command.target_center_mm.z_mm =
+                g_upper_controller_debug.ac_observe_target_center_mm[2];
+            command.max_speed_mm_s = APP_ARM_BD_OBSERVATION_SPEED_MM_S;
+            command.tool_pitch_valid = 1u;
+            command.tool_pitch_deg = APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG;
+            result = ArmSubmitToolCenterCommand(&command);
+            g_upper_controller_debug.ac_observe_command_id =
+                command.command_id;
+            g_upper_controller_debug.ac_observe_target_command_id =
+                command.command_id;
+            if (result == ARM_COMMAND_OK) {
+                g_upper_controller_debug.ac_observe_state =
+                    UPPER_AC_OBSERVE_TARGET_SUBMITTED;
+                g_upper_controller_debug.ac_operation_status =
+                    (uint8_t)UPPER_AC_OBSERVE_TARGET_SUBMITTED;
+            } else if (result != ARM_COMMAND_BUSY &&
+                       result != ARM_COMMAND_NOT_READY) {
+                g_upper_controller_debug.ac_start_result = (uint8_t)result;
+                UpperControllerFailAcObservation();
+            }
+        }
+        break;
+
+    case UPPER_AC_OBSERVE_TARGET_SUBMITTED:
+        if (host.last_command_id !=
+            g_upper_controller_debug.ac_observe_target_command_id) {
+            break;
+        }
+        if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+            host.last_command_result == ARM_COMMAND_OK) {
+            uint32_t capture_id = UpperControllerNextAcCaptureId();
+            Camera_Target_Transform_Status_e status =
+                UpperControllerCaptureCameraPose(capture_id, now_ms);
+
+            if (status == CAMERA_TARGET_STATUS_OK) {
+                g_upper_controller_debug.ac_observe_capture_id =
+                    capture_id;
+                g_upper_controller_debug.ac_observe_state =
+                    UPPER_AC_OBSERVE_HOLDING;
+                g_upper_controller_debug.ac_operation_status =
+                    (uint8_t)UPPER_AC_OBSERVE_HOLDING;
+                g_upper_controller_debug.ac_observe_complete_count++;
+                g_upper_controller_debug.ac_complete_count++;
+                g_upper_controller_debug.discrete_complete_count++;
+                (void)UpperControllerSendCallback(
+                    UPPER_CALLBACK_AC_SIDE_PICK,
+                    UPPER_CALLBACK_COMPLETED);
+                g_upper_controller_debug.discrete_state =
+                    UPPER_DISCRETE_IDLE;
+            } else {
+                UpperControllerFailAcObservation();
+            }
+        } else if (host.last_command_state == ARM_COMMAND_STATE_REJECTED ||
+                   host.last_command_state == ARM_COMMAND_STATE_CANCELLED ||
+                   host.last_command_state == ARM_COMMAND_STATE_FAULTED) {
+            UpperControllerFailAcObservation();
+        }
+        break;
+
+    case UPPER_AC_OBSERVE_HOLDING:
+    case UPPER_AC_OBSERVE_FAILED:
+    case UPPER_AC_OBSERVE_IDLE:
+    default:
+        break;
+    }
+}
+
+static void UpperControllerPollArmTargetPick(void)
+{
+    App_Arm_Flow_Status_e status;
+
+    if (g_upper_controller_debug.arm_target_pick_running == 0u) {
+        return;
+    }
+    status = AppArmFlowGetStatus();
+    g_upper_controller_debug.arm_target_pick_flow_status = status;
+    if (status == APP_ARM_FLOW_RUNNING) {
+        return;
+    }
+    if (status == APP_ARM_FLOW_DONE) {
+        if (upper_arm_target_flow_state == UPPER_ARM_TARGET_FLOW_PICK) {
+            App_Arm_Flow_Start_Result_e start_result =
+                AppArmFlowStartPlace(&upper_arm_target_place_profile,
+                                     HAL_GetTick());
+
+            g_arm_target_debug.stage =
+                UPPER_ARM_TARGET_DEBUG_PICK_DONE;
+            if (start_result == APP_ARM_FLOW_START_ACCEPTED) {
+                upper_arm_target_flow_state =
+                    UPPER_ARM_TARGET_FLOW_PLACE;
+                g_upper_controller_debug.arm_target_pick_flow_status =
+                    APP_ARM_FLOW_RUNNING;
+                g_arm_target_debug.stage =
+                    UPPER_ARM_TARGET_DEBUG_PLACE_STARTED;
+                return;
+            }
+            if (start_result == APP_ARM_FLOW_START_BUSY) {
+                return;
+            }
+            g_upper_controller_debug.arm_target_pick_running = 0u;
+            upper_arm_target_flow_state = UPPER_ARM_TARGET_FLOW_IDLE;
+            g_arm_target_debug.stage =
+                UPPER_ARM_TARGET_DEBUG_PLACE_REJECTED;
+            g_upper_controller_debug.arm_target_pick_fail_count++;
+            g_upper_controller_debug.discrete_invalid_count++;
+            return;
+        }
+        g_upper_controller_debug.arm_target_pick_running = 0u;
+        upper_arm_target_flow_state = UPPER_ARM_TARGET_FLOW_IDLE;
+        (void)UpperControllerSendCallback(
+            UPPER_CALLBACK_ARM_TARGET, UPPER_CALLBACK_COMPLETED);
+        g_arm_target_debug.stage = UPPER_ARM_TARGET_DEBUG_PLACE_DONE;
+        g_upper_controller_debug.arm_target_pick_complete_count++;
+        g_upper_controller_debug.discrete_complete_count++;
+    } else {
+        g_upper_controller_debug.arm_target_pick_running = 0u;
+        upper_arm_target_flow_state = UPPER_ARM_TARGET_FLOW_IDLE;
+        g_arm_target_debug.stage = UPPER_ARM_TARGET_DEBUG_PICK_FAILED;
+        g_upper_controller_debug.arm_target_pick_fail_count++;
+        g_upper_controller_debug.discrete_invalid_count++;
+    }
+}
+
 void UpperControllerBridgeInit(void)
 {
     memset(&g_upper_controller_debug, 0,
            sizeof(g_upper_controller_debug));
+    memset(&g_arm_target_debug, 0, sizeof(g_arm_target_debug));
     memset(&upper_pending_discrete, 0,
            sizeof(upper_pending_discrete));
+    memset(&upper_arm_target_place_profile, 0,
+           sizeof(upper_arm_target_place_profile));
     upper_next_chassis_command_id = UPPER_CHASSIS_COMMAND_ID_SEED;
+    upper_next_ac_capture_id = UPPER_AC_CAPTURE_ID_SEED;
+    upper_current_area_callback_pending = 0u;
+    upper_arm_target_flow_state = UPPER_ARM_TARGET_FLOW_IDLE;
+    g_upper_controller_debug.current_area =
+        UPPER_CONTROLLER_AREA_UNKNOWN;
+    g_upper_controller_debug.ac_observe_state = UPPER_AC_OBSERVE_IDLE;
     CameraTargetTransformInit();
     g_upper_controller_debug.initialized = 1u;
 }
@@ -170,11 +755,23 @@ void UpperControllerBridgeTask(uint32_t now_ms)
     if (g_upper_controller_debug.initialized == 0u) {
         return;
     }
+    if (UpperControllerResetHomeActive() != 0u) {
+        UpperControllerServiceResetHome();
+        return;
+    }
+    UpperControllerServiceCurrentAreaCallback();
+    UpperControllerPollArmTargetPick();
     if (g_upper_controller_debug.discrete_state ==
             UPPER_DISCRETE_PENDING) {
         if (upper_pending_discrete.task_id ==
             UPPER_TASK_CAMERA_GIMBAL) {
             UpperControllerRunCameraCommand(now_ms);
+        } else if (upper_pending_discrete.task_id ==
+                   UPPER_TASK_AC_SIDE_PICK) {
+            UpperControllerStartAcObservation(now_ms);
+        } else if (upper_pending_discrete.task_id ==
+                   UPPER_TASK_QR_RECOGNITION_POSE) {
+            UpperControllerRejectUndefinedQrPose();
         } else {
             UpperControllerSubmitGripperCommand();
         }
@@ -183,6 +780,9 @@ void UpperControllerBridgeTask(uint32_t now_ms)
         if (upper_pending_discrete.task_id ==
             UPPER_TASK_CAMERA_GIMBAL) {
             UpperControllerPollCameraCommand(now_ms);
+        } else if (upper_pending_discrete.task_id ==
+                   UPPER_TASK_AC_SIDE_PICK) {
+            UpperControllerPollAcObservation(now_ms);
         } else {
             UpperControllerPollGripperCommand();
         }
@@ -195,12 +795,23 @@ void on_receive_StateMachineCommand(
     ProtocolRuntimeNotifyApplicationRx();
     if (packet == NULL ||
         UpperControllerPacketAllowed() == 0u ||
-        packet->task_id > UPPER_TASK_CAMERA_GIMBAL ||
-        packet->task_status > UPPER_TASK_STATUS_SECONDARY) {
+        UpperControllerDiscreteCommandValid(packet) == 0u) {
         g_upper_controller_debug.discrete_invalid_count++;
         return;
     }
     g_upper_controller_debug.discrete_rx_count++;
+    if (packet->task_id == UPPER_TASK_RETURN_INITIAL_POSE) {
+        UpperControllerRequestResetHome(packet, HAL_GetTick());
+        return;
+    }
+    if (packet->task_id == UPPER_TASK_CURRENT_AREA) {
+        UpperControllerApplyCurrentArea(packet);
+        return;
+    }
+    if (g_upper_controller_debug.arm_target_pick_running != 0u) {
+        g_upper_controller_debug.discrete_busy_count++;
+        return;
+    }
     if (g_upper_controller_debug.discrete_state !=
             UPPER_DISCRETE_IDLE) {
         if (packet->task_id == upper_pending_discrete.task_id &&
@@ -215,6 +826,9 @@ void on_receive_StateMachineCommand(
     upper_pending_discrete = *packet;
     g_upper_controller_debug.pending_task_id = packet->task_id;
     g_upper_controller_debug.pending_task_status = packet->task_status;
+    if (packet->task_id == UPPER_TASK_QR_RECOGNITION_POSE) {
+        g_upper_controller_debug.qr_pose_request_count++;
+    }
     g_upper_controller_debug.discrete_state = UPPER_DISCRETE_PENDING;
 }
 
@@ -223,10 +837,19 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
     Camera_Target_Transform_Result_s transform_result;
     Camera_Target_Transform_Status_e transform_status;
     const Camera_Arm_Pose_Snapshot_s *snapshot;
+    uint32_t now_ms;
+    uint32_t capture_id;
+    uint8_t gate_flags;
     uint8_t valid;
 
     ProtocolRuntimeNotifyApplicationRx();
     g_upper_controller_debug.arm_target_rx_count++;
+    g_arm_target_debug.rx_count++;
+    g_arm_target_debug.stage = UPPER_ARM_TARGET_DEBUG_RX;
+    g_arm_target_debug.transform_status = CAMERA_TARGET_STATUS_OK;
+    g_arm_target_debug.pose_age_ms = UPPER_ARM_TARGET_POSE_AGE_UNKNOWN;
+    g_arm_target_debug.gate_flags = 0u;
+    g_arm_target_debug.pick_start_result = 0u;
     valid = (uint8_t)(packet != NULL &&
         UpperControllerPacketAllowed() != 0u &&
         isfinite(packet->target_x) && isfinite(packet->target_y) &&
@@ -237,6 +860,7 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
         packet->z_type <= UPPER_ARM_TARGET_MAX_Z_TYPE);
     g_upper_controller_debug.arm_target_valid = valid;
     if (valid == 0u) {
+        g_arm_target_debug.stage = UPPER_ARM_TARGET_DEBUG_INVALID;
         g_upper_controller_debug.arm_target_invalid_count++;
         return;
     }
@@ -256,18 +880,53 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
     g_upper_controller_debug.arm_target_base_mm[0] = NAN;
     g_upper_controller_debug.arm_target_base_mm[1] = NAN;
     g_upper_controller_debug.arm_target_base_mm[2] = NAN;
-    transform_status = CameraTargetTransformLatest(
-        0u, HAL_GetTick(), CAMERA_TARGET_DEFAULT_MAX_POSE_AGE_MS,
-        g_upper_controller_debug.arm_target_camera_mm,
-        &transform_result);
-    g_upper_controller_debug.arm_target_transform_status =
-        transform_status;
+    now_ms = HAL_GetTick();
+
+    /*
+     * AC closed-loop picking uses the arm pose at the moment the upper
+     * computer reports the camera target. Refresh the pose here instead of
+     * reusing the observation-complete snapshot, because perception or manual
+     * debug may take longer than the pose-age guard.
+     */
+    capture_id = UpperControllerNextAcCaptureId();
+    transform_status = UpperControllerCaptureCameraPose(capture_id, now_ms);
+    g_arm_target_debug.transform_status = transform_status;
     snapshot = CameraTargetGetPoseSnapshot();
     if (snapshot != NULL) {
         g_upper_controller_debug.arm_target_pose_capture_id =
             snapshot->capture_id;
         g_upper_controller_debug.arm_target_pose_capture_tick_ms =
             snapshot->capture_tick_ms;
+        if (snapshot->valid != 0u) {
+            g_arm_target_debug.pose_age_ms =
+                (uint32_t)(now_ms - snapshot->capture_tick_ms);
+        }
+    }
+    if (transform_status != CAMERA_TARGET_STATUS_OK) {
+        g_arm_target_debug.stage =
+            UPPER_ARM_TARGET_DEBUG_TRANSFORM_FAILED;
+        g_upper_controller_debug.arm_target_transform_fail_count++;
+        g_upper_controller_debug.arm_target_deferred_count++;
+        return;
+    }
+
+    transform_status = CameraTargetTransformLatest(
+        capture_id, now_ms, CAMERA_TARGET_DEFAULT_MAX_POSE_AGE_MS,
+        g_upper_controller_debug.arm_target_camera_mm,
+        &transform_result);
+    g_upper_controller_debug.arm_target_transform_status =
+        transform_status;
+    g_arm_target_debug.transform_status = transform_status;
+    snapshot = CameraTargetGetPoseSnapshot();
+    if (snapshot != NULL) {
+        g_upper_controller_debug.arm_target_pose_capture_id =
+            snapshot->capture_id;
+        g_upper_controller_debug.arm_target_pose_capture_tick_ms =
+            snapshot->capture_tick_ms;
+        if (snapshot->valid != 0u) {
+            g_arm_target_debug.pose_age_ms =
+                (uint32_t)(now_ms - snapshot->capture_tick_ms);
+        }
     }
     if (transform_status == CAMERA_TARGET_STATUS_OK) {
         memcpy(g_upper_controller_debug.arm_target_reference_mm,
@@ -277,14 +936,100 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
                transform_result.base_point_mm,
                sizeof(g_upper_controller_debug.arm_target_base_mm));
         g_upper_controller_debug.arm_target_transform_success_count++;
+        gate_flags = UpperControllerArmTargetGateFlags();
+        g_arm_target_debug.gate_flags = gate_flags;
+        if (gate_flags != 0u) {
+            g_arm_target_debug.stage = UPPER_ARM_TARGET_DEBUG_DEFERRED;
+            g_upper_controller_debug.arm_target_deferred_count++;
+            return;
+        }
+        {
+            App_Arm_Pick_Target_s target;
+            App_Fruit_Side_e side =
+                (App_Fruit_Side_e)g_upper_controller_debug.ac_active_side;
+            float advance_sign;
+            float pick_x_bias_mm;
+            uint8_t start_ok;
+
+            if (side != APP_FRUIT_SIDE_LEFT &&
+                side != APP_FRUIT_SIDE_RIGHT) {
+                g_arm_target_debug.stage =
+                    UPPER_ARM_TARGET_DEBUG_PICK_REJECTED;
+                g_upper_controller_debug.arm_target_pick_fail_count++;
+                g_upper_controller_debug.discrete_invalid_count++;
+                return;
+            }
+            if (AppArmSidePickPlaceBuildPlaceProfile(
+                    side, &upper_arm_target_place_profile) == 0u) {
+                g_arm_target_debug.stage =
+                    UPPER_ARM_TARGET_DEBUG_PLACE_REJECTED;
+                g_upper_controller_debug.arm_target_pick_fail_count++;
+                g_upper_controller_debug.discrete_invalid_count++;
+                return;
+            }
+            advance_sign = side == APP_FRUIT_SIDE_RIGHT ? -1.0f : 1.0f;
+            pick_x_bias_mm = side == APP_FRUIT_SIDE_RIGHT ?
+                APP_ARM_AC_CLOSED_LOOP_RIGHT_PICK_X_BIAS_MM :
+                APP_ARM_AC_CLOSED_LOOP_LEFT_PICK_X_BIAS_MM;
+            memset(&target, 0, sizeof(target));
+            target.approach_valid = 1u;
+            target.approach_x_mm =
+                transform_result.base_point_mm[0] + pick_x_bias_mm;
+            target.approach_y_mm = transform_result.base_point_mm[1];
+            target.approach_z_mm = APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM;
+            target.x_mm = target.approach_x_mm;
+            target.y_mm = target.approach_y_mm +
+                advance_sign * APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM;
+            target.z_mm = APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM;
+            target.tool_pitch_deg =
+                APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG;
+            /*
+             * AC闭环抓后放置沿用开环profile，但Y峰值按本次视觉目标动态
+             * 收紧：只允许比最终抓取点再向当前侧前方多配置余量。
+             */
+            upper_arm_target_place_profile.transfer_path_y_max_mm =
+                fabsf(target.y_mm) +
+                APP_ARM_AC_CLOSED_LOOP_PLACE_FORWARD_MARGIN_MM;
+            g_upper_controller_debug.arm_target_pick_center_mm[0] =
+                target.x_mm;
+            g_upper_controller_debug.arm_target_pick_center_mm[1] =
+                target.y_mm;
+            g_upper_controller_debug.arm_target_pick_center_mm[2] =
+                target.z_mm;
+            g_upper_controller_debug.arm_target_pick_tool_pitch_deg =
+                target.tool_pitch_deg;
+            start_ok = AppArmFlowStartPick(&target, now_ms);
+            g_upper_controller_debug.arm_target_pick_start_result =
+                start_ok;
+            g_arm_target_debug.pick_start_result = start_ok;
+            if (start_ok != 0u) {
+                g_upper_controller_debug.arm_target_pick_running = 1u;
+                upper_arm_target_flow_state = UPPER_ARM_TARGET_FLOW_PICK;
+                g_upper_controller_debug.arm_target_pick_flow_status =
+                    APP_ARM_FLOW_RUNNING;
+                g_upper_controller_debug.arm_target_pick_start_count++;
+                g_arm_target_debug.stage =
+                    UPPER_ARM_TARGET_DEBUG_PICK_STARTED;
+                g_upper_controller_debug.ac_observe_state =
+                    UPPER_AC_OBSERVE_IDLE;
+                g_upper_controller_debug.ac_operation_status =
+                    (uint8_t)UPPER_AC_OBSERVE_IDLE;
+                (void)UpperControllerSendCallback(
+                    UPPER_CALLBACK_ARM_TARGET,
+                    UPPER_CALLBACK_EXECUTING);
+            } else {
+                g_arm_target_debug.stage =
+                    UPPER_ARM_TARGET_DEBUG_PICK_REJECTED;
+                g_upper_controller_debug.arm_target_pick_fail_count++;
+                g_upper_controller_debug.discrete_invalid_count++;
+            }
+        }
     } else {
+        g_arm_target_debug.stage =
+            UPPER_ARM_TARGET_DEBUG_TRANSFORM_FAILED;
         g_upper_controller_debug.arm_target_transform_fail_count++;
+        g_upper_controller_debug.arm_target_deferred_count++;
     }
-    /*
-     * The packet has no capture_id and no requested tool pitch. A successful
-     * calculation remains observation-only; reliable ACK is not motion success.
-     */
-    g_upper_controller_debug.arm_target_deferred_count++;
 }
 
 Camera_Target_Transform_Status_e UpperControllerCaptureCameraPose(
@@ -338,6 +1083,16 @@ Camera_Target_Transform_Status_e UpperControllerCaptureCameraPose(
         g_upper_controller_debug.arm_pose_capture_fail_count++;
     }
     return status;
+}
+
+uint8_t UpperControllerGetCurrentArea(Upper_Controller_Area_e *area)
+{
+    if (area == NULL ||
+        g_upper_controller_debug.current_area_valid == 0u) {
+        return 0u;
+    }
+    *area = g_upper_controller_debug.current_area;
+    return 1u;
 }
 
 void on_receive_VelocityCommand(const Packet_VelocityCommand *packet)

@@ -1167,7 +1167,7 @@ static void ArmUpdateFeedback(uint32_t now_ms)
         g_arm_state.q_feedback_deg[axis] = joint->feedback_deg;
         g_arm_state.q_target_deg[axis] = joint->target_deg;
     }
-    /* 转成台架上直观的物理角：HOME时应分别接近-90deg和60deg。 */
+    /* 转成台架上直观的物理角：HOME时应分别接近-110deg和40deg。 */
     g_arm_home_joint_debug.shoulder_current_deg =
         -g_arm_state.q_feedback_deg[ARM_JOINT_SHOULDER];
     g_arm_home_joint_debug.shoulder_target_deg =

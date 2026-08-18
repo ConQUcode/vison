@@ -135,12 +135,13 @@
 #define ARM_AUTO_Q3_MAX_DEG ARM_Q3_SOFT_MAX_DEG
 
 /*
- * HOME解析目标：q1=0deg，物理大臂=-90deg对应内部q2=+90deg，
- * 两杆物理夹角60deg对应内部q3=-60deg。ARM_SAFE_Q*既用于HOME的IK
+ * HOME解析目标：q1=0deg，物理大臂由-90deg往后靠20deg到-110deg，
+ * 对应内部q2=+110deg；小臂按两杆物理夹角收至40deg，对应内部q3=-40deg。
+ * ARM_SAFE_Q*既用于HOME的IK
  * 参考/自检，也供旧NORMAL顺序回位流程使用；电机永久零位参数不改变。
  */
-#define ARM_HOME_SHOULDER_PHYSICAL_DEG     (-90.0f)
-#define ARM_HOME_ELBOW_INCLUDED_DEG          60.0f
+#define ARM_HOME_SHOULDER_PHYSICAL_DEG    (-110.0f)
+#define ARM_HOME_ELBOW_INCLUDED_DEG          40.0f
 #define ARM_SAFE_Q1_DEG                       0.0f
 #define ARM_SAFE_Q2_DEG  (-(ARM_HOME_SHOULDER_PHYSICAL_DEG))
 #define ARM_SAFE_Q3_DEG  (-(ARM_HOME_ELBOW_INCLUDED_DEG))
@@ -204,9 +205,13 @@
 #define ARM_REAR_ZONE_X_MARGIN_MM                   2.0f
 #define ARM_REAR_ZONE_MIN_TOOL_Z_MM               160.0f
 /*
- * 大臂从实机零点朝栏框方向最多允许到120deg。该限制是机械安全边界，
- * 不因工具中心高度而豁免。仅当底座处于正前方扇区时应用这条限制；
- * 底座已经转到后方后，仍由关节软限位和负X工具高度保护负责安全检查。
+ * 前方栏框肩关节保护为旧机械结构遗留限制。当前实机前方无遮挡，关闭该
+ * 保护；后方框仍由REAR_ZONE/REAR_CROSSING系列高度保护负责。
+ */
+#define ARM_FRONT_BARRIER_SHOULDER_LIMIT_ENABLE      0u
+/*
+ * 大臂从实机零点朝栏框方向最多允许到120deg。仅在
+ * ARM_FRONT_BARRIER_SHOULDER_LIMIT_ENABLE打开时生效。
  */
 #define ARM_FRONT_BARRIER_SHOULDER_Q2_MAX_DEG      120.0f
 /* 底座逻辑角绝对值不超过90deg时，认为机械臂仍面向前方栏框。 */
@@ -322,9 +327,9 @@
  * 夹爪中心命令必须显式选择ARM_CONTROL_POINT_TOOL_CENTER，固件会按
  * ARM_TOOL_PITCH_AXIS_TO_CENTER_MM和绝对俯仰角反算ID1轴心目标。
  */
-#define ARM_USB_HOME_X_MM                          225.1666f
+#define ARM_USB_HOME_X_MM                          136.2414f
 #define ARM_USB_HOME_Y_MM                            0.0f
-#define ARM_USB_HOME_Z_MM                          192.0f
+#define ARM_USB_HOME_Z_MM                          176.3204f
 #define ARM_USB_HOME_SPEED_MM_S                    200.0f
 #define ARM_USB_TOOL_PITCH_MIN_DEG                (-180.0f)
 #define ARM_USB_TOOL_PITCH_MAX_DEG                  180.0f

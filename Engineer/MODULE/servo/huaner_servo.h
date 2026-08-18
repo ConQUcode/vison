@@ -31,6 +31,8 @@
 #define HUANER_SERVO_BOARD_VOLTAGE_MAX_MV         15000u
 /* 到位需同时满足位置误差、反馈速度和连续稳定时间。 */
 #define HUANER_SERVO_ARRIVAL_TOLERANCE_POS           15u
+/* 临时调试：ID1俯仰舵机中位偏差偏大，单独放宽到位误差，不影响ID2夹爪。 */
+#define HUANER_SERVO_ID1_ARRIVAL_TOLERANCE_POS       25u
 #define HUANER_SERVO_ARRIVAL_VELOCITY_POS_S       100.0f
 #define HUANER_SERVO_ARRIVAL_STABLE_MS              120u
 #define HUANER_SERVO_MOTION_TIMEOUT_MARGIN_MS        500u

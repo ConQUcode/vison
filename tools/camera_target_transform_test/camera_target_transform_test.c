@@ -267,8 +267,8 @@ static void test_latest_snapshot_guards(void)
     CameraTargetTransformInit();
     status = CameraTargetTransformLatest(0u, 1000u, 500u,
                                          point, &result);
-    expect_true((uint8_t)(status == CAMERA_TARGET_STATUS_NOT_CALIBRATED),
-                "default calibration disabled");
+    expect_true((uint8_t)(status == CAMERA_TARGET_STATUS_NO_POSE_SNAPSHOT),
+                "default calibration requires pose snapshot");
     expect_true((uint8_t)(CameraTargetSetExtrinsic(&extrinsic) ==
                           CAMERA_TARGET_STATUS_OK),
                 "configure valid extrinsic");

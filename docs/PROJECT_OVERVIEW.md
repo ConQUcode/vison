@@ -1,36 +1,41 @@
 # 当前工程功能
 
-更新时间：2026-08-16
+更新时间：2026-08-17
 
 ## 当前默认运行内容
 
 `Engineer/APPLICATION/app_config.h` 当前为：
 
 ```c
-#define APP_MODE APP_MODE_ARM_BD_OBSERVATION_TEST
+#define APP_MODE APP_MODE_HOST_CONTROL
 #define APP_ARM_TOOL_CENTER_TEST_ENABLE 1u
 ```
 
-当前模式在正常 HOME 后先同步移动到 `q=[-90,120,-48] deg` 的紧凑
-右侧过渡姿态，再以 `150 mm/s` 单次移动到 BD 区右侧树上水果观察位
-并保持。最终夹爪中心为 `[0,-57,210] mm`，世界绝对俯仰为 `-30 deg`；
-两段离线回放最大 `|Y|=231.470 mm`，低于 `260 mm` 限制。该模式不运行
-底盘、不闭合夹爪、不进入AC抓放循环。
+当前模式初始化USB、底盘、IMU、机械臂、ID2夹爪和双MG995，由上位机协议控制
+底盘速度、离散执行和AC闭环观察抓取。HOST模式速度能力为`1.0m/s`线速度、
+`1.5rad/s`角速度、有限超限饱和和300ms超时平滑停车。
 
-BD左右观察点均已显式保存：LEFT为`q1=+90deg/[0,+57,210]mm`，
-RIGHT为`q1=-90deg/[0,-57,210]mm`。当前
-`APP_ARM_BD_OBSERVATION_ACTIVE_SIDE=RIGHT`，每次离线回放会同时验证两侧。
+闭环方案AC/BD左右观察点均已显式保存：LEFT为
+`q1=+90deg/[0,+150,300]mm`，RIGHT为严格镜像
+`q1=-90deg/[0,-150,300]mm`，绝对俯仰均为`-58deg`，斜向对应侧观察。当前活动侧为LEFT；
+staging为`[+90,90,-80]deg`，每次离线回放仍同时验证两侧。BD回放上限为
+405mm，不替代AC独立的445mm抓后边界。
 
 保留的 `APP_MODE_ARM_POSTURE_TEST` 仍按先左后右、只对Y取负的
 已验证路径运行：
 
 ```text
-左侧=[0,380,-150] -> [0,480,-150] mm
-右侧=[0,-380,-150] -> [0,-480,-150] mm
+左侧=[0,380,-140] -> [0,440,-140] mm
+右侧=[0,-380,-140] -> [0,-440,-140] mm
 两侧世界绝对俯仰=-5 deg
-接近点=600 mm/s，最后100 mm推进=150 mm/s
+接近点=600 mm/s，最后60 mm推进=150 mm/s
 左抓取/A左放置 -> 返回前方 -> 右抓取/A右放置 -> 返回前方 -> 重复
 ```
+
+AC抓后使用`[q1=+/-90,q2=27.3,q3=-62.7] deg`专用waypoint，工具中心
+由`Z=-140 mm`抬高约20mm，完整放置准备保持`|Y|<=440 mm`。这些参数只在
+`app_arm_side_pick_place`复制公共A左/A右profile后注入；正式A区公共profile
+保持直接进入原安全姿态，不共享AC的waypoint或Y/Z约束。
 
 左右两侧每次都先调用 `AppArmFlowBuildPickStaging()`，用一条联合命令同时
 到达 `q1=+/-89.5 deg`、`q2=80 deg`、`q3=-90 deg` 和ID1相对俯仰
@@ -63,9 +68,8 @@ LEFT/RIGHT循环；未来USB协议桥可提交相同命令，本轮尚未增加�
 | `app_arm_command_id.c/.h` | 固件内部机械臂命令ID的唯一分配器 |
 | `arm/` | 主臂、轨迹、运动学、工具和安全控制 |
 | `chassis/` | 相对运动和连续vx/wz命令、里程计、IMU闭环、超时停车和停稳 |
-| `fruit_usb_bridge.c/.h` | 水果识别结果校验和观察，不直接驱动任务 |
 | `camera_target_transform.c/.h` | 相机外参、拍照姿态快照及摄像头系到机械臂基座系的刚体点变换 |
-| `upper_controller_bridge.c/.h` | 新版上位机速度、离散执行和ArmTarget适配；当前目标变换后仍禁止运动 |
+| `upper_controller_bridge.c/.h` | 新版上位机速度、离散执行、AC观察姿态和ArmTarget闭环抓取适配 |
 
 底盘公共接口为 `ChassisInit`、`ChassisSubmitCommand`、
 `ChassisSubmitVelocityCommand`、`ChassisGetStatus`、`ChassisCancelMotion`
@@ -104,9 +108,10 @@ LEFT/RIGHT循环；未来USB协议桥可提交相同命令，本轮尚未增加�
 `-90 deg` 绝对俯仰由ID1随主臂轨迹同步保持。
 
 放置流程由显式 `App_Arm_Place_Profile_s` 决定。点1从 `+90` 经 `+135`
-到 `+180 deg`，点2从 `-90` 经 `-135` 到 `-180 deg`；ID2张开后小臂从
-`q3=-70` 上抬到 `q3=-80`。定向转到后方后，释放和抬臂命令保留底座
-实时反馈角，不再次提交 `q1=+180/-180`；底座回到 `q1=0` 即结束放置，
+到 `+178 deg`，点2从 `-90` 经 `-135` 到 `-178 deg`；ID2张开后小臂从
+`q3=-70` 上抬到 `q3=-80`。定向转到后方后，释放和抬臂命令继续显式
+保持profile中的 `q1=+178/-178`，不使用瞬时反馈重锁定底座目标；底座回到
+`q1=0` 即结束放置，
 下一抓的底座预对准会让ID1与三台达妙同步进入 `[q2,q3]=[80,-90]`、
 ID1相对俯仰 `-80 deg` 的准备姿态；随后工具中心轨迹以 `200 mm/s`
 请求速度运行，使夹爪绝对俯仰保持 `-90 deg` 并保留 `10 deg` 名义余量。
@@ -124,21 +129,31 @@ ID1相对俯仰 `-80 deg` 的准备姿态；随后工具中心轨迹以 `200 mm/
 
 ## 上位机协议边界
 
-当前生成协议哈希为 `0x2588BA9A`，生成文件是
+当前生成协议哈希为 `0x740E426B`，生成文件是
 `protocol.c/.h/PROTOCOL_DOC.md`；项目维护的 `protocol_runtime.*`、
-`protocol_port.*`、`fruit_usb_bridge.*` 和 `upper_controller_bridge.*` 不能被
+`protocol_port.*` 和 `upper_controller_bridge.*` 不能被
 生成文件替换。新版协议无需强制握手且心跳非严格，但下位机仍观察连接状态；
 生成FSM负责心跳回包和入站可靠消息ACK，运行层不得重复回包。
 
 业务消息新增 `StateMachineCommand`、`ExecutionCallback`、`ArmTarget` 和
 `VelocityCommand`。在 `APP_MODE_HOST_CONTROL` 中，速度包转换为
-`vx_mm_s/wz_rad_s`后提交底盘；离散包控制ID2夹爪或双MG995。
+`vx_mm_s/wz_rad_s`后提交底盘；离散包控制ID2夹爪、双MG995，或通过
+`task_id=2`选择AC左/右观察姿态。status 0进入左观察、1进入右观察、2当前无效；
+观察开始/到位时发送`callback_id=2`、status 1/0，并在到位后保存pose snapshot。
+`task_id=5`的status 0..3已映射为当前区域A..D，独立于执行器状态保存，并发送
+`callback_id=5`的执行中/完成；应用可通过`UpperControllerGetCurrentArea()`读取。
+`task_id=4`二维码识别姿态因没有已确认点位而保持显式未配置，只更新Watch，
+不动作、不伪报callback 4。当前协议没有BD观察侧别字段，区域状态不触发观察点。
 `ArmTarget`的米制相机坐标会先转换为毫米，再尝试执行
 `P_B=T_B_E*T_E_C*P_C`。算法、旋转矩阵校验、腕部/夹爪两种安装参考系、
-姿态快照和离线测试均已实现；当前外参配置保持`calibrated=0`，且协议没有
-图像帧ID，因此桥只记录明确失败原因，不产生机械臂动作。拍照触发侧必须在
-拍照瞬间调用`UpperControllerCaptureCameraPose(capture_id, now_ms)`，不能在
-目标包到达时读取当前姿态代替。`z_type`只保留任务分类语义，不参与坐标计算。
+姿态快照和离线测试均已实现；当前D435i外参已启用用于AC闭环联调。协议没有
+图像帧ID，因此桥只使用最近一次AC观察完成时保存的快照，最大年龄5000ms。
+换算成功且机械臂空闲后，闭环抓取目标`X/Y`取基座坐标、`Z=-100mm`，
+`APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG=-90deg`保持夹爪竖直向下，并通过
+`callback_id=3`报告执行状态；成功启动后消费观察状态，下一次抓取必须重新观察。
+拍照触发侧必须在观察到位时调用
+`UpperControllerCaptureCameraPose(capture_id, now_ms)`，不能在目标包到达时读取
+当前姿态代替。`z_type`只保留任务分类语义，不参与当前固定Z计算。
 具体标定参数和矩阵方向见`docs/CAMERA_TARGET_TRANSFORM.md`。
 
 ## 夹爪容错
@@ -152,10 +167,10 @@ ID2 默认/张开位置为 `450`，探测闭合目标为 `660`。接触后每次
 
 | 模式 | 作用 |
 |---|---|
-| `APP_MODE_ARM_BD_OBSERVATION_TEST` | 当前默认，HOME后单次到BD右观察位并保持 |
+| `APP_MODE_HOST_CONTROL` | USB上位机控制底盘速度、ID2夹爪、双MG995、AC观察姿态和ArmTarget闭环抓取 |
+| `APP_MODE_ARM_BD_OBSERVATION_TEST` | 手动切回测试用，HOME后单次到BD左侧高位斜向观察位并保持 |
 | `APP_MODE_MG995_TEST` | 只输出PI6/PI7双路PWM并保持两侧摄像头水平0deg |
-| `APP_MODE_HOST_CONTROL` | USB上位机控制底盘速度、ID2夹爪和双MG995；ArmTarget暂只观察 |
-| `APP_MODE_ARM_POSTURE_TEST` | HOME后先执行左侧 `[0,380,-150] -> [0,480,-150]`，再执行右侧镜像路径并持续交替抓放 |
+| `APP_MODE_ARM_POSTURE_TEST` | HOME后先执行左侧 `[0,380,-140] -> [0,440,-140]`，再执行右侧镜像路径并持续交替抓放 |
 | `APP_MODE_ARM` | 底盘原地执行点1/点2无限交替抓放 |
 | `APP_MODE_CHASSIS_ONE_METER` | 应用层通过公共底盘接口复现1m/右转90/1m循环 |
 | `APP_MODE_HUANER_FEEDBACK` | 幻儿舵机反馈专项模式 |
@@ -163,7 +178,7 @@ ID2 默认/张开位置为 `450`，探测闭合目标为 `660`。接触后每次
 
 ## 常用 Watch
 
-- `g_app_arm_bd_observation_debug`：BD右观察位状态、实际坐标/关节/俯仰、误差和路径预检。
+- `g_app_arm_bd_observation_debug`：BD左观察位状态、实际坐标/关节/俯仰、误差和路径预检。
 - `g_app_arm_posture_test_debug`：AC左右抓放状态、坐标/关节目标与反馈、绝对俯仰误差和命令结果。
 - `g_app_arm_command_id_debug`：公共机械臂命令ID种子、最后发放值、发放次数和回绕次数。
 - `g_app_fruit_task_debug`：当前区域、侧别、点位、任务索引、距离和唯一失败来源。
@@ -184,9 +199,8 @@ ID2 默认/张开位置为 `450`，探测闭合目标为 `660`。接触后每次
 
 ## 验证边界
 
-当前协议、桥接和坐标变换已通过 ARM GCC 严格语法检查，坐标变换29项离线
-检查全部通过；MG995模式和临时`APP_MODE_HOST_CONTROL`模式的历史构建
-均为Keil ArmCC 5全量构建0错误0警告，host模式MAP确认ArmTarget调用变换
-模块。最新AXF/HEX为BD右观察位默认模式，同样0错误0警告。未烧录、
-未标定相机外参，也没有
-替代USB、底盘、夹爪、摄像头或机械臂的实机验收。
+当前HOST默认模式已通过 ARM GCC 严格检查和Keil ArmCC 5.06u7全量重建，
+构建为0错误0警告；2026-08-17 02:58生成新AXF/HEX/MAP。MAP确认
+VelocityCommand底盘链、AC方向命令的Start/Poll/回调链及机械臂任务轮询均在
+最终镜像。BD双侧和AC路径回放仍通过。未烧录、未标定相机外参，也没有进行
+真实USB、1m/s底盘、AC方向抓取、夹爪、摄像头或机械臂实机验收。

@@ -1,5 +1,64 @@
 # Findings
 
+## Phase 30 AC post-grip Y limit
+
+- 当前AC放置从`APP_ARM_PLACE_STEP_SUBMIT_TRANSFER`开始，直接把抓取终点关节姿态联合插值到profile的`safe_q_deg`；现有状态机没有`430mm`专用Y限制。
+- A区左右profile的安全姿态分别为`[+90,90,-100]deg`和`[-90,90,-100]deg`，后续才沿各自方向转到后方；问题发生在底座后转之前的第一段。
+- `AppArmFlowSubmitJoint()`没有为该段提交新的ID1俯仰目标，因此候选路径必须按实际普通关节命令语义和现有工具状态逐采样计算夹爪中心，而不能只比较起终点Y。
+- 普通放置过渡命令以当前三轴反馈为起点，`move_type=ARM_MOVE_LINEAR`，同时提交q1/q2/q3目标；该命令的`tool_relative_pitch_valid`保持0，后续需从`ArmExecuteJointCommand`和轨迹层确认ID1在插值期间的实际保持语义。
+- 当前AC抓取终点宏为左右`Y=+420/-420mm`，抓取后停留500ms；现有profile的转移姿态q2/q3来自`APP_FRUIT_A_TRANSFER_*`，并非笛卡尔轨迹点。
+- `app_fruit_task_config.h`内仍有业务任务表的`[0,+/-400,-100]mm, -90deg`旧A点；HOST/专项AC单侧抓放实际使用`app_config.h`的`[0,+/-420,-145]mm, -5deg`，本轮回放起点必须采用后者，不能混用旧业务点。
+- 离线工具已有`staging_pose_safe()`、1deg关节插值采样、工具中心FK及左右镜像检查，可直接扩展为AC抓取终点到放置准备的永久`|Y|<=430mm`回归测试。
+- 轨迹层`ArmTrajectoryMoveJointWithOptions()`会先解析当前/指定ID1相对俯仰，再分别检查起点、waypoint和终点的ID1可达性，同时通过`ArmWorkspaceJointPathSafe()`检查关节直线段；但它仍没有AC专用430mm限制。
+- 现有关节命令原生支持一个`waypoint_q_deg`，可在一条命令中执行“起点->waypoint->safe_q”并保留现有命令完成/失败语义；若能找到满足约束的镜像waypoint，这是比新增多条状态更小的实现。
+- `ArmCartesianResolveRelativeToolPitch()`明确规定普通关节动作锁存动作开始时的ID1相对小臂角，而非保持世界绝对俯仰；轨迹中绝对俯仰会随q2/q3变化。
+- 当前抓取终点约`q=[+/-90,12.964,-88.139]deg`、绝对俯仰`-5deg`，对应锁存相对俯仰约`+73.9deg`；直达`safe_q=[+/-90,90,-100]deg`时工具绝对俯仰会大幅上抬，需按该相对角计算真实工具中心Y峰值。
+- 修改前基线`tools/arm_path_replay/run.cmd`已通过：AC左右终点解仍为`[+/-90,12.964,-88.139]deg`，BD双侧和后方绕行回放均正常；后续新增检查可用该基线判断是否引入回归。
+- 临时搜索器按真实起点和锁存相对俯仰复现：从`q=[90,12.964,-88.139]deg`直达`[90,90,-100]deg`时夹爪中心峰值`|Y|=479.161mm`，明确超过用户要求的430mm。
+- q1保持当前侧`+/-90deg`并增加q2/q3 waypoint可消除外凸；粗网格找到1870个满足430mm的候选。最低峰值候选贴近q3上边界，因此正式参数需保留软件限位余量后再选。
+- q3普通软件范围为`-190..-35deg`。已测简单候选中`q=[90,20,-50]deg`峰值`424.376mm`且离q3上限15deg；`[90,30,-60]deg`峰值`427.887mm`。前者更有Y余量，但仍继续比较q3=-45deg组以增加动态余量。
+- `q=[+/-90,20,-45]deg`保留q3上限10deg余量，两段理论峰值均为起点`420.000mm`，相对430mm留10mm。
+- 运行时`ArmCartesianInterpolateJointSamples()`严格在`start -> waypoint -> target`的相邻样本间做分段线性关节插值，不使用会越过waypoint的高阶关节曲线；现有`ArmWorkspaceJointPathSafe()`也对两段逐1deg预检，因此离线两段采样与实际规划几何一致。
+- 正式实现已把A区profile首段改为单命令双段关节轨迹：`抓取终点 -> q=[+/-90,20,-45]deg -> safe_q=[+/-90,90,-100]deg`；普通关节命令仍锁存抓取完成时ID1相对俯仰。
+- 永久回放检查通过，左右逐采样`maxAbsY=420.000mm < 430mm`，并同时验证左右工具中心严格镜像、关节/ID1/现有工作空间安全；BD双侧、下一次抓取过渡和后方绕行基线仍通过。
+- `gcc_arm_check.cmd`已通过全部配置单元及显式HOST模式`app_runtime.c`检查；profile新字段只有A区左右两个静态初始化器，均已补齐，`git diff --check`无空白错误（仅现有CRLF提示）。
+- README、HANDOFF、FRUIT_TASK_FLOW和TUNING_GUIDE原先只描述直达`safe_q`；本轮已同步为先经过`[+/-90,20,-45]deg`并明确`420/430mm`验证边界。
+- 为避免未来点位或实际ID1反馈变化后只依赖离线常量，A区profile新增运行时Y上限；提交首段前按实际q反馈和ID1相对角逐1deg复核两段，超限或反馈无效时以`ARM_COMMAND_PREFLIGHT_FAILED`锁存失败，不开始运动。
+- 最终验证：AC回放`maxAbsY=420.000mm/limit=430.0mm`，BD双侧、下一侧抓取和后方绕行回放全部通过；严格ARM GCC含HOST模式通过，`git diff --check`通过。按工程约束未启动Keil，避免改写当前脏的`Engineer.uvoptx`。
+
+## Phase 31 AC endpoint and raised retract
+
+- 实时配置仍为接近`[0,+/-380,-145]mm`、抓取终点`[0,+/-420,-145]mm`、抓取俯仰`-5deg`，阶段30 waypoint为`[+/-90,20,-45]deg`、运行时Y上限430mm。
+- 用户本轮目标按上下文解释为：接近与终点Z都提高5mm到`-140mm`，终点Y恢复`+/-440mm`；接近Y保持`+/-380mm`，因此低速推进距离从40mm变为60mm。
+- 抓后第一段应在向内收Y时把工具中心从`Z=-140mm`抬到约`-120mm`，且第一段不能先向更低Z下探；完整放置准备改为`|Y|<=440mm`并保持运行时实际反馈预检。
+- 工作区仍包含大量既有修改，`Engineer.uvoptx`已脏；本轮继续只改AC参数、A区放置profile、回放和维护文档，不触碰无关文件。
+- 新终点`[0,+440,-140]mm/-5deg`的IK为`q=[90,13.017,-92.631]deg`，普通关节动作锁存ID1相对角约`69.353deg`。
+- 原waypoint`[90,20,-45]deg`在新相对俯仰下虽然Y向内，但Z会先下探到`-176.105mm`且waypoint只有`-168.376mm`，不符合抬高20mm要求。
+- 0.1deg网格找到236个同时满足第一段Y单调向内、Z不下探、waypoint Z在`-120+/-0.5mm`和两段`|Y|<=440mm`的候选；当前最佳`[90,27.3,-62.7]deg`对应中心约`[0,340.525,-120.007]mm`，全程最低Z正好为起点`-140mm`。
+- 邻近简单点对比：`[27,-63]deg`到`Z=-121.218mm`（抬18.782mm），`[27.5,-62.5]deg`到`Z=-119.201mm`（抬20.799mm）；采用搜索最佳`[27.3,-62.7]deg`，抬高`19.993mm`。
+- 正式实现将把Z要求写入profile并按实际反馈运行时预检：第一段Z不能相对上一采样下降，waypoint相对起点的抬高量必须在`20+/-2mm`内；第二段继续沿用原工作空间安全和Y上限检查。
+- 当前profile只有A左/A右两个静态初始化器，适合在现有`transfer_path_y_max_mm`旁新增抬高目标和容差字段；运行时预检集中在`AppArmFlowTransferPathWithinYLimit()`，可在不改底层全局轨迹器的前提下扩展为Y+Z专用检查。
+- 正式参数已更新：接近点`[0,+/-380,-140]mm`、抓取终点`[0,+/-440,-140]mm`，waypoint`[+/-90,27.3,-62.7]deg`，Y上限440mm，抬高目标`20+/-2mm`。
+- 永久回放通过：终点IK`[+/-90,13.017,-92.631]deg`；第一段Z单调从`-140`到`-120.007mm`，抬高`19.993mm`；两段`maxAbsY=440.000mm`，左右严格镜像。接近/60mm推进、下一侧准备、BD和后方绕行均继续通过。
+- 严格ARM GCC全部配置单元及显式HOST模式通过，`git diff --check`通过（仅现有CRLF提示）。
+- README、HANDOFF、FRUIT_TASK_FLOW、TUNING_GUIDE、PROJECT_OVERVIEW和电气验证表已同步到`+/-440/-140/60mm推进/[+/-90,27.3,-62.7]/440mm/抬高约20mm`，旧`420/-145/430/[20,-45]`表述已清理。
+- A区profile仍被旧正式业务点`[0,+/-400,-100]mm/-90deg`共享；在最终确定运行时Z约束归属前必须回放该入口，避免新增`20+/-2mm`检查导致非AC流程被拒绝。
+- 兼容性回放确认风险真实存在：旧正式A点起始`q=[90,32.859,-101.444]deg`、ID1相对角`-44.303deg`，若复用AC新waypoint会把工具中心从`Z=-100`降到`-162.483mm`，且Z非单调上升，因此公共profile会被AC专用运行时检查拒绝。
+- 最终边界修正：`App_Arm_Place_Profile_s`增加可选waypoint和约束开关；`app_fruit_task.c`中的A左/A右公共profile保持两开关为0，`AppArmSidePickPlacePrepare()`仅在复制后的AC单侧profile中注入`[+/-90,27.3,-62.7]deg`、440mm上限和`20+/-2mm`抬高约束。
+- 最终复核确认工程内只有A左/A右两份静态profile初始化器，新增字段均已显式初始化；公共A业务继续直接进入`safe_q`，AC任务才分两段执行waypoint。
+- 收尾验证再次通过：AC抓后`waypointZ=-120.007mm/raiseZ=19.993mm/maxAbsY=440.000mm`，BD双侧、AC接近/60mm推进、下一侧准备和后方路径全部通过；严格ARM GCC含显式HOST模式通过，`git diff --check`无空白错误。
+- 六份维护文档已明确上述AC副本作用域，并再次搜索确认没有有效的`420/-145/430/最后40mm/[20,-45]`旧参数残留。本轮未启动Keil、未烧录、未做实机运动验证，`Engineer.uvoptx`未被本轮命令改写。
+
+## Phase 32 camera extrinsic persistence and AC hardware rejection
+
+- 用户确认D435i螺丝到RGB光心偏移来自官方数据、XYZ轴方向正确，相机安装在ID1之后并随夹爪一起俯仰；Fusion参考点为ID1轴心。
+- 当前固件使用`CAMERA_TARGET_REFERENCE_TOOL_CENTER`，且ID1轴心到夹爪中心沿工具+X为117mm，因此已确认的ID1轴到RGB光心平移`[36.944894,69.184360,48.192321]mm`应换算为工具中心到RGB光心`[-80.055106,69.184360,48.192321]mm`；旋转矩阵不变。
+- 实机截图显示`APP_ARM_POSTURE_TEST_FAILED`、左侧active、完成计数0、`place_start_result=0/ACCEPTED`、主机`fault_code=0`、夹爪已进入终态，且停在放置首步附近；这排除放置profile启动失败和主机故障，指向首段运行时预检或关节命令提交拒绝。
+- `AppArmFlowPoll()`先调用`AppArmFlowUpdateWatch()`再执行`AppArmFlowPollPlace()`；若首段同一拍失败，上层立即停止Poll，所以侧任务中的`arm_flow_status/place_step`副本会永久停留在失败前的RUNNING/SUBMIT_TRANSFER，不能据截图中的数值否定拒绝。
+- 精确拒绝来源应看`g_app_arm_pick_place_test_debug.failure_source/fault`以及`transfer_path_y_check_passed/peak_abs_y/start_z/waypoint_z/z_raise`；截图中的`submit_result=0`是旧命令结果，不代表放置首段已提交成功。
+- 正式边界调整为：公共A左/A右profile恢复无AC waypoint/无AC YZ约束的原始直接安全姿态过渡；`app_arm_side_pick_place`取得profile副本后，仅为AC命令覆盖`[+/-90,27.3,-62.7]deg`、440mm和20+/-2mm约束。
+- 本轮不得修改全局工作空间边界或`Engineer.uvoptx`；实现范围限定为AC放置准备状态和`tools/arm_path_replay`验证。
+
 ## Phase 21 BD left observation point
 
 - 用户确认的新目标是工具中心`[0,57,210] mm`、世界绝对俯仰`-30deg`，方向仍朝左，因此底座预对准保持`q1=+90deg`。
@@ -64,6 +123,38 @@
 - 双侧回放同次通过：两侧过渡q2/q3均为`120/-48deg`、ID1相对俯仰均为`-18deg`、最大`|Y|`均为`231.470mm`；最终关节解分别为`[+90.000,168.151,-47.928]deg`和`[-90.000,168.151,-47.928]deg`。
 - ARM GCC严格检查和`git diff --check`通过；Keil ArmCC 5.06u7全量重建0错误0警告，`Code=93880`、`RO-data=896`、`RW-data=932`、`ZI-data=134480`，AXF/HEX/MAP于22:41更新。
 - 当前固件上电只执行RIGHT，LEFT只是永久保存并参与回放；本轮没有烧录或执行机械臂实机动作，也没有修改`Engineer.uvoptx`。
+
+## Phase 26 upper-controller chassis mode
+
+- 现有`APP_MODE_HOST_CONTROL`已完整启用USB、协议runtime、`UpperControllerBridge`、INS和`ChassisTask`，并由1ms底盘任务持续执行；无需新增模式或重写底盘控制器。
+- `VelocityCommand`协议ID为`0x14`，payload为两个float共8字节：`linear_x`单位m/s、`angular_z`单位rad/s；回调将linear_x乘1000后提交`ChassisSubmitVelocityCommand()`，每帧使用递增command_id刷新同一连续速度命令。
+- 底盘接受范围为`|vx|<=200mm/s`和`|wz|<=0.80rad/s`；超范围帧由底盘接口返回INVALID。连续命令300ms不刷新会进入平滑停车并最终CANCELLED，因此上位机应以至少10Hz持续发送。
+- 包只有在bridge已初始化、协议连接ready且link online时才执行；`CFG_STRICT_HEARTBEAT=0`，但USB链路仍必须在线。`wz=0`且`vx!=0`时固件捕获当前IMU航向并自动直行保持。
+- HOST_CONTROL既有初始化还包含MG995和`ArmInit()`，机械臂会正常上电HOME，但不会运行BD观察状态机；本轮按已有模式语义保留，不改执行机构所有权。
+- 默认模式已切到`APP_MODE_HOST_CONTROL`，未修改速度限幅、超时停车、AC参数或已保存的BD左右观察点。
+- BD双侧/AC路径回放和ARM GCC严格检查通过；后者包含`app_runtime.c in host-control mode`专门检查，`git diff --check`无空白错误。
+- Keil ArmCC 5.06u7全量重建`host_control_chassis_rebuild_20260816.log`为0错误0警告，`Code=124532`、`RO-data=3464`、`RW-data=1408`、`ZI-data=136432`，新AXF/HEX/MAP于23:01生成。
+- 最终MAP确认`protocol_fsm_feed -> on_receive_VelocityCommand -> ChassisSubmitVelocityCommand`，并保留`UpperControllerBridgeInit/Task`；本轮未烧录，也未做真实上位机USB或底盘硬件动作测试。
+
+## Phase 27 host chassis speed saturation
+
+- 当前`ChassisVelocityCommandValid()`把超出`200mm/s`或`0.8rad/s`的任一有限字段判为INVALID，整包不进入底盘；用户观察与源码语义一致。
+- 仅把线速度接口上限改为`1.0m/s`仍会被现有`0.35m/s`单轮上限二次比例缩小，因此HOST线/角上限、单轮上限和加速度必须配套调整。
+- 选定`1.0m/s`线速度、`1.5rad/s`角速度和`1.3m/s`单轮上限；最大组合命令的理论单轮峰值为`1.0+1.5*0.32/2=1.24m/s`，低于单轮上限，不改变给定曲率。
+- 有限超限输入应逐字段饱和，正负号保持；NaN/Inf、空指针和无效command_id仍必须拒绝。300ms失联停车、线/角零值死区和20mm/s停稳阈值不属于本轮提速范围。
+- 实现后`ChassisVelocityCommandValid()`只验证指针、ID和有限数；提交路径保存原始请求，分别钳位vx/wz并统计总/线/角钳位次数，然后用钳位值刷新目标，超限包返回ACCEPTED。
+- Phase 27通过BD/AC路径回放、ARM GCC严格检查、`git diff --check`和Keil ArmCC 5.06u7全量重建；`host_control_chassis_1ms_saturation_rebuild_20260817.log`为0错误0警告，AXF/HEX/MAP于01:14生成。
+
+## Phase 28 upper-controller AC side command
+
+- 新状态继续复用`StateMachineCommand`的两个业务字节，无需改协议结构：`task_id=2`，status 0/1/2分别为AC左、右、左右都抓；callback_id固定为2，status 1/0表示开始/完成。
+- 当前桥在接收侧用`task_id>1`和`task_status>1`直接拒绝新状态；协议业务桥是首个缺口。
+- 现有`AppArmSidePickPlaceStart/Poll`已封装一侧完整AC接近、推进、抓取、对应侧放置和回正，但真实实现只编译于ARM自动模式或POSTURE测试模式；HOST当前得到的是FAILED stub，也未初始化或轮询该状态机。
+- 正确接法是HOST启用真实单侧状态机与`AppArmFlowInit()`，由机械臂应用任务唯一调用Poll；USB桥只负责Start、读取状态、status 2时在左侧DONE后启动右侧、以及发送一次开始/最终完成回调。
+- 实现后旧任务仍按各自status上限校验，只有task_id 2允许status 2；相同运行中可靠重传计入duplicate，不会重启任务，不同离散命令计入busy。
+- 双侧请求首侧受理后只发送一次执行中回调；左侧DONE后直接Start RIGHT，不发送中间完成，右侧DONE后才发送最终完成。FAILED/异常IDLE均结束桥任务并计失败，不伪报完成。
+- BD/AC路径回放、HOST严格GCC检查和`git diff --check`通过；Keil全量重建`host_control_ac_side_command_rebuild_20260817.log`为0错误0警告，`Code=131044`、`RO-data=3600`、`RW-data=1432`、`ZI-data=137036`，新AXF/HEX/MAP于01:50生成。
+- MAP确认`AppArmTask -> AppArmSidePickPlacePoll`、Bridge AC Start/Poll、单侧Start/GetStatus和ExecutionCallback发送链均进入最终镜像；未烧录、未做上位机或机械臂实机动作测试。
 - 实时`AppArmBdObservationTask()`第一段复制当前q反馈后只覆盖q1，并根据该姿态计算ID1相对角，确认Y超限来自目标构造而非电机反馈等待。
 - 现有关节运动层已对同步关节插值执行软限位、自动工作区和工具俯仰检查；新增过渡姿态可继续复用这些保护，但`Y<=260mm`是本次额外应用约束，需要离线逐样本证明。
 
@@ -278,3 +369,139 @@
 - A dedicated host-control app mode is required because the current full-arm mode owns an automatic fruit task and the active MG995 mode intentionally disables USB/chassis/arm. Sharing either mode would create actuator ownership conflicts.
 - The final bridge maps camera commands to mirrored physical angles `-45 deg` down and `+45 deg` up, waits 500 ms after PWM submission, then sends the completed callback; MG995 has no position feedback, so this is a timed completion rather than measured arrival.
 - Both active-mode variants link under ArmCC 5: host-control mode retains `UpperControllerBridgeInit/Task`, strong protocol callbacks and `ChassisSubmitVelocityCommand`; the final rebuilt image is restored to `APP_MODE_MG995_TEST`.
+- Phase 29 protocol audit: the user-updated generated files define wire hash `0x740E426B` and remove `FruitDetection` (packet ID `0x10`, packet type, send/receive hooks and FSM dispatch).
+- The new `ExecutionCallback` mapping is `0=gripper`, `1=camera servo`, `2=AC automatic pick`, `3=ArmTarget`; AC `task_id=2` remains `status 0=left`, `1=right`, `2=left then right`.
+- `ArmTarget` still only validates, transforms and records camera coordinates. Because calibration/snapshot/execution inputs are incomplete, callback ID 3 is reserved and no false start/completion callback is emitted.
+- Maintained firmware still referenced the deleted generated type through `protocol_runtime.c`, `fruit_usb_bridge.*`, `app_runtime.c`, `gcc_arm_check.cmd` and `Engineer.uvprojx`; Phase 29 removes that obsolete bridge without changing generated protocol files.
+- Phase 29 verification passed: Keil ArmCC 5.06u7 rebuilt the HOST image at 02:58 with `Code=130740`, `RO-data=3600`, `RW-data=1436`, `ZI-data=136984`, `0 Error(s), 0 Warning(s)`; MAP contains the AC, ArmTarget and chassis command paths and contains no FruitDetection bridge symbols.
+- Phase 33 changes only the AC copied-profile runtime Y threshold from 440 mm to 445 mm. The pick endpoints and nominal replay peak remain +/-440 mm and 440.000 mm; the added 5 mm is feedback tolerance, not a new target coordinate. Waypoint, Z constraints, public A profiles and global workspace limits are unchanged.
+- Phase 34 initial ownership audit: in `APP_MODE_HOST_CONTROL`, `AppArmSidePickPlacePoll()` is called by `AppArmTask()` only. `AppUsbTask()` calls `UpperControllerBridgeTask()`, which starts pending AC work but does not Poll the arm flow. No second periodic arm-flow owner has been found yet.
+- The intermittent base twitch must be checked against the rear placement boundary: the A-left/A-right profiles use directed base endpoints at `q1=+180/-180 deg`, while the trajectory and workspace code repeatedly normalizes q1 deltas with `ArmCartesianWrapTo180()`. Feedback/target representation at this exact equivalent-angle boundary is a higher-risk hypothesis than the new 445 mm AC Y threshold.
+- Phase 34 sequencing audit: `AppArmFlowCommandFinished()` requires `host.last_command_id == active_command_id` plus `COMPLETED/OK`; it does not accept a stale previous completion. Place transfer, rotate-to-place, release pose, open, clearance and rotate-to-front are therefore serialized by command ID.
+- The joint trajectory enters `SETTLING` after the reference curve ends and calls `ArmUpdateJointReference(final_q)` every arm cycle until feedback is stable. Application arrival error wraps q1 differences to +/-180. The remaining critical question is whether the low-level Damiao target path also treats +180 and -180 as equivalent; if it does not, an exact rear target at the representation boundary can produce a physical correction despite a near-zero application-level error.
+- RTOS ownership is structured rather than concurrent: `ArmControlTask` is AboveNormal and runs `AppArmTask()` every 1 ms; `MotorControlTask` is High and runs `DMMotorControl()` with `vTaskDelayUntil(...,1ms)`. The arm task computes/writes references and the higher-priority motor task sends the latest stored references. No second q1 planner was found.
+- `ArmUpdateJointReference()` validates the supplied q array and passes it unchanged to `ArmCommandPoseWithAxisSpeeds()`. Unlike arrival/error calculations, this boundary does not itself apply q1 wrap/continuity selection. The next audit target is the logical-q to Damiao-position conversion and whether the stored motor target can jump between equivalent +pi/-pi representations.
+- The low-level mapping is linear and absolute: `ArmJointDegToMotorRadBase()` applies zero trim/direction without modulo, and `DMMotorSetPositionSpeed()` stores `position_ref_rad` unchanged. Therefore an upstream +180/-180 representation change would become a real near-2pi target jump. However the feedback conversion is also linear and no pi wrap has yet been found, so runtime evidence is required before naming boundary sign flip as the root cause.
+- A source-confirmed target change occurs twice at the rear: release-pose and release-clearance commands start by copying all `arm->q_feedback_deg`, then replace only q2/q3. Their q1 targets therefore change from the prior planned rear endpoint to the instantaneous q1 feedback. This can remove/reapply base position error or capture load deflection and is currently the strongest source-level explanation for repeated small twitches.
+## Phase 34 resumed evidence (2026-08-17)
+
+- Re-read the live dirty checkout and confirmed Phase 34 remains diagnosis-only; no motion parameter or source behavior has been changed in this phase.
+- `AppArmFlowSubmitJoint()` documents and implements that every unspecified joint is initialized from `arm->q_feedback_deg`. The release-pose submission (place steps 5/6) and release-clearance submission (place steps 10/11) both leave q1 unspecified, so each replaces the prior planned rear q1 hold target with the instantaneous base feedback.
+- The place profile validator requires both `release_q_deg[q1]` and `release_clearance_q_deg[q1]` to equal `rotate_to_place_target_q1_deg`, yet those stored q1 values are not submitted in the two calls above. This mismatch strengthens the hypothesis that q1 target re-locking is unintended rather than a required profile behavior.
+- The exact gripper-open completion path and the concrete left/right rear q1 profile values still need targeted source extraction before concluding root cause.
+
+### Phase 34 root-cause conclusion
+
+- AC uses the A-area rear routes exactly at the periodic boundary: LEFT `+135 -> +180 deg`, RIGHT `-135 -> -180 deg`; return routes are `+90 -> 0 deg` and `-90 -> 0 deg`.
+- q1 arrival error is evaluated through `ArmCartesianWrapTo180()`. Combined with `ARM_LIMIT_TOLERANCE_DEG=0.2`, a physical feedback value such as `+180.1 deg` is legal and is considered only `-0.1 deg` from the `+180 deg` target.
+- The next release-pose command copies this raw `+180.1 deg` feedback into both the command target and the trajectory start sample. `ArmCartesianInterpolateJointSamples()` applies an outer `ArmCartesianWrapTo180()` to every q1 reference, immediately converting `+180.1 deg` to `-179.9 deg`. The right side has the symmetric `-180.1 -> +179.9 deg` failure.
+- `ArmUpdateJointReference() -> ArmCommandPoseWithAxisSpeeds() -> ArmSetJointCommandForPose() -> DMMotorSetPositionSpeed()` sends this as a linear absolute motor position; the lower layer has no matching periodic unwrapping. Therefore the numerical wrap becomes a real near-360-degree target discontinuity.
+- The same raw-feedback q1 re-lock occurs again in release-clearance, explaining why one place cycle can twitch more than once. Boundary crossing depends on small overshoot/load/noise, explaining why the fault is intermittent.
+- ID2 open is not completed on submit: it must reach `ARM_GRIPPER_OPEN` after valid feedback, empty TX pending state, arrived feedback and matching target position. It is therefore not the primary source of the premature-looking base motion.
+- Source-level diagnosis is complete. Hardware confirmation can be obtained by capturing `place_step`, `q_feedback_deg[0]`, `trajectory_q_deg[0]`, `q_target_deg[0]` and `motor_command_rad[0]` at the twitch; no firmware behavior was changed in Phase 34.
+
+## Phase 35 implementation
+
+- User approved moving the rear placement yaw inward. A-area LEFT/RIGHT rear q1 targets are now exactly mirrored at `+178/-178deg`, retaining the existing `+/-135deg` directed waypoints and `+/-90 -> 0deg` front-return routes.
+- Release-pose now explicitly submits `release_q_deg[q1]`; release-clearance explicitly submits `release_clearance_q_deg[q1]`. The profile validator already guarantees both values equal the selected rear target, so neither step can replace q1 with instantaneous feedback.
+- This is intentionally a local application-flow fix. Global `WrapTo180`, q1 limits/tolerance, Damiao absolute-position conversion, AC Y/Z transfer constraints, speeds, ID1/ID2 behavior, BD observation, chassis and protocol paths are unchanged.
+- Maintenance audit found four documents still describing the superseded `+/-180deg` and instantaneous-feedback hold behavior. PROJECT_OVERVIEW, TUNING_GUIDE, HANDOFF and FRUIT_TASK_FLOW were updated to the implemented `+/-178deg` explicit-profile hold semantics; unrelated values were left unchanged.
+- Final validation passed: the complete path replay retained AC `maxAbsY=440.000mm` under the `445.0mm` runtime limit and `19.993mm` Z raise while BD, mirrored picks, post-place transitions and rear routes passed; all strict ARM GCC units plus explicit HOST-mode `app_runtime.c` compiled with `-Werror`; `git diff --check` found no whitespace errors. Remaining `180` documentation references are intentional boundary/soft-limit descriptions.
+
+## Phase 36 closed-loop observation posture
+
+- Phase 35 is now explicitly retained as the AC open-loop fallback; it must not be removed while the camera/host closed-loop protocol is still pending.
+- The requested first closed-loop bring-up posture is interpreted as tool-center world pitch `-90deg` (vertical downward), base yaw `+90deg` (physical left), `X=0mm`, and preferred `Y=40mm`. Z remains to be selected by full kinematic and path replay rather than by point-only IK.
+- Communication and camera target execution remain out of scope for this phase; the immediate deliverable is a firmware test mode that reaches and holds the selected left observation point.
+- 2026-08-17 Phase 36 resumed: terminal execution is pinned to native `cmd.exe` because PowerShell still fails with `8009001d`; source remains on Windows paths and no Keil GUI will be opened during candidate search.
+- The existing BD verifier entry points are `verify_bd_observation_side()` at line 485, `verify_bd_observation_transition()` at line 583, and `main()` at line 879 of `tools/arm_path_replay/arm_path_replay.c`; candidate selection will extend this source-equivalent path validation rather than use endpoint-only IK.
+- The live observation runtime already performs the intended sequence: HOME `[0,90,-60]` -> synchronized staging `q1/q2/q3` with ID1 relative pitch -> tool-center linear move -> hold. Existing staging `q=[+90,120,-48]deg` requires ID1 relative pitch `-78deg` when the world tool pitch is `-90deg`, which is inside the configured ID1 range.
+- Current permanent BD verification samples the HOME-to-staging joint interpolation, enforces `|Y|<=260mm`, samples the staging-to-target Cartesian segment, solves dynamic IK continuously, and verifies the final q1 branch. It needs temporary parameterization/metrics to compare candidate Z heights; the temporary scan will be removed after selecting the final point.
+- First full-path scan with legacy staging `[90,120,-48]deg` rejected every `Z=180..320mm` candidate. The continuous IK branch disappears mid-segment around `Y=90..108mm`, `Z=142..157mm`; endpoint reachability is therefore not the deciding issue. A new staging q2/q3 must be searched under the unchanged joint, workspace, `|Y|<=260mm`, and ID1 limits.
+- A broader grid over HOME-safe staging `q2=60..120deg`, `q3=-120..-40deg` still found no complete straight-line route to any `[0,40,Z]mm`, `Z=180..320mm`, pitch `-90deg` target. Endpoint candidate rejection must be isolated before changing geometry or adding a non-linear approach.
+- Endpoint isolation proved `[0,40,Z]mm` is geometrically solvable by the three DM joints but not by ID1: the left-branch ID1 relative demand ranges from `-107.625deg` at Z=180 to `-130.401deg` at Z=320, below the configured and measured `-90deg` minimum. Raising Z worsens the ID1 demand at fixed Y=40; the safe solution must increase radial Y or relax vertical pitch, and the user explicitly requires vertical pitch.
+- At pitch `-90deg` and the existing `|Y|<=260mm` observation envelope, the first endpoint barely enters ID1 range at `(Y,Z)=(150,180),(175,190),(210,200)mm`, each with only about `0.03..0.16deg` margin. No endpoint is safe for Z>=210 through Y=260, so a practical observation pose needs lower Z than the old 210mm point unless vertical pitch is relaxed.
+- Endpoint combinations retaining about 10deg ID1 margin are approximately `(Y,Z)=(95,100),(105,110),(120,120),(140,130),(160,140),(190,150)mm`. These are the meaningful tradeoff frontier for the user's fixed vertical pitch; full HOME-to-staging-to-target validation will compare rounded candidates on this frontier.
+- Rounded frontier targets all have at least one complete route, but an angle-margin-only staging score selects paths whose staging tool-center minimum Z ranges from `-64.6mm` to `52.3mm`. Because the user wants a raised observation approach and has already identified obstacle risks, candidate ranking must include the whole HOME-to-staging minimum Z, not only joint/ID1 margins.
+- Final closed-loop observation test selection is left tool center `[0,+105,110]mm`, base `q1=+90deg`, pitch `-90deg`, with staging `[+90,90,-80]deg` and ID1 relative `-80deg`. The HOME-to-staging minimum tool Z is `82.056mm`; the full path reaches `max|Y|=256.050mm`, and the final solution is approximately `[90,125.436,-44.186]deg` with ID1 `-79.622deg` and minimum reported angular margin about `9.186deg`.
+- The selected point is intentionally not Y=40: fixed Y40 requires ID1 below its real lower bound. The right point remains `[0,-105,110]mm/q1=-90deg` as a strict mirror, while only LEFT is active in the current test firmware source.
+
+## Phase 37 corrected BD observation radius
+
+- The user corrected the intended BD observation Y from about 40mm to about 400mm. With X=0, Z=110mm and pitch=-90deg, the endpoint is kinematically reachable at approximately `q=[+90,56.100,-112.631]deg`, requiring ID1 relative pitch about `-78.732deg`.
+- `APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM` is BD replay-only; AC independently uses `APP_ARM_POSTURE_TEST_TRANSFER_PATH_Y_MAX_MM=445mm` in its side-pick profile and replay. Phase 37 must not route either limit into the other flow.
+- Permanent replay with the corrected configuration passes both mirrors: BD final q is `[+/-90,56.100,-112.631]deg`, staging relative ID1 stays `-80deg`, and `max|Y|=400.000mm` under the BD-only 405mm limit. The same run still reports AC `max|Y|=440.000mm` under its independent 445mm limit.
+- Phase 37 final audit found no stale `+105mm` or `256.050mm` BD values in source/maintenance docs. The current default remains the LEFT BD observation test; communication, camera execution, AC motion, chassis and protocol behavior were not changed.
+
+## Phase 38 raised BD observation posture
+
+- Directly changing only Z to 350mm while retaining Y=400mm/pitch=-90deg fails the permanent straight-line replay at approximately `[0,289.177,203.609]mm`: the arm solution makes the small-link absolute pitch cross 0deg, so ID1 would need slightly below its real `-90deg` relative limit. Continuing toward the endpoint would also worsen the wrist reach because a vertical 117mm tool offset raises the ID1 axis.
+- Relaxing pitch to -60deg remains insufficient: the path reaches approximately `[0,389.483,328.526]mm`, where the small-link pitch rises to about +30deg and ID1 again needs below -90deg.
+- The smallest tested practical adjustment is pitch=-45deg. It preserves the requested tool-center `[0,+/-400,350]mm` without shrinking Y, passes the whole mirrored HOME -> staging -> Cartesian route, and ends at `q=[+/-90,69.663,-139.562]deg`. Endpoint ID1 relative pitch is approximately `-74.225deg`, leaving about `15.775deg` to its -90deg lower limit.
+- The BD-only replay peak remains `max|Y|=400.000mm` under 405mm. The same permanent run still passes AC `max|Y|=440.000mm` under its independent 445mm post-grip limit; no AC parameter or flow was changed.
+
+## Phase 39 reduced BD observation Y
+
+- The active left BD tool-center Y changed from +400mm to +200mm; the right target remains generated as a strict mirror and is therefore -200mm. Z=350mm, absolute pitch=-45deg, staging, speed and the BD-only 405mm replay limit are unchanged.
+- Both complete mirrored paths pass. Final q is approximately `[+/-90,114.050,-96.794]deg`; endpoint ID1 relative pitch is about `-75.844deg`, leaving `14.156deg` to its -90deg lower limit.
+- The whole-path `max|Y|` is `338.781mm`, larger than the 200mm endpoint because HOME-to-staging temporarily extends the tool farther sideways. It remains below the 405mm BD replay limit. AC independently remains `440/445mm` and was not modified.
+
+## Phase 40 BD observation pitch -30deg
+
+- The preferred absolute tool pitch of -30deg passes both complete mirrored BD routes at the unchanged `[0,+/-200,350]mm` targets; the -35deg fallback is not needed.
+- Staging remains `[+/-90,90,-80]deg`, with ID1 relative pitch changing from -35deg to -20deg. Final q is approximately `[+/-90,120.249,-87.711]deg`; endpoint ID1 relative pitch is about `-57.960deg`, leaving `32.040deg` to its -90deg lower limit.
+- Whole-path minimum Z is `102.373mm` and `max|Y|` becomes `357.375mm`, still below the unchanged 405mm BD-only replay limit. The independent AC fallback remains `440/445mm` and unchanged.
+
+## Phase 41 downward-pitch boundary and final -53deg
+
+- The user clarified that the desired direction is closer to vertical downward (-90deg), superseding the temporary Phase 40 interpretation. At `[0,+/-200,350]mm`, complete replay rejects -75deg near `[0,235.622,273.186]mm`, -70deg near `[0,228.773,295.161]mm`, -65deg near `[0,218.766,318.125]mm`, and -60deg near `[0,206.577,339.982]mm`, each when ID1 would cross below its -90deg relative limit.
+- Pitch=-55deg is the first tested complete pass, but final ID1 is approximately -87.269deg, leaving only 2.731deg lower-limit margin. Pitch=-50deg passes with about 8.395deg margin. The user selected the intermediate final value -53deg.
+- Final pitch=-53deg passes both mirrored routes. Final q is approximately `[+/-90,110.456,-101.558]deg`; endpoint ID1 is `-85.014deg`, leaving `4.986deg` to its -90deg lower limit. Whole-path minimum Z is `80.112mm` and `max|Y|=326.462mm < 405mm`; AC remains independently `440/445mm`.
+
+## Phase 42 confirmed observation baseline
+
+- The user confirmed both BD observation poses. They are now documented as the fixed motion baseline for the next upper/lower-controller protocol update, not as provisional test points.
+- Parameter ownership is explicit: protocol/runtime/bridge code may select LEFT or RIGHT, but must not duplicate or override observation coordinates, pitch, staging or speed. `app_config.h` remains the single source for the geometry.
+- No wire format or runtime protocol behavior changed in this phase. The next protocol sync must first compare the new generated `protocol.h`, `protocol.c` and `PROTOCOL_DOC.md`, then adapt project-maintained runtime and bridge code without retuning the confirmed poses.
+
+## Phase 43 generated protocol resync
+
+- Live generated files still use `PROTOCOL_HASH=0x740E426B`, packet IDs 0x11/0x12/0x13/0x14, CRC8, optional handshake and non-strict heartbeat. `protocol.h` and `protocol.c` introduce no new binary layout relative to the already integrated Phase 29 contract; transport/runtime replacement is unnecessary.
+- The generated semantic table declares `StateMachineCommand task_id=4/status=0` as QR recognition pose and `task_id=5/status=0..3` as current area A/B/C/D, with callback IDs 4 and 5. The maintained bridge currently validates only task IDs 0, 1 and 2, so both new semantics are rejected before reaching business handling.
+- No QR pose coordinates, joint targets or existing application entry point exist anywhere in the live checkout. It is unsafe to map task 4 to a guessed arm pose or report callback 4 completed. Task 5 is state-only and can be integrated idempotently without moving hardware.
+- Confirmed BD LEFT/RIGHT geometry remains owned by `app_config.h`; the protocol table has no BD side-selection command in this version, so the sync must not claim that current-area task 5 selects a BD observation side.
+- Task 5 is implemented as an orthogonal, idempotent state update: wire status 0..3 maps to a dedicated `Upper_Controller_Area_e`, updates can arrive while another discrete actuator command is active, and consumers use `UpperControllerGetCurrentArea()` rather than the Watch struct. It does not overwrite `pending_task_id/status`. Callback 5/1 then 5/0 is deferred to the next bridge task so the generated FSM can enqueue its automatic reliable ACK first.
+- Task 4/status 0 is explicitly recognized and counted, then returned to IDLE without motion or callback 4 because the protocol has no failure callback status and no QR pose exists. Reliable ACK remains receipt-only; reporting completed would be false.
+
+## Phase 44 AC closed-loop observation and pick
+
+- Current HOST `StateMachineCommand task_id=2` semantics supersede the Phase 28/29 open-loop bridge behavior. `status=0` enters the confirmed left observation posture, `status=1` enters the confirmed right observation posture, and `status=2` is invalid because the following `ArmTarget` frame can only correspond to one active observation side.
+- Observation execution is a two-step arm sequence: first joint staging to the selected side with the configured ID1 relative pitch, then tool-center motion to the configured `[0,+/-150,300]mm` point at `pitch=-53deg` and `150mm/s`. On successful arrival the bridge calls `UpperControllerCaptureCameraPose()` with an internal `0xACxxxxxx` capture ID and sends callback 2 completed.
+- D435i extrinsic is now enabled for AC closed-loop bring-up. The stored tool-center transform remains `t_E_C=[-80.055106,69.184360,48.192321]mm` with the previously confirmed RGB optical rotation matrix. If real known-point testing shows axis or offset mismatch, `CAMERA_TARGET_DEFAULT_CALIBRATED` must be returned to 0 before further motion.
+- `ArmTarget` still has no wire-level `capture_id`, so this version deliberately uses only the latest AC observation snapshot and enforces the existing 5000ms age limit. Transform success alone is not enough: the bridge also requires AC observation holding, no pending discrete command, no running AC fallback task and no running ArmTarget pick. A successful pick start consumes the observation state, so the same snapshot cannot be reused for another pick without a new observation command.
+- Closed-loop AC pick target generation is intentionally simple for first hardware bring-up: `X/Y` come from the transformed base-frame point, `Z` is fixed at `APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM=-100mm`, and tool pitch reuses the AC pick pitch configuration. The motion is submitted through `AppArmFlowStartPick()`, so IK, software limits, workspace safety and normal pick sequencing remain in the arm layer.
+- ExecutionCallback boundaries remain layered: generated reliable ACK means packet receipt only; callback 2 means observation motion state; callback 3 means ArmTarget closed-loop pick state. Transport success, transform success and physical pick completion must not be treated as the same condition in logs or upper-computer tests.
+- Phase 44 validation passed strict Cortex-M4 GCC including forced HOST runtime, permanent arm-path replay, camera transform 29 checks and `git diff --check`. No Keil build, AXF/HEX generation, flash, live USB exchange or physical arm/camera validation was performed.
+
+## Phase 45 default mode back to HOST
+
+- The default application mode is now `APP_MODE_HOST_CONTROL`, so the firmware no longer boots directly into the left BD observation-point test. This enables upper-computer control of chassis velocity, gripper, MG995 servos, AC observation pose and ArmTarget closed-loop pick by default.
+- `APP_MODE_ARM_BD_OBSERVATION_TEST` is still present for manual regression testing of the confirmed left observation point. No BD/AC observation geometry, D435i extrinsic, protocol wire layout, chassis limits or arm path parameter changed in this phase.
+
+## Phase 46 observation point lowered and pulled inward
+
+- The current closed-loop observation geometry is now `[0,+/-150,300]mm/pitch=-53deg`: Z was lowered by 50mm from 350mm to 300mm, and Y was moved 50mm toward zero from +/-200mm to +/-150mm. The right point remains a strict mirror of the left point.
+- Complete replay passes both mirrors. Final q is approximately `[+/-90,125.540,-81.916]deg`; endpoint ID1 relative pitch is about `-80.456deg`, leaving about `9.544deg` to the `-90deg` lower limit.
+- The path-wide `max|Y|` remains `326.462mm` under the unchanged BD-only 405mm replay limit because the peak still occurs during HOME-to-staging, not at the lowered endpoint. AC pick endpoints, D435i extrinsic, protocol layout, staging, speed and chassis parameters are unchanged.
+
+## Phase 47 observation pitch moved 5deg downward
+
+- The current AC/BD observation geometry keeps `[0,+/-150,300]mm` and changes only world absolute pitch from `-53deg` to `-58deg`, moving 5deg closer to vertical downward (`-90deg`). RIGHT remains the strict mirror of LEFT.
+- Staging remains `[+/-90,90,-80]deg`; at staging, the small-link absolute pitch is `-10deg`, so the commanded ID1 relative pitch is `-48deg`, not `-68deg`.
+- Complete replay passes both mirrors. Final q is approximately `[+/-90,123.291,-84.168]deg`; endpoint ID1 relative pitch is about `-85.459deg`, leaving about `4.541deg` to the `-90deg` lower limit. Whole-path minimum Z is `77.557mm` and `max|Y|=318.051mm < 405mm`; AC pick endpoints, D435i extrinsic, protocol layout, staging, speed and chassis parameters are unchanged.
+
+## Phase 48 AC closed-loop vertical pick pitch
+
+- Before this phase, `APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG` aliased `APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG`, so ArmTarget closed-loop picking inherited the AC open-loop side-push pitch of `-5deg`.
+- The AC closed-loop target generation is now explicit: `X/Y` come from the camera-to-base transform, `Z` remains fixed at `APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM=-100mm`, and the gripper world absolute pitch is fixed at `-90deg` for vertical downward picking.
+- This change affects only the ArmTarget closed-loop pick submitted through `upper_controller_bridge.c`; AC open-loop side-push picking remains `-5deg`, and the observation posture remains `[0,+/-150,300]mm/pitch=-58deg`.

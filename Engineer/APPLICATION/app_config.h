@@ -20,12 +20,12 @@
 #define APP_MODE_MG995_TEST              5u
 /* 上位机控制：USB协议统一控制底盘速度、夹爪和双摄像头舵机。 */
 #define APP_MODE_HOST_CONTROL            6u
-/* BD区观察位：正常HOME后单次移动到右侧树上水果观察点并保持。 */
+/* BD闭环观察位：正常HOME后单次移动到左侧高位斜向观察点并保持。 */
 #define APP_MODE_ARM_BD_OBSERVATION_TEST 7u
 
-/* 当前固件用于BD右观察点测试：HOME后主臂与底座协同转向，再进入目标。 */
+/* 当前固件切回上位机控制：USB协议控制底盘/夹爪/摄像头/AC闭环观察抓取。 */
 #ifndef APP_MODE
-#define APP_MODE APP_MODE_ARM_BD_OBSERVATION_TEST
+#define APP_MODE APP_MODE_HOST_CONTROL
 #endif
 
 /* 所有固件内部机械臂调用者共享同一递增序列，禁止再划分模块私有区间。 */
@@ -36,40 +36,72 @@
  * 禁止直接覆盖或复用本组已验证参数。
  */
 #define APP_ARM_POSTURE_TEST_X_MM                      0.0f
-#define APP_ARM_POSTURE_TEST_Z_MM                   (-150.0f)
+#define APP_ARM_POSTURE_TEST_Z_MM                   (-140.0f)
 #define APP_ARM_POSTURE_TEST_LEFT_Y_MM               380.0f
 #define APP_ARM_POSTURE_TEST_RIGHT_Y_MM \
     (-APP_ARM_POSTURE_TEST_LEFT_Y_MM)
-/* 接近点到位后保持X/Z和俯仰不变，沿当前侧Y方向直线推进100mm。 */
+/* 接近点到位后保持X/Z和俯仰不变，沿当前侧Y方向直线推进60mm。 */
 #define APP_ARM_POSTURE_TEST_ADVANCE_X_MM              0.0f
-#define APP_ARM_POSTURE_TEST_ADVANCE_Z_MM           (-150.0f)
-#define APP_ARM_POSTURE_TEST_LEFT_ADVANCE_Y_MM        480.0f
+#define APP_ARM_POSTURE_TEST_ADVANCE_Z_MM           (-140.0f)
+#define APP_ARM_POSTURE_TEST_LEFT_ADVANCE_Y_MM        440.0f
 #define APP_ARM_POSTURE_TEST_RIGHT_ADVANCE_Y_MM \
     (-APP_ARM_POSTURE_TEST_LEFT_ADVANCE_Y_MM)
 #define APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG           (-5.0f)
-/* 先快速到接近点，再低速推进最后100mm，避免夹爪把水果推离抓取位。 */
+/* 先快速到接近点，再低速推进最后60mm，避免夹爪把水果推离抓取位。 */
 #define APP_ARM_POSTURE_TEST_APPROACH_SPEED_MM_S      600.0f
 #define APP_ARM_POSTURE_TEST_GRIP_ADVANCE_SPEED_MM_S 150.0f
 
 /*
- * BD区左右树上水果观察点，坐标均为夹爪中心mm，不能当作后续抓取点。
+ * AC抓取后的专用收拢路径；只由app_arm_side_pick_place写入A区profile副本，
+ * 不能覆盖正式A区业务点共用的原始放置profile。
+ * 离线名义Y峰值为440mm；运行时上限保留5mm实机反馈误差余量。
+ * 第一段收拢只要求至少抬高10mm，避免实机抓取姿态反馈偏高时误拒。
+ * ID1相对俯仰若只越过机械边界5deg以内，按边界值继续收拢。
+ */
+#define APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q2_DEG       27.3f
+#define APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q3_DEG      (-62.7f)
+#define APP_ARM_POSTURE_TEST_TRANSFER_PATH_Y_MAX_MM         445.0f
+#define APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM             10.0f
+#define APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM          2.0f
+#define APP_ARM_POSTURE_TEST_TRANSFER_PITCH_CLAMP_TOL_DEG     5.0f
+
+/*
+ * AC闭环抓取：task_id=2先进入对应侧观察位，ArmTarget换算成功后把
+ * 基座系X/Y作为接近点；Z和末端水平俯仰复用AC开环参数，再沿当前侧
+ * Y方向低速推进配置距离后闭爪，随后复用AC开环放置profile归位。
+ */
+#define APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM \
+    APP_ARM_POSTURE_TEST_Z_MM
+#define APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG \
+    APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG
+#define APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM             15.0f
+#define APP_ARM_AC_CLOSED_LOOP_PLACE_FORWARD_MARGIN_MM 100.0f
+/*
+ * AC闭环视觉实测横向补偿：该偏置加在ArmTarget已经换算到机械臂基座系
+ * 之后的X坐标上，不修改上位机相机光学坐标和相机外参。
+ * 右侧实测X偏大，因此右侧减40mm；左侧实测X偏小，因此左侧加40mm。
+ */
+#define APP_ARM_AC_CLOSED_LOOP_LEFT_PICK_X_BIAS_MM    40.0f
+#define APP_ARM_AC_CLOSED_LOOP_RIGHT_PICK_X_BIAS_MM  (-40.0f)
+/*
+ * AC/BD闭环方案共用的左右观察点，坐标均为夹爪中心mm，不能当作抓取点。
  * +Y/q1=+90deg固定表示物理左侧，-Y/q1=-90deg固定表示物理右侧。
  * 两侧共享q2/q3、绝对俯仰和速度；右侧点由左侧严格镜像，禁止分别调漂。
- * 当前上传固件选择RIGHT。后续上位机视觉选边时只切ACTIVE_SIDE对应入口，
- * 不得覆盖这两组已验证点，也不得复用AC区抓取或放置参数。
+ * 2026-08-17左右观察姿态均已确认；HOST模式下task_id=2只选择LEFT/RIGHT
+ * 观察，不下发几何参数。阶段35的AC左右抓放继续作为开环备选。
  */
 #define APP_ARM_BD_OBSERVATION_SIDE_LEFT                  1u
 #define APP_ARM_BD_OBSERVATION_SIDE_RIGHT                 2u
 #define APP_ARM_BD_OBSERVATION_ACTIVE_SIDE \
-    APP_ARM_BD_OBSERVATION_SIDE_RIGHT
+    APP_ARM_BD_OBSERVATION_SIDE_LEFT
 
-/* 左观察点：工具中心[0,+57,210]mm，底座朝物理左侧。 */
+/* AC/BD左观察点：工具中心[0,+150,300]mm，底座朝左，世界俯仰-58deg。 */
 #define APP_ARM_BD_OBSERVATION_LEFT_BASE_Q1_DEG         90.0f
 #define APP_ARM_BD_OBSERVATION_LEFT_X_MM                 0.0f
-#define APP_ARM_BD_OBSERVATION_LEFT_Y_MM                57.0f
-#define APP_ARM_BD_OBSERVATION_LEFT_Z_MM               210.0f
+#define APP_ARM_BD_OBSERVATION_LEFT_Y_MM               150.0f
+#define APP_ARM_BD_OBSERVATION_LEFT_Z_MM               300.0f
 
-/* 右观察点：工具中心[0,-57,210]mm，底座朝物理右侧。 */
+/* AC/BD右观察点：左观察点的严格镜像。 */
 #define APP_ARM_BD_OBSERVATION_RIGHT_BASE_Q1_DEG \
     (-APP_ARM_BD_OBSERVATION_LEFT_BASE_Q1_DEG)
 #define APP_ARM_BD_OBSERVATION_RIGHT_X_MM \
@@ -79,11 +111,12 @@
 #define APP_ARM_BD_OBSERVATION_RIGHT_Z_MM \
     APP_ARM_BD_OBSERVATION_LEFT_Z_MM
 
-/* 两侧共同的同步收拢姿态、路径限制、最终俯仰和请求速度。 */
-#define APP_ARM_BD_OBSERVATION_STAGING_Q2_DEG           120.0f
-#define APP_ARM_BD_OBSERVATION_STAGING_Q3_DEG          (-48.0f)
-#define APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM             260.0f
-#define APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG         (-30.0f)
+/* HOME后同步转向并收拢；目标俯仰-58deg时staging处ID1相对俯仰为-48deg。 */
+#define APP_ARM_BD_OBSERVATION_STAGING_Q2_DEG            90.0f
+#define APP_ARM_BD_OBSERVATION_STAGING_Q3_DEG          (-80.0f)
+/* 仅用于BD左右观察路径离线回放；AC继续使用独立的445mm抓后约束。 */
+#define APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM             405.0f
+#define APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG         (-58.0f)
 #define APP_ARM_BD_OBSERVATION_SPEED_MM_S             150.0f
 
 /* 状态机只读取以下活动点别名；切侧时只修改ACTIVE_SIDE。 */

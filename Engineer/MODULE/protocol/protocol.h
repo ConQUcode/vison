@@ -11,7 +11,7 @@
 /* USER CODE END Includes */
 
 // 协议哈希校验码
-#define PROTOCOL_HASH 0x2588BA9A
+#define PROTOCOL_HASH 0x740E426B
 
 // 校验算法: CRC8
 #define CHECKSUM_ALGO_CRC8 1
@@ -39,7 +39,6 @@
 // 数据包ID定义
 typedef enum
 {
-    PACKET_ID_FRUITDETECTION = 16,
     PACKET_ID_STATEMACHINECOMMAND = 17,
     PACKET_ID_EXECUTIONCALLBACK = 18,
     PACKET_ID_ARMTARGET = 19,
@@ -50,12 +49,6 @@ typedef enum
 } PacketID;
 
 #pragma pack(1)
-typedef struct
-{
-    uint8_t fruit_id;
-    uint8_t status;
-} Packet_FruitDetection;
-
 typedef struct
 {
     uint8_t task_id;
@@ -105,8 +98,6 @@ uint8_t calculate_checksum(const uint8_t *data, size_t len);
 void protocol_fsm_feed(uint8_t byte);
 
 // 用户可覆盖的接收回调与自动生成的发送函数声明
-void on_receive_FruitDetection(const Packet_FruitDetection *pkt);
-void send_FruitDetection(const Packet_FruitDetection *pkt);
 void on_receive_StateMachineCommand(const Packet_StateMachineCommand *pkt);
 void send_StateMachineCommand(const Packet_StateMachineCommand *pkt);
 void on_receive_ExecutionCallback(const Packet_ExecutionCallback *pkt);

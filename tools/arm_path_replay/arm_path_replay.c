@@ -2,6 +2,7 @@
 #include "arm_config.h"
 #include "arm_tool.h"
 #include "app_config.h"
+#include "app_fruit_task_config.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -266,6 +267,221 @@ static uint8_t staging_pose_safe(const float q_deg[3],
     return 1u;
 }
 
+static int verify_ac_transfer_segment(
+    const float left_start_q_deg[3], const float right_start_q_deg[3],
+    const float left_target_q_deg[3], const float right_target_q_deg[3],
+    float left_relative_pitch_deg, float right_relative_pitch_deg,
+    uint8_t require_z_raise, float *max_abs_y_mm,
+    float *waypoint_z_mm, float *z_raise_mm)
+{
+    float max_delta_deg = 0.0f;
+    float left_start_z_mm = 0.0f;
+    float right_start_z_mm = 0.0f;
+    float left_previous_z_mm = 0.0f;
+    float right_previous_z_mm = 0.0f;
+    uint16_t intervals;
+
+    for (uint8_t joint = 0u; joint < 3u; ++joint) {
+        float delta_deg = joint == ARM_JOINT_BASE_YAW ?
+            fabsf(wrap180(left_target_q_deg[joint] -
+                          left_start_q_deg[joint])) :
+            fabsf(left_target_q_deg[joint] - left_start_q_deg[joint]);
+
+        max_delta_deg = fmaxf(max_delta_deg, delta_deg);
+    }
+    intervals = (uint16_t)ceilf(max_delta_deg);
+    if (intervals < 1u) intervals = 1u;
+
+    for (uint16_t i = 0u; i <= intervals; ++i) {
+        float ratio = (float)i / (float)intervals;
+        float left_q_deg[3];
+        float right_q_deg[3];
+        Arm_Position_s left_center;
+        Arm_Position_s right_center;
+
+        left_q_deg[0] = left_start_q_deg[0] + ratio *
+            wrap180(left_target_q_deg[0] - left_start_q_deg[0]);
+        right_q_deg[0] = right_start_q_deg[0] + ratio *
+            wrap180(right_target_q_deg[0] - right_start_q_deg[0]);
+        for (uint8_t joint = 1u; joint < 3u; ++joint) {
+            left_q_deg[joint] = left_start_q_deg[joint] + ratio *
+                (left_target_q_deg[joint] - left_start_q_deg[joint]);
+            right_q_deg[joint] = right_start_q_deg[joint] + ratio *
+                (right_target_q_deg[joint] - right_start_q_deg[joint]);
+        }
+        if (!staging_pose_safe(left_q_deg, left_relative_pitch_deg,
+                               &left_center) ||
+            !staging_pose_safe(right_q_deg, right_relative_pitch_deg,
+                               &right_center)) {
+            fprintf(stderr,
+                    "FAIL AC transfer safety sample=%u "
+                    "leftQ=(%.3f,%.3f,%.3f) "
+                    "rightQ=(%.3f,%.3f,%.3f)\n",
+                    i, left_q_deg[0], left_q_deg[1], left_q_deg[2],
+                    right_q_deg[0], right_q_deg[1], right_q_deg[2]);
+            return 40;
+        }
+        if (fabsf(left_center.y_mm) >
+                APP_ARM_POSTURE_TEST_TRANSFER_PATH_Y_MAX_MM + 0.001f ||
+            fabsf(right_center.y_mm) >
+                APP_ARM_POSTURE_TEST_TRANSFER_PATH_Y_MAX_MM + 0.001f) {
+            fprintf(stderr,
+                    "FAIL AC transfer Y sample=%u leftY=%.3f rightY=%.3f "
+                    "limit=%.3f\n",
+                    i, left_center.y_mm, right_center.y_mm,
+                    APP_ARM_POSTURE_TEST_TRANSFER_PATH_Y_MAX_MM);
+            return 41;
+        }
+        if (i == 0u) {
+            left_start_z_mm = left_center.z_mm;
+            right_start_z_mm = right_center.z_mm;
+        } else if (require_z_raise != 0u &&
+                   (left_center.z_mm < left_previous_z_mm - 0.01f ||
+                    right_center.z_mm < right_previous_z_mm - 0.01f)) {
+            fprintf(stderr,
+                    "FAIL AC transfer Z dip sample=%u "
+                    "leftZ=%.3f/%.3f rightZ=%.3f/%.3f\n",
+                    i, left_previous_z_mm, left_center.z_mm,
+                    right_previous_z_mm, right_center.z_mm);
+            return 45;
+        }
+        left_previous_z_mm = left_center.z_mm;
+        right_previous_z_mm = right_center.z_mm;
+        if (fabsf(left_center.x_mm - right_center.x_mm) > 0.001f ||
+            fabsf(left_center.y_mm + right_center.y_mm) > 0.001f ||
+            fabsf(left_center.z_mm - right_center.z_mm) > 0.001f) {
+            fprintf(stderr,
+                    "FAIL AC transfer mirror sample=%u "
+                    "left=(%.3f,%.3f,%.3f) right=(%.3f,%.3f,%.3f)\n",
+                    i, left_center.x_mm, left_center.y_mm,
+                    left_center.z_mm, right_center.x_mm,
+                    right_center.y_mm, right_center.z_mm);
+            return 42;
+        }
+        *max_abs_y_mm = fmaxf(*max_abs_y_mm,
+                              fabsf(left_center.y_mm));
+        *max_abs_y_mm = fmaxf(*max_abs_y_mm,
+                              fabsf(right_center.y_mm));
+        if (i == intervals && require_z_raise != 0u) {
+            float left_raise_mm = left_center.z_mm - left_start_z_mm;
+            float right_raise_mm = right_center.z_mm - right_start_z_mm;
+
+            if (fabsf(left_raise_mm -
+                      APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM) >
+                    APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM ||
+                fabsf(right_raise_mm -
+                      APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM) >
+                    APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM) {
+                fprintf(stderr,
+                        "FAIL AC transfer Z raise left=%.3f right=%.3f "
+                        "target=%.3f tolerance=%.3f\n",
+                        left_raise_mm, right_raise_mm,
+                        APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM,
+                        APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM);
+                return 46;
+            }
+            if (waypoint_z_mm != NULL) {
+                *waypoint_z_mm = left_center.z_mm;
+            }
+            if (z_raise_mm != NULL) {
+                *z_raise_mm = left_raise_mm;
+            }
+        }
+    }
+    return 0;
+}
+
+static int verify_ac_post_grip_transfer(void)
+{
+    const Arm_Position_s left_center = {
+        APP_ARM_POSTURE_TEST_ADVANCE_X_MM,
+        APP_ARM_POSTURE_TEST_LEFT_ADVANCE_Y_MM,
+        APP_ARM_POSTURE_TEST_ADVANCE_Z_MM
+    };
+    const Arm_Position_s right_center = {
+        APP_ARM_POSTURE_TEST_ADVANCE_X_MM,
+        APP_ARM_POSTURE_TEST_RIGHT_ADVANCE_Y_MM,
+        APP_ARM_POSTURE_TEST_ADVANCE_Z_MM
+    };
+    const float left_seed_q_deg[3] = {90.0f, 15.0f, -85.0f};
+    const float right_seed_q_deg[3] = {-90.0f, 15.0f, -85.0f};
+    const float left_waypoint_q_deg[3] = {
+        APP_FRUIT_A_LEFT_SAFE_Q1_DEG,
+        APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q2_DEG,
+        APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q3_DEG
+    };
+    const float right_waypoint_q_deg[3] = {
+        APP_FRUIT_A_RIGHT_SAFE_Q1_DEG,
+        APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q2_DEG,
+        APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q3_DEG
+    };
+    const float left_safe_q_deg[3] = {
+        APP_FRUIT_A_LEFT_SAFE_Q1_DEG,
+        APP_FRUIT_A_TRANSFER_Q2_DEG,
+        APP_FRUIT_A_TRANSFER_Q3_DEG
+    };
+    const float right_safe_q_deg[3] = {
+        APP_FRUIT_A_RIGHT_SAFE_Q1_DEG,
+        APP_FRUIT_A_TRANSFER_Q2_DEG,
+        APP_FRUIT_A_TRANSFER_Q3_DEG
+    };
+    Arm_Tool_Center_IK_Result_s left_ik;
+    Arm_Tool_Center_IK_Result_s right_ik;
+    float left_relative_pitch_deg;
+    float right_relative_pitch_deg;
+    float max_abs_y_mm = 0.0f;
+    float waypoint_z_mm = 0.0f;
+    float z_raise_mm = 0.0f;
+    int result;
+
+    memset(&left_ik, 0, sizeof(left_ik));
+    memset(&right_ik, 0, sizeof(right_ik));
+    if (ArmInverseKinematicsToolCenter(
+            &left_center, APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG,
+            left_seed_q_deg, &left_ik) != ARM_IK_OK ||
+        ArmInverseKinematicsToolCenter(
+            &right_center, APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG,
+            right_seed_q_deg, &right_ik) != ARM_IK_OK) {
+        fprintf(stderr, "FAIL AC transfer start IK\n");
+        return 43;
+    }
+    left_relative_pitch_deg = APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG -
+        (left_ik.q_deg[1] + (-180.0f - left_ik.q_deg[2]));
+    right_relative_pitch_deg = APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG -
+        (right_ik.q_deg[1] + (-180.0f - right_ik.q_deg[2]));
+    if (fabsf(left_ik.q_deg[0] + right_ik.q_deg[0]) > 0.001f ||
+        fabsf(left_ik.q_deg[1] - right_ik.q_deg[1]) > 0.001f ||
+        fabsf(left_ik.q_deg[2] - right_ik.q_deg[2]) > 0.001f ||
+        fabsf(left_relative_pitch_deg - right_relative_pitch_deg) >
+            0.001f) {
+        fprintf(stderr, "FAIL AC transfer start is not mirrored\n");
+        return 44;
+    }
+    result = verify_ac_transfer_segment(
+        left_ik.q_deg, right_ik.q_deg,
+        left_waypoint_q_deg, right_waypoint_q_deg,
+        left_relative_pitch_deg, right_relative_pitch_deg,
+        1u, &max_abs_y_mm, &waypoint_z_mm, &z_raise_mm);
+    if (result != 0) return result;
+    result = verify_ac_transfer_segment(
+        left_waypoint_q_deg, right_waypoint_q_deg,
+        left_safe_q_deg, right_safe_q_deg,
+        left_relative_pitch_deg, right_relative_pitch_deg,
+        0u, &max_abs_y_mm, NULL, NULL);
+    if (result != 0) return result;
+
+    printf("PASS AC post-grip transfer: waypoint=(+/-90.0,%.1f,%.1f) "
+           "waypointZ=%.3f raiseZ=%.3f safe=(+/-90.0,%.1f,%.1f) "
+           "maxAbsY=%.3f limit=%.1f\n",
+           APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q2_DEG,
+           APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q3_DEG,
+           waypoint_z_mm, z_raise_mm,
+           APP_FRUIT_A_TRANSFER_Q2_DEG,
+           APP_FRUIT_A_TRANSFER_Q3_DEG,
+           max_abs_y_mm, APP_ARM_POSTURE_TEST_TRANSFER_PATH_Y_MAX_MM);
+    return 0;
+}
+
 static int verify_bd_observation_side(
     float base_q1_deg, const Arm_Position_s *target_center,
     const char *side_name, const char *csv_name)
@@ -281,6 +497,7 @@ static int verify_bd_observation_side(
          (-180.0f - staging_q_deg[ARM_JOINT_ELBOW]));
     float max_delta_deg = 0.0f;
     float max_abs_y_mm = 0.0f;
+    float min_z_mm = HOST_INF;
     Arm_Position_s staging_center = {0};
     float final_q_deg[3];
     uint16_t joint_intervals;
@@ -327,6 +544,7 @@ static int verify_bd_observation_side(
             return 32;
         }
         max_abs_y_mm = fmaxf(max_abs_y_mm, fabsf(center.y_mm));
+        min_z_mm = fminf(min_z_mm, center.z_mm);
         staging_center = center;
     }
 
@@ -345,6 +563,7 @@ static int verify_bd_observation_side(
         }
         max_abs_y_mm = fmaxf(max_abs_y_mm,
                              fabsf(points[i].center.y_mm));
+        min_z_mm = fminf(min_z_mm, points[i].center.z_mm);
     }
     result = solve_route(count, APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG,
                          staging_q_deg, csv_name, final_q_deg);
@@ -357,9 +576,9 @@ static int verify_bd_observation_side(
         return 35;
     }
     printf("PASS BD %s coordinated staging: q=(%.1f,%.1f,%.1f) "
-           "relative_pitch=%.1f maxAbsY=%.3f limit=%.1f\n",
+           "relative_pitch=%.1f minZ=%.3f maxAbsY=%.3f limit=%.1f\n",
            side_name, staging_q_deg[0], staging_q_deg[1],
-           staging_q_deg[2], relative_pitch_deg, max_abs_y_mm,
+           staging_q_deg[2], relative_pitch_deg, min_z_mm, max_abs_y_mm,
            APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM);
     return 0;
 }
@@ -672,6 +891,9 @@ int main(void)
     int result;
 
     result = verify_bd_observation_transition();
+    if (result != 0) return result;
+
+    result = verify_ac_post_grip_transfer();
     if (result != 0) return result;
 
     result = verify_post_place_cycle_transition();

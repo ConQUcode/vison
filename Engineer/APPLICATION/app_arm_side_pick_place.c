@@ -15,7 +15,8 @@
 
 App_Arm_Posture_Test_Debug_s g_app_arm_posture_test_debug;
 
-#if APP_ARM_ENABLED || APP_ARM_POSTURE_TEST_ENABLED
+#if APP_ARM_ENABLED || APP_ARM_POSTURE_TEST_ENABLED || \
+    APP_HOST_CONTROL_ENABLED
 
 static uint32_t app_arm_side_pitch_stable_tick;
 static uint32_t app_arm_side_state_tick;
@@ -43,6 +44,39 @@ static void AppArmSidePickPlaceFail(uint32_t now_ms)
     AppArmSidePickPlaceSetStatus(APP_ARM_SIDE_PICK_PLACE_FAILED);
 }
 
+uint8_t AppArmSidePickPlaceBuildPlaceProfile(
+    App_Fruit_Side_e side, App_Arm_Place_Profile_s *profile)
+{
+    if (profile == NULL) {
+        return 0u;
+    }
+    memset(profile, 0, sizeof(*profile));
+    if (side != APP_FRUIT_SIDE_LEFT && side != APP_FRUIT_SIDE_RIGHT) {
+        return 0u;
+    }
+    /* AC区当前复用已验证的A区左右放置profile；BD区必须独立配置。 */
+    if (AppFruitGetPlaceProfile(APP_FRUIT_AREA_A, side, profile) == 0u) {
+        return 0u;
+    }
+
+    /* AC抓后专用：向内收时至少抬高约20mm，公共A区profile保持原语义。 */
+    profile->transfer_waypoint_valid = 1u;
+    profile->transfer_path_constraints_enabled = 1u;
+    profile->transfer_waypoint_q_deg[ARM_JOINT_BASE_YAW] =
+        profile->safe_q_deg[ARM_JOINT_BASE_YAW];
+    profile->transfer_waypoint_q_deg[ARM_JOINT_SHOULDER] =
+        APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q2_DEG;
+    profile->transfer_waypoint_q_deg[ARM_JOINT_ELBOW] =
+        APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q3_DEG;
+    profile->transfer_path_y_max_mm =
+        APP_ARM_POSTURE_TEST_TRANSFER_PATH_Y_MAX_MM;
+    profile->transfer_waypoint_z_raise_mm =
+        APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM;
+    profile->transfer_waypoint_z_tolerance_mm =
+        APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM;
+    return 1u;
+}
+
 /** 装载AC区一侧镜像抓放参数，并清空本轮ID供提交时重新分配。 */
 static uint8_t AppArmSidePickPlacePrepare(App_Fruit_Side_e side)
 {
@@ -59,8 +93,7 @@ static uint8_t AppArmSidePickPlacePrepare(App_Fruit_Side_e side)
     } else {
         return 0u;
     }
-    /* AC区当前复用已验证的A区左右放置profile；BD区必须独立配置。 */
-    if (AppFruitGetPlaceProfile(APP_FRUIT_AREA_A, side, &profile) == 0u) {
+    if (AppArmSidePickPlaceBuildPlaceProfile(side, &profile) == 0u) {
         return 0u;
     }
 
@@ -487,6 +520,30 @@ App_Arm_Side_Pick_Place_Status_e AppArmSidePickPlacePoll(uint32_t now_ms)
     return app_arm_side_status;
 }
 
+App_Arm_Side_Pick_Place_Status_e AppArmSidePickPlaceGetStatus(void)
+{
+    return app_arm_side_status;
+}
+
+void AppArmSidePickPlaceAbort(uint32_t now_ms)
+{
+    AppArmFlowAbort(now_ms);
+    app_arm_side_pitch_stable_tick = 0u;
+    app_arm_side_state_tick = now_ms;
+    g_app_arm_posture_test_debug.base_command_id = 0u;
+    g_app_arm_posture_test_debug.target_command_id = 0u;
+    g_app_arm_posture_test_debug.advance_command_id = 0u;
+    g_app_arm_posture_test_debug.active_command_id = 0u;
+    g_app_arm_posture_test_debug.submit_result = 0u;
+    g_app_arm_posture_test_debug.command_state =
+        (uint32_t)ARM_COMMAND_STATE_NONE;
+    g_app_arm_posture_test_debug.place_start_result = 0u;
+    g_app_arm_posture_test_debug.active_side =
+        (uint8_t)APP_FRUIT_SIDE_NONE;
+    AppArmSidePickPlaceSetState(APP_ARM_POSTURE_TEST_WAIT_READY, now_ms);
+    AppArmSidePickPlaceSetStatus(APP_ARM_SIDE_PICK_PLACE_IDLE);
+}
+
 #else
 
 void AppArmSidePickPlaceInit(void)
@@ -495,6 +552,16 @@ void AppArmSidePickPlaceInit(void)
            sizeof(g_app_arm_posture_test_debug));
     g_app_arm_posture_test_debug.operation_status =
         (uint8_t)APP_ARM_SIDE_PICK_PLACE_IDLE;
+}
+
+uint8_t AppArmSidePickPlaceBuildPlaceProfile(
+    App_Fruit_Side_e side, App_Arm_Place_Profile_s *profile)
+{
+    (void)side;
+    if (profile != NULL) {
+        memset(profile, 0, sizeof(*profile));
+    }
+    return 0u;
 }
 
 App_Arm_Side_Pick_Place_Start_Result_e AppArmSidePickPlaceStart(
@@ -511,6 +578,18 @@ App_Arm_Side_Pick_Place_Status_e AppArmSidePickPlacePoll(uint32_t now_ms)
 {
     (void)now_ms;
     return APP_ARM_SIDE_PICK_PLACE_IDLE;
+}
+
+App_Arm_Side_Pick_Place_Status_e AppArmSidePickPlaceGetStatus(void)
+{
+    return APP_ARM_SIDE_PICK_PLACE_IDLE;
+}
+
+void AppArmSidePickPlaceAbort(uint32_t now_ms)
+{
+    (void)now_ms;
+    g_app_arm_posture_test_debug.operation_status =
+        (uint8_t)APP_ARM_SIDE_PICK_PLACE_IDLE;
 }
 
 #endif

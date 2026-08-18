@@ -1,6 +1,6 @@
 # 参数位置和调参说明
 
-更新时间：2026-08-16
+更新时间：2026-08-17
 
 修改参数后需要重新编译。底盘和机械臂首次动作应架空测试；当前已实测
 方向符号不得凭直觉改动，每次只调整一个参数组。
@@ -11,23 +11,25 @@
 
 | 参数 | 当前值 | 作用 |
 |---|---:|---|
-| `APP_MODE` | `APP_MODE_ARM_BD_OBSERVATION_TEST` | 当前HOME后单次到BD右观察位并保持 |
-| `APP_ARM_BD_OBSERVATION_ACTIVE_SIDE` | `RIGHT` | 当前上传固件执行右观察点 |
-| BD左观察点 | `q1=+90 deg / [0,+57,210] mm` | 已保存并参与每次双侧回放 |
-| BD右观察点 | `q1=-90 deg / [0,-57,210] mm` | 已保存并参与每次双侧回放 |
-| BD当前同步过渡关节 | `[-90,120,-48] deg` | HOME后底座和主臂同步动作，最大 `|Y|=231.470 mm` |
-| BD路径Y限制 | `260 mm` | 两段离线回放均逐点检查工具中心 `|Y|` |
-| BD观察俯仰 | `-30 deg` | 最终夹爪中心线世界绝对俯仰 |
+| `APP_MODE` | `APP_MODE_HOST_CONTROL` | 上位机协议控制底盘、夹爪、摄像头和AC闭环观察抓取 |
+| `APP_ARM_BD_OBSERVATION_ACTIVE_SIDE` | `LEFT` | 当前上传固件执行左观察点 |
+| AC/BD左观察点 | `q1=+90 deg / [0,+150,300] mm` | 当前闭环观察点，夹爪中心坐标 |
+| AC/BD右观察点 | `q1=-90 deg / [0,-150,300] mm` | 严格镜像保存并参与回放 |
+| BD当前同步过渡关节 | `[+90,90,-80] deg` | ID1相对-48deg，完整路径最低Z=77.557mm、最大 `|Y|=318.051 mm` |
+| BD路径Y限制 | `405 mm` | 只用于BD双侧离线回放，不影响AC的445mm边界 |
+| BD观察俯仰 | `-58 deg` | 用户选定的向下观察角，完整路径已通过ID1检查 |
 | BD观察速度 | `150 mm/s` | 首次单点确认速度 |
+| AC闭环抓取固定Z/俯仰 | `Z=-100 mm / pitch=-90 deg` | ArmTarget换算后只取X/Y，夹爪竖直向下抓取 |
 | 右侧MG995 | `PI6 / TIM8_CH2 / 1500 us` | 舵机90deg，对应摄像头0deg |
 | 左侧MG995 | `PI7 / TIM8_CH3 / 1500 us` | 舵机90deg，对应摄像头0deg |
-| AC左侧定姿路径 | `[0,380,-150] -> [0,480,-150] mm` | 使用A左放置profile |
-| AC右侧定姿路径 | `[0,-380,-150] -> [0,-480,-150] mm` | 只对左侧Y取负，使用A右放置profile |
+| AC左侧定姿路径 | `[0,380,-140] -> [0,440,-140] mm` | 使用A左放置profile |
+| AC右侧定姿路径 | `[0,-380,-140] -> [0,-440,-140] mm` | 只对左侧Y取负，使用A右放置profile |
 | 两侧绝对俯仰 | `-5 deg` | X/Z、速度、等待和夹爪动作完全一致 |
-| AC定姿速度 | `600/150 mm/s` | 接近点/最后100 mm推进分段速度 |
+| AC定姿速度 | `600/150 mm/s` | 接近点/最后60 mm推进分段速度 |
 | `APP_ARM_TOOL_CENTER_TEST_ENABLE` | `1` | 为正式水果流程和当前A左/A右放置提供共享子流程 |
 
-当前BD观察位模式不运行底盘或夹爪，也不进入AC循环。观察
+当前HOST模式会正常初始化机械臂并HOME，但不会自动执行BD观察测试路径；
+收到`StateMachineCommand task_id=2/status 0或1`后才进入左/右AC观察姿态。可观察
 `g_app_arm_bd_observation_debug`：`state=4` 为到位保持，`state=5`
 为失败；重点查看 `actual_center_mm`、`actual_tool_pitch_deg`、`actual_q_deg`、
 `center_error_mm`、`pitch_error_deg` 和 `path_preflight_passed`。
@@ -46,11 +48,12 @@ IMU、USB业务和DM/DJI电机周期控制均不运行。观察
 `g_app_arm_posture_test_debug.operation_status`。运行中重复提交返回 `BUSY`，
 成功完成一侧后状态保持 `DONE`，由调用者决定是否以及何时提交下一侧。
 
-当前绝对俯仰为 `-5 deg`、Z为 `-150 mm`。按实时运动学对
-`|Y|=380..480 mm` 逐毫米镜像预检，两侧q2/q3和ID1结果一致；接近点ID1
-相对俯仰约 `+82.80 deg`、控制值约 `155.02`，距当前
-`+92.4 deg/115` 软件边界约 `9.60 deg/40.02`。
-终点q2约 `7.88 deg`，距3deg软件下限约 `4.88 deg`。
+当前绝对俯仰为 `-5 deg`、Z为 `-140 mm`。按实时运动学对
+`|Y|=380..440 mm` 逐毫米镜像预检，两侧q2/q3和ID1结果一致；接近点ID1
+相对俯仰约 `+82.535 deg`、控制值约 `156.10`，距当前
+`+92.4 deg/115` 软件边界约 `9.865 deg/41.10`。
+终点关节约为 `q=[+/-90,12.964,-88.139] deg`，终点q2距3deg软件下限
+约 `9.964 deg`。
 
 `APP_ARM_COMMAND_ID_SEED=0xA1100000u` 是固件内部机械臂命令序列的启动
 种子，通常不作为调参项修改。专项测试、抓放流程和未来新增内部流程必须统一
@@ -110,7 +113,10 @@ WAIT_READY -> IDLE -> RUNNING -> STOPPING -> COMPLETED
 | `CHASSIS_TEST_MAX_SPEED_M_S` | 0.200 m/s | 当前直线最大速度 |
 | `CHASSIS_TEST_MIN_SPEED_M_S` | 0.060 m/s | 终点附近最低速度 |
 | `CHASSIS_TEST_DECEL_DISTANCE_M` | 0.250 m | 增大可更早减速 |
-| `CHASSIS_MAX_LINEAR_ACCEL_M_S2` | 0.35 m/s2 | 增大响应和电流冲击都会增加 |
+| `CHASSIS_MAX_LINEAR_ACCEL_M_S2` | 1.00 m/s2 | HOST和相对直线共用的加减速上限 |
+| `CHASSIS_TURN_MAX_RATE_RAD_S` | 1.50 rad/s | HOST角速度和相对转角的内部速率上限 |
+| `CHASSIS_TURN_MAX_ACCEL_RAD_S2` | 3.00 rad/s2 | HOST和相对转角共用的角加速度上限 |
+| `CHASSIS_MAX_WHEEL_SPEED_M_S` | 1.30 m/s | 左右轮最终联合速度上限 |
 | `CHASSIS_STOP_SPEED_M_S` | 0.020 m/s | 停稳速度阈值 |
 | `CHASSIS_STOP_STABLE_MS` | 300 ms | 连续停稳窗口 |
 
@@ -122,8 +128,8 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 
 | 参数 | 当前值 | 作用 |
 |---|---:|---|
-| `CHASSIS_VELOCITY_MAX_LINEAR_MM_S` | 200 mm/s | 上位机vx绝对值上限 |
-| `CHASSIS_VELOCITY_MAX_ANGULAR_RAD_S` | 0.8 rad/s | 上位机wz绝对值上限 |
+| `CHASSIS_VELOCITY_MAX_LINEAR_MM_S` | 1000 mm/s | 上位机vx执行绝对值上限 |
+| `CHASSIS_VELOCITY_MAX_ANGULAR_RAD_S` | 1.5 rad/s | 上位机wz执行绝对值上限 |
 | `CHASSIS_VELOCITY_COMMAND_TIMEOUT_MS` | 300 ms | 未刷新后平滑停车到CANCELLED |
 | `CHASSIS_VELOCITY_LINEAR_ZERO_MM_S` | 0.5 mm/s | vx零值归一化阈值 |
 | `CHASSIS_VELOCITY_ANGULAR_ZERO_RAD_S` | 0.005 rad/s | wz零值及IMU直行保持判定阈值 |
@@ -134,6 +140,9 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 不能分别削顶改变曲率。新版USB `VelocityCommand` 已在
 `APP_MODE_HOST_CONTROL`中通过`upper_controller_bridge.c`调用该接口；协议输入
 `linear_x`为m/s，桥内乘1000转换为`vx_mm_s`，`angular_z`保持rad/s。
+有限超限值在底盘提交层分别饱和到`1.0 m/s`和`1.5 rad/s`并正常接受，
+NaN/Inf仍拒绝。建议上位机至少10Hz持续刷新；300ms未刷新时底盘将平滑
+停车到`CANCELLED`。
 
 主要 Watch：
 
@@ -146,6 +155,8 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 - `velocity_target_wz_rad_s/velocity_actual_wz_rad_s`
 - `velocity_heading_hold_active/velocity_command_tick`
 - `velocity_refresh_count/velocity_timeout_count/velocity_heading_capture_count`
+- `velocity_requested_vx_mm_s/velocity_requested_wz_rad_s`
+- `velocity_clamp_count/velocity_linear_clamp_count/velocity_angular_clamp_count`
 - `velocity_wheel_scale`
 - `fault/motor_offline_count/imu_fault_count/direction_fault_count`
 
@@ -167,10 +178,10 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 
 | 参数 | 当前值 | 作用 |
 |---|---:|---|
-| `CAMERA_TARGET_DEFAULT_CALIBRATED` | `0` | 当前未实测；必须保持0，避免占位参数驱动机械臂 |
+| `CAMERA_TARGET_DEFAULT_CALIBRATED` | `1` | AC闭环联调已启用；实机已知点验证不一致时立即改回0 |
 | `CAMERA_TARGET_DEFAULT_REFERENCE_FRAME` | `TOOL_CENTER` | 摄像头随ID1运动时使用；若固定在小臂/ID1前则改为`WRIST_PITCH_AXIS` |
-| `CAMERA_TARGET_DEFAULT_T_E_C_X/Y/Z_MM` | `[0,0,0]` | 摄像头光心在所选末端E系中的位置，单位mm |
-| `CAMERA_TARGET_DEFAULT_R_E_C_00..22` | 单位矩阵占位 | 相机三根轴在末端E系中的方向 |
+| `CAMERA_TARGET_DEFAULT_T_E_C_X/Y/Z_MM` | `[-80.055106,69.184360,48.192321]` | 摄像头RGB光心在工具中心E系中的位置，单位mm |
+| `CAMERA_TARGET_DEFAULT_R_E_C_00..22` | D435i RGB光学系到工具中心E系矩阵 | 相机三根轴在末端E系中的方向 |
 | `CAMERA_TARGET_DEFAULT_MAX_POSE_AGE_MS` | `5000 ms` | ArmTarget允许使用的最新拍照姿态年龄上限 |
 
 不能只测相机到夹爪的三个距离后就把`CALIBRATED`改为1。还必须确认上位机
@@ -179,9 +190,10 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 单位方向。固件会拒绝非正交矩阵和行列式不是`+1`的镜像矩阵。
 
 拍照触发处调用`UpperControllerCaptureCameraPose(capture_id, now_ms)`保存
-当时姿态。当前协议`ArmTarget`没有帧ID，不能证明目标和快照一一对应，且
-没有抓取绝对俯仰字段，所以即使变换成功也继续禁止动作。详细坐标系、明日
-测量清单、Watch和离线测试见`docs/CAMERA_TARGET_TRANSFORM.md`。
+当时姿态。当前协议`ArmTarget`没有帧ID，阶段性实现只使用最近一次AC观察快照，
+最大年龄5000ms；换算成功后抓取`X/Y`取基座坐标，`Z`固定为`-100mm`，
+夹爪世界绝对俯仰固定为`-90deg`。详细坐标系、已知点验证清单、Watch和离线测试见
+`docs/CAMERA_TARGET_TRANSFORM.md`。
 
 ## 机械臂点位和放置 profile
 
@@ -203,13 +215,28 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 `+/-90 deg` 侧的抓取坐标；底层关节速度和加速度安全上限保持不变。
 不要直接把预对准改为 `+/-90`，否则可能跨过 `X=0` 并触发跨区保护。
 
-点1放置：`[90,90,-100] -> +135 -> +180 -> [q1反馈,120,-70]`；
-点2放置：`[-90,90,-100] -> -135 -> -180 -> [q1反馈,120,-70]`。
+点1放置：`[90,27.3,-62.7] -> [90,90,-100] -> +135 -> +178 -> [178,120,-70]`；
+点2放置：`[-90,27.3,-62.7] -> [-90,90,-100] -> -135 -> -178 -> [-178,120,-70]`。
+第一组为抓取后的收拢waypoint。当前AC终点按锁存ID1相对俯仰逐1deg回放，
+第一段工具中心从`Z=-140`单调抬到`-120.007 mm`，抬高`19.993 mm`；
+完整两段名义峰值为`|Y|=440.000 mm`，profile运行时上限为445mm，保留5mm
+实机反馈误差余量。
+该上限同时写入`App_Arm_Place_Profile_s.transfer_path_y_max_mm`。放置首段提交前
+按实际三轴和ID1反馈重算；观察`g_app_arm_pick_place_test_debug`中的
+`transfer_path_y_check_passed`、`transfer_path_peak_abs_y_mm`和
+`transfer_path_y_limit_mm`，以及`transfer_path_z_check_passed`、
+`transfer_path_start_z_mm`、`transfer_path_waypoint_z_mm`和
+`transfer_path_z_raise_mm`确认运行时预检结果。
+上述waypoint、445mm上限和`20+/-2 mm`抬高约束只由
+`AppArmSidePickPlacePrepare()`写入AC单侧profile副本。正式A区公共profile的
+`transfer_waypoint_valid`和`transfer_path_constraints_enabled`均保持0，
+仍直接进入原安全姿态；调AC参数时不要把它们写回公共profile。
 释放 ID1 相对小臂均为 `-45 deg`。ID2张开后保持 `q2=120 deg`，小臂
 从 `q3=-70 deg` 再上抬10deg到 `q3=-80 deg`，随后分别经 `+90/-90`
 返回 `q1=0` 并立即结束放置，不再额外恢复 `[0,90,-100]`。下一次抓取的
-底座预对准会同时进入 `[q2,q3]=[80,-90]` 准备姿态。释放与释放后抬臂
-不重复提交后方 `q1=+180/-180`，而是保留定向旋转完成后的底座实际反馈角。
+底座预对准会同时进入 `[q2,q3]=[80,-90]` 准备姿态。后方目标保留2deg
+周期边界余量，固定为 `q1=+178/-178`；释放与释放后抬臂继续显式提交
+profile中的同一q1，不再用定向旋转完成后的瞬时反馈重锁定底座目标。
 
 正式抓取与当前左右专项测试都必须调用 `AppArmFlowBuildPickStaging()`；
 不要在某个测试状态机中复制反馈 `q2/q3` 后只覆盖 `q1`。实机已经证明，
@@ -218,6 +245,7 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 
 放置参数以完整 `App_Arm_Place_Profile_s` 提交。更改某侧时应同时核对：
 
+- 抓取后收拢waypoint及整段工具中心Y上限；
 - 安全三轴位姿；
 - 到放置点的引导角和终点角；
 - 释放三轴位姿和ID1相对俯仰；
@@ -285,12 +313,25 @@ BMI088 Z 轴角速度，不是离散 Yaw 误差差分。推荐顺序：反馈方
 
 ## 协议边界
 
-当前生成协议哈希为 `0x2588BA9A`。生成文件为 `protocol.c/.h` 和
+当前生成协议哈希为 `0x740E426B`。生成文件为 `protocol.c/.h` 和
 `PROTOCOL_DOC.md`；`protocol_runtime.*`、`protocol_port.*`、
-`fruit_usb_bridge.*`、`upper_controller_bridge.*` 是工程维护层，更新生成文件
+`upper_controller_bridge.*` 是工程维护层，更新生成文件
 时不能覆盖。协议无需强制握手且心跳非严格；生成FSM自动回心跳和可靠入站ACK。
 
-`StateMachineCommand`控制夹爪和双摄像头舵机，摄像头逻辑目标为向下`-45deg`
-或向上`+45deg`，PWM提交后等待500ms再回完成。`VelocityCommand`已接连续底盘
-接口。`ArmTarget`当前只记录相机坐标和`z_type`，未标定外参前不执行机械臂。
-`FruitDetection`仍只更新`g_fruit_usb_debug`，不改变A区静态测试表。
+`StateMachineCommand`控制夹爪、双摄像头舵机和AC闭环观察方向。`task_id=2`时
+status 0进入左观察、1进入右观察、2当前无效；callback_id 2的status 1表示观察
+执行中，status 0表示观察到位且pose snapshot已保存。摄像头逻辑目标为向下
+`-45deg`或向上`+45deg`，PWM提交后等待500ms再回完成。夹爪和AC闭环任务都按真实
+命令终态回调，不用固定延时冒充到位。`VelocityCommand`已接连续底盘接口。
+`ArmTarget`收到后执行相机点到基座点换算；满足观察保持、快照新鲜和机械臂空闲
+后，以固定`Z=-100mm`和固定俯仰`-90deg`调用`AppArmFlowStartPick()`，
+并用callback_id 3报告抓取执行中/完成；成功
+启动后会消费观察状态，下一次抓取必须重新观察。新协议已删除`FruitDetection`。
+
+`task_id=5`的status 0/1/2/3对应当前区域A/B/C/D，接收时立即幂等保存，
+下一次桥任务再发送`callback_id=5`的执行中/完成，保证生成FSM先自动回可靠ACK；
+Watch看`current_area`、`current_area_valid`、`current_area_callback_pending`和
+`current_area_update_count`。区域更新与执行器离散状态独立，不会中断抓取。
+`task_id=4`二维码姿态尚无点位，只增加`qr_pose_request_count`和
+`qr_pose_unsupported_count`，不会动作或发送callback 4。当前协议也没有BD左右
+观察侧选择字段，不能用area值代替LEFT/RIGHT。

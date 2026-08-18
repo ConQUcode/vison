@@ -42,11 +42,13 @@ typedef enum {
     APP_ARM_FLOW_START_FAILED
 } App_Arm_Flow_Start_Result_e;
 
-/** 工具中心坐标抓取子流程步骤；顺序即执行顺序。 */
+/** 工具中心坐标抓取子流程步骤；旧编号尽量保持稳定，执行顺序看状态机。 */
 typedef enum {
     APP_ARM_PICK_STEP_IDLE = 0,
     APP_ARM_PICK_STEP_SUBMIT_BASE_AIM,   /* 底座对准并同步进入抓取准备姿态。 */
     APP_ARM_PICK_STEP_WAIT_BASE_AIM,
+    APP_ARM_PICK_STEP_SUBMIT_APPROACH,   /* 可选接近点，闭环抓取用。 */
+    APP_ARM_PICK_STEP_WAIT_APPROACH,
     APP_ARM_PICK_STEP_SUBMIT_TARGET,     /* 提交夹爪中心坐标和绝对俯仰。 */
     APP_ARM_PICK_STEP_WAIT_TARGET,
     APP_ARM_PICK_STEP_WAIT_PITCH_STABLE, /* 等ID1反馈稳定在目标附近。 */
@@ -55,13 +57,15 @@ typedef enum {
     APP_ARM_PICK_STEP_WAIT_CLOSE,
     APP_ARM_PICK_STEP_POST_GRIP_DWELL,   /* 抓取后固定停留。 */
     APP_ARM_PICK_STEP_DONE,
-    APP_ARM_PICK_STEP_FAILED
+    APP_ARM_PICK_STEP_FAILED,
+    APP_ARM_PICK_STEP_SUBMIT_SAFE_STAGING, /* 先收大臂/小臂/ID1，底座保持当前角。 */
+    APP_ARM_PICK_STEP_WAIT_SAFE_STAGING
 } App_Arm_Pick_Step_e;
 
-/** 显式profile放置子流程步骤；底层不包含区域或左右侧参数。 */
+/** 显式profile放置子流程步骤；旧编号尽量保持稳定，执行顺序看状态机。 */
 typedef enum {
     APP_ARM_PLACE_STEP_IDLE = 0,
-    APP_ARM_PLACE_STEP_SUBMIT_TRANSFER,        /* 抓取侧大臂竖直、小臂上抬10deg。 */
+    APP_ARM_PLACE_STEP_SUBMIT_TRANSFER,        /* 经受约束过渡点收拢到安全姿态。 */
     APP_ARM_PLACE_STEP_WAIT_TRANSFER,
     APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_PLACE, /* 左逆时针/右顺时针转到后方。 */
     APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_PLACE,
@@ -75,7 +79,9 @@ typedef enum {
     APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_FRONT, /* 沿本次抓取侧返回前方。 */
     APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_FRONT,
     APP_ARM_PLACE_STEP_DONE,
-    APP_ARM_PLACE_STEP_FAILED
+    APP_ARM_PLACE_STEP_FAILED,
+    APP_ARM_PLACE_STEP_SUBMIT_REAR_STAGING,    /* 后方旋转前，底座不动，先收大臂/小臂/ID1。 */
+    APP_ARM_PLACE_STEP_WAIT_REAR_STAGING
 } App_Arm_Place_Step_e;
 
 /** 失败来源分类，避免机械臂故障码与命令结果码数值重叠。 */
@@ -86,6 +92,17 @@ typedef enum {
     APP_ARM_PICK_PLACE_FAILURE_COMMAND_EXECUTION
 } App_Arm_Pick_Place_Failure_Source_e;
 
+/** AC抓后转移阶段拒绝原因；0表示本轮转移预检/提交未拒绝。 */
+typedef enum {
+    APP_ARM_TRANSFER_REJECT_NONE = 0,
+    APP_ARM_TRANSFER_REJECT_FEEDBACK_INVALID,
+    APP_ARM_TRANSFER_REJECT_RELATIVE_PITCH_RANGE,
+    APP_ARM_TRANSFER_REJECT_PATH_INVALID,
+    APP_ARM_TRANSFER_REJECT_Y_LIMIT,
+    APP_ARM_TRANSFER_REJECT_Z_RAISE,
+    APP_ARM_TRANSFER_REJECT_COMMAND_SUBMIT
+} App_Arm_Transfer_Reject_Reason_e;
+
 /**
  * 工具中心抓取目标。x/y/z为夹爪中心世界坐标，tool_pitch_deg为
  * 世界绝对俯仰角；四个字段都直接参与运动规划。
@@ -95,6 +112,10 @@ typedef struct {
     float y_mm;
     float z_mm;
     float tool_pitch_deg;
+    uint8_t approach_valid;
+    float approach_x_mm;
+    float approach_y_mm;
+    float approach_z_mm;
 } App_Arm_Pick_Target_s;
 
 /**
@@ -113,6 +134,12 @@ typedef struct {
 typedef struct {
     uint32_t profile_id;
     uint8_t configured;
+    uint8_t transfer_waypoint_valid;
+    uint8_t transfer_path_constraints_enabled;
+    float transfer_waypoint_q_deg[3];
+    float transfer_path_y_max_mm;
+    float transfer_waypoint_z_raise_mm;
+    float transfer_waypoint_z_tolerance_mm;
     float safe_q_deg[3];
     float rotate_to_place_waypoint_q1_deg;
     float rotate_to_place_target_q1_deg;
@@ -159,6 +186,14 @@ typedef struct {
     float center_error_norm_mm;
     float target_wrist_mm[3];
     float target_q_deg[3];
+    uint8_t transfer_path_y_check_passed;
+    float transfer_path_y_limit_mm;
+    float transfer_path_peak_abs_y_mm;
+    uint8_t transfer_path_z_check_passed;
+    float transfer_path_start_z_mm;
+    float transfer_path_waypoint_z_mm;
+    float transfer_path_z_raise_mm;
+    uint8_t transfer_reject_reason; /* App_Arm_Transfer_Reject_Reason_e */
     uint8_t safety_route_enabled;
     uint8_t safety_route_segment;
     uint32_t workspace_safety_result;
@@ -208,5 +243,13 @@ App_Arm_Flow_Start_Result_e AppArmFlowStartPlace(
  * 返回值为当前子流程总状态；DONE后保持直到下一次Start。
  */
 App_Arm_Flow_Status_e AppArmFlowPoll(uint32_t now_ms);
+/** 只读当前子流程总状态；协议桥用它发送ArmTarget执行回调。 */
+App_Arm_Flow_Status_e AppArmFlowGetStatus(void);
+/**
+ * 上位机return initial pose/reset命令使用：退出当前抓取或放置子流程，
+ * 清除FAILED/DONE锁存，使后续HOME命令和新任务能重新受理。
+ * 本函数只复位应用层状态，不直接提交电机取消；调用方负责发送取消命令。
+ */
+void AppArmFlowAbort(uint32_t now_ms);
 
 #endif

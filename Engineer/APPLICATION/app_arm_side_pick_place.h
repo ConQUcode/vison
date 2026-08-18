@@ -86,6 +86,13 @@ extern App_Arm_Posture_Test_Debug_s g_app_arm_posture_test_debug;
 void AppArmSidePickPlaceInit(void);
 
 /**
+ * 构造AC区单侧放置profile副本。闭环和开环AC抓取共用该入口，
+ * 避免抓后收拢Y峰值、抬高量和后方放置路线出现两套参数。
+ */
+uint8_t AppArmSidePickPlaceBuildPlaceProfile(
+    App_Fruit_Side_e side, App_Arm_Place_Profile_s *profile);
+
+/**
  * 提交一次AC区完整单侧任务。受理后依次完成准备、接近、推进、抓取、
  * 对应侧放置和回正；运行中重复提交返回BUSY，不改变当前任务。BD区不得
  * 直接复用该入口的AC坐标和放置profile，应提供独立配置或独立调用封装。
@@ -95,5 +102,13 @@ App_Arm_Side_Pick_Place_Start_Result_e AppArmSidePickPlaceStart(
 
 /** 由机械臂应用任务周期调用；DONE表示本次指定侧完整流程已经结束。 */
 App_Arm_Side_Pick_Place_Status_e AppArmSidePickPlacePoll(uint32_t now_ms);
+
+/** 只读当前任务状态；协议桥用它判断单侧完成，不重复轮询状态机。 */
+App_Arm_Side_Pick_Place_Status_e AppArmSidePickPlaceGetStatus(void);
+/**
+ * 上位机return initial pose/reset命令使用：退出AC单侧完整抓放任务，
+ * 并同步释放内部AppArmFlow子流程锁存。调用方负责提交电机取消和HOME。
+ */
+void AppArmSidePickPlaceAbort(uint32_t now_ms);
 
 #endif

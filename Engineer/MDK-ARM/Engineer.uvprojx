@@ -1316,11 +1316,6 @@
               <FilePath>..\APPLICATION\arm\arm_tool.c</FilePath>
             </File>
             <File>
-              <FileName>fruit_usb_bridge.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\APPLICATION\fruit_usb_bridge.c</FilePath>
-            </File>
-            <File>
               <FileName>camera_target_transform.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\APPLICATION\camera_target_transform.c</FilePath>

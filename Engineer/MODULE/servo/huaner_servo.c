@@ -389,16 +389,20 @@ static void HuanerServoUpdateArrival(HuanerServo_Status_s *status,
                                   uint32_t now_ms)
 {
     int32_t absolute_error;
+    uint32_t tolerance_pos;
 
     if (status == NULL || status->target_valid == 0u ||
         status->feedback_valid == 0u) {
         return;
     }
+    tolerance_pos = status->id == 1u ?
+        HUANER_SERVO_ID1_ARRIVAL_TOLERANCE_POS :
+        HUANER_SERVO_ARRIVAL_TOLERANCE_POS;
     absolute_error = status->position_error;
     if (absolute_error < 0) {
         absolute_error = -absolute_error;
     }
-    if ((uint32_t)absolute_error <= HUANER_SERVO_ARRIVAL_TOLERANCE_POS &&
+    if ((uint32_t)absolute_error <= tolerance_pos &&
         fabsf(status->feedback_velocity_pos_s) <=
             HUANER_SERVO_ARRIVAL_VELOCITY_POS_S) {
         if (status->arrival_stable_since_tick == 0u) {
