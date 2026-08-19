@@ -59,13 +59,13 @@
  * AC抓取后的专用收拢路径；只由app_arm_side_pick_place写入A区profile副本，
  * 不能覆盖正式A区业务点共用的原始放置profile。
  * 离线名义Y峰值为440mm；运行时上限保留5mm实机反馈误差余量。
- * 第一段收拢只要求至少抬高10mm，避免实机抓取姿态反馈偏高时误拒。
+ * 第一段收拢要求至少抬高5mm，再继续向后放置。
  * ID1相对俯仰若只越过机械边界5deg以内，按边界值继续收拢。
  */
 #define APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q2_DEG       27.3f
 #define APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q3_DEG      (-62.7f)
 #define APP_ARM_POSTURE_TEST_TRANSFER_PATH_Y_MAX_MM         445.0f
-#define APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM             10.0f
+#define APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM              5.0f
 #define APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM          2.0f
 #define APP_ARM_POSTURE_TEST_TRANSFER_PITCH_CLAMP_TOL_DEG     5.0f
 

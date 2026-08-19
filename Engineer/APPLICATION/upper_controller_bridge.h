@@ -130,6 +130,10 @@ typedef struct {
     uint32_t arm_target_pick_start_count;
     uint32_t arm_target_pick_complete_count;
     uint32_t arm_target_pick_fail_count;
+    uint32_t arm_target_failed_callback_count;
+    uint32_t arm_target_failed_callback_fail_count;
+    uint8_t arm_failure_home_blocked;
+    uint32_t reset_home_blocked_count;
     Upper_Controller_Area_e current_area;
     uint8_t current_area_valid;
     uint8_t current_area_callback_pending;

@@ -839,7 +839,7 @@ static uint8_t AppArmFlowTransferPathWithinLimits(
     z_raise_mm = waypoint_z_mm - start_z_mm;
     /*
      * AC抓后收拢只要求过渡点相对当前抓取姿态至少抬高配置值。
-     * 不要求精确等于10mm，否则不同视觉目标/反馈姿态会被误拒。
+     * 不要求精确等于配置值，否则不同视觉目标/反馈姿态会被误拒。
      */
     z_safe = y_safe != 0u &&
         z_raise_mm + app_place_profile.transfer_waypoint_z_tolerance_mm >=

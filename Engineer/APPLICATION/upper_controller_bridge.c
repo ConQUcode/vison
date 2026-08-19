@@ -40,6 +40,10 @@
 #define UPPER_CALLBACK_ARM_RETRACT_POSE    7u
 #define UPPER_CALLBACK_COMPLETED           0u
 #define UPPER_CALLBACK_EXECUTING           1u
+/* 协议统一失败终态；ArmTarget使用callback_id=3上报。 */
+#define UPPER_CALLBACK_FAILED              2u
+/* 调试拒绝原因：ArmTarget失败后保持现场，暂不执行上位机HOME命令。 */
+#define UPPER_DEBUG_BLOCK_HOME_AFTER_ARM_FAILURE_ENABLE 1u
 #define UPPER_ARM_TARGET_MAX_ABS_M        10.0f
 #define UPPER_ARM_TARGET_MAX_Z_TYPE       15u
 #define UPPER_CHASSIS_COMMAND_ID_SEED 0xC2000000u
@@ -90,6 +94,28 @@ static uint32_t UpperControllerNextChassisCommandId(void)
         upper_next_chassis_command_id = 1u;
     }
     return upper_next_chassis_command_id;
+}
+
+/** 上报ArmTarget拒绝/失败并结束本次任务；保持原位，不自动取消或HOME。 */
+static void UpperControllerHandleArmTargetFailure(
+    Upper_Arm_Target_Debug_Stage_e failure_stage)
+{
+    g_upper_controller_debug.arm_target_pick_running = 0u;
+    upper_arm_target_flow_state = UPPER_ARM_TARGET_FLOW_IDLE;
+    g_upper_controller_debug.arm_target_pick_flow_status =
+        APP_ARM_FLOW_FAILED;
+    g_arm_target_debug.stage = failure_stage;
+    g_upper_controller_debug.arm_target_pick_fail_count++;
+    g_upper_controller_debug.discrete_invalid_count++;
+#if UPPER_DEBUG_BLOCK_HOME_AFTER_ARM_FAILURE_ENABLE != 0u
+    g_upper_controller_debug.arm_failure_home_blocked = 1u;
+#endif
+    if (UpperControllerSendCallback(
+            UPPER_CALLBACK_ARM_TARGET, UPPER_CALLBACK_FAILED) != 0u) {
+        g_upper_controller_debug.arm_target_failed_callback_count++;
+    } else {
+        g_upper_controller_debug.arm_target_failed_callback_fail_count++;
+    }
 }
 
 static uint32_t UpperControllerNextAcCaptureId(void)
@@ -1048,12 +1074,8 @@ static void UpperControllerPollArmTargetPick(void)
             if (start_result == APP_ARM_FLOW_START_BUSY) {
                 return;
             }
-            g_upper_controller_debug.arm_target_pick_running = 0u;
-            upper_arm_target_flow_state = UPPER_ARM_TARGET_FLOW_IDLE;
-            g_arm_target_debug.stage =
-                UPPER_ARM_TARGET_DEBUG_PLACE_REJECTED;
-            g_upper_controller_debug.arm_target_pick_fail_count++;
-            g_upper_controller_debug.discrete_invalid_count++;
+            UpperControllerHandleArmTargetFailure(
+                UPPER_ARM_TARGET_DEBUG_PLACE_REJECTED);
             return;
         }
         g_upper_controller_debug.arm_target_pick_running = 0u;
@@ -1064,11 +1086,10 @@ static void UpperControllerPollArmTargetPick(void)
         g_upper_controller_debug.arm_target_pick_complete_count++;
         g_upper_controller_debug.discrete_complete_count++;
     } else {
-        g_upper_controller_debug.arm_target_pick_running = 0u;
-        upper_arm_target_flow_state = UPPER_ARM_TARGET_FLOW_IDLE;
-        g_arm_target_debug.stage = UPPER_ARM_TARGET_DEBUG_PICK_FAILED;
-        g_upper_controller_debug.arm_target_pick_fail_count++;
-        g_upper_controller_debug.discrete_invalid_count++;
+        UpperControllerHandleArmTargetFailure(
+            upper_arm_target_flow_state == UPPER_ARM_TARGET_FLOW_PLACE ?
+                UPPER_ARM_TARGET_DEBUG_PLACE_REJECTED :
+                UPPER_ARM_TARGET_DEBUG_PICK_FAILED);
     }
 }
 
@@ -1152,6 +1173,15 @@ void on_receive_StateMachineCommand(
     }
     g_upper_controller_debug.discrete_rx_count++;
     if (packet->task_id == UPPER_TASK_RETURN_INITIAL_POSE) {
+#if UPPER_DEBUG_BLOCK_HOME_AFTER_ARM_FAILURE_ENABLE != 0u
+        if (g_upper_controller_debug.arm_failure_home_blocked != 0u) {
+            g_upper_controller_debug.reset_home_blocked_count++;
+            (void)UpperControllerSendCallback(
+                UPPER_CALLBACK_RETURN_INITIAL_POSE,
+                UPPER_CALLBACK_FAILED);
+            return;
+        }
+#endif
         UpperControllerRequestResetHome(packet, HAL_GetTick());
         return;
     }
@@ -1304,18 +1334,14 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
 
             if (side != APP_FRUIT_SIDE_LEFT &&
                 side != APP_FRUIT_SIDE_RIGHT) {
-                g_arm_target_debug.stage =
-                    UPPER_ARM_TARGET_DEBUG_PICK_REJECTED;
-                g_upper_controller_debug.arm_target_pick_fail_count++;
-                g_upper_controller_debug.discrete_invalid_count++;
+                UpperControllerHandleArmTargetFailure(
+                    UPPER_ARM_TARGET_DEBUG_PICK_REJECTED);
                 return;
             }
             if (AppArmSidePickPlaceBuildPlaceProfile(
                     side, &upper_arm_target_place_profile) == 0u) {
-                g_arm_target_debug.stage =
-                    UPPER_ARM_TARGET_DEBUG_PLACE_REJECTED;
-                g_upper_controller_debug.arm_target_pick_fail_count++;
-                g_upper_controller_debug.discrete_invalid_count++;
+                UpperControllerHandleArmTargetFailure(
+                    UPPER_ARM_TARGET_DEBUG_PLACE_REJECTED);
                 return;
             }
             advance_sign = side == APP_FRUIT_SIDE_RIGHT ? -1.0f : 1.0f;
@@ -1369,10 +1395,8 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
                     UPPER_CALLBACK_ARM_TARGET,
                     UPPER_CALLBACK_EXECUTING);
             } else {
-                g_arm_target_debug.stage =
-                    UPPER_ARM_TARGET_DEBUG_PICK_REJECTED;
-                g_upper_controller_debug.arm_target_pick_fail_count++;
-                g_upper_controller_debug.discrete_invalid_count++;
+                UpperControllerHandleArmTargetFailure(
+                    UPPER_ARM_TARGET_DEBUG_PICK_REJECTED);
             }
         }
     } else {

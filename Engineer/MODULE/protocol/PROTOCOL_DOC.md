@@ -52,7 +52,7 @@
 - **ROS 话题**：`fruit_hardware_bridge/execution/callback`
 - **ROS 消息类型**：`fruit_hardware_interfaces/msg/ExecutionCallback`
 - **数据段字节数（Len）**：`2`
-- **注意事项**：Lower-controller execution status for discrete hardware and observation-position actions.
+- **注意事项**：Lower-controller execution status for discrete hardware and pick-direction actions.
 
 | callback_id | Device or command         |
 | :---------: | :------------------------ |
@@ -69,6 +69,7 @@
 | :-------------: | :-------- |
 |        0        | completed |
 |        1        | executing |
+|        2        | failed    |
 
 
 | 字节偏移 | 字段名            | C 类型    | 字节数 |
@@ -117,7 +118,9 @@
 - **ROS 话题**：`fruit_hardware_bridge/state_machine/command`
 - **ROS 消息类型**：`fruit_hardware_interfaces/msg/StateMachineCommand`
 - **数据段字节数（Len）**：`3`
-- **注意事项**：Discrete hardware or observation-position command. Publish once; reliable transport handles delivery acknowledgement.
+- **注意事项**：Discrete hardware or pick-direction command. Publish once; reliable transport handles delivery acknowledgement.
+Task ID 2 is common to A/B/C. The lower controller must interpret left/right
+with the latest current-area command from task_id = 5.
 
 | task_id | Device or command         | task_status = 0     | task_status = 1 | task_status = 2 | task_status = 3 |
 | :-----: | :------------------------ | :------------------ | :-------------- | :-------------- | :-------------- |
