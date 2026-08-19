@@ -71,13 +71,13 @@
 
 /*
  * AC闭环抓取：task_id=2先进入对应侧观察位，ArmTarget换算成功后把
- * 基座系X/Y作为接近点；Z在AC开环抓取高度基础上抬高15mm，夹爪世界
- * 绝对俯仰固定为-5deg，给ID1正向机械边界保留余量；再沿当前侧Y方向
+ * 基座系X/Y作为接近点；Z在AC开环抓取高度基础上抬高35mm，夹爪世界
+ * 绝对俯仰固定为-15deg；再沿当前侧Y方向
  * 低速推进配置距离后闭爪，随后复用AC开环放置profile归位。
  */
 #define APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM \
-    (APP_ARM_POSTURE_TEST_Z_MM + 15.0f)
-#define APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG    (-5.0f)
+    (APP_ARM_POSTURE_TEST_Z_MM + 35.0f)
+#define APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG   (-15.0f)
 #define APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM             15.0f
 #define APP_ARM_AC_CLOSED_LOOP_PLACE_FORWARD_MARGIN_MM 100.0f
 /*

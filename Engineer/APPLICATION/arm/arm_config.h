@@ -104,10 +104,10 @@
 #define ARM_Q1_SOFT_MIN_DEG              (-180.0f)
 #define ARM_Q1_SOFT_MAX_DEG                180.0f
 /*
- * 大臂硬件范围为0deg~180deg；普通运动保留3deg下限安全余量。
+ * 大臂硬件和普通运动范围均为0deg~180deg。
  * 朝正前方时仍由ARM_FRONT_BARRIER_SHOULDER_Q2_MAX_DEG独立限制栏框侧动作。
  */
-#define ARM_Q2_SOFT_MIN_DEG                  3.0f
+#define ARM_Q2_SOFT_MIN_DEG                  0.0f
 #define ARM_Q2_SOFT_MAX_DEG                180.0f
 /* q3采用机械定义：q3 = -两杆物理内夹角。
  * 正常物理夹角35deg~190deg，对应q3=-190deg~-35deg；
@@ -117,7 +117,7 @@
 /* 底座启动脱困/硬边界与关节命令范围一致；普通IK仍由ARM_AUTO_Q1限制。 */
 #define ARM_Q1_ESCAPE_MIN_DEG            (-180.0f)
 #define ARM_Q1_ESCAPE_MAX_DEG              180.0f
-/* 允许从0deg~3deg的软件限位外区域单向脱困回到普通工作区。 */
+/* q2脱困边界与普通软件限位一致，均使用完整硬件角度范围。 */
 #define ARM_Q2_ESCAPE_MIN_DEG                0.0f
 #define ARM_Q2_ESCAPE_MAX_DEG              180.0f
 /* 脱困物理夹角20deg~210deg，对应q3=-210deg~-20deg。 */
@@ -131,7 +131,7 @@
 /* 仅供显式标记的AC低位侧抓命令使用；其他自动轨迹仍保持+/-90deg。 */
 #define ARM_AC_SIDE_PICK_Q1_MIN_DEG        (-115.0f)
 #define ARM_AC_SIDE_PICK_Q1_MAX_DEG          115.0f
-/* 自动轨迹沿用3deg正常肩关节下限，不使用0deg~3deg脱困区域。 */
+/* 自动轨迹沿用q2完整的0deg~180deg普通软件限位。 */
 #define ARM_AUTO_Q2_MIN_DEG ARM_Q2_SOFT_MIN_DEG
 #define ARM_AUTO_Q2_MAX_DEG ARM_Q2_SOFT_MAX_DEG
 #define ARM_AUTO_Q3_MIN_DEG ARM_Q3_SOFT_MIN_DEG

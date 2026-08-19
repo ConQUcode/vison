@@ -366,15 +366,15 @@ static int verify_ac_transfer_segment(
             float left_raise_mm = left_center.z_mm - left_start_z_mm;
             float right_raise_mm = right_center.z_mm - right_start_z_mm;
 
-            if (fabsf(left_raise_mm -
-                      APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM) >
-                    APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM ||
-                fabsf(right_raise_mm -
-                      APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM) >
-                    APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM) {
+            if (left_raise_mm +
+                    APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM <
+                    APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM ||
+                right_raise_mm +
+                    APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM <
+                    APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM) {
                 fprintf(stderr,
                         "FAIL AC transfer Z raise left=%.3f right=%.3f "
-                        "target=%.3f tolerance=%.3f\n",
+                        "minimum=%.3f tolerance=%.3f\n",
                         left_raise_mm, right_raise_mm,
                         APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM,
                         APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM);
