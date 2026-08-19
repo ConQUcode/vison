@@ -60,7 +60,9 @@ typedef enum {
     UPPER_ARM_TARGET_DEBUG_PICK_FAILED,
     UPPER_ARM_TARGET_DEBUG_PLACE_REJECTED,
     UPPER_ARM_TARGET_DEBUG_PLACE_STARTED,
-    UPPER_ARM_TARGET_DEBUG_PLACE_DONE
+    UPPER_ARM_TARGET_DEBUG_PLACE_DONE,
+    UPPER_ARM_TARGET_DEBUG_NEAR_LIMIT_REJECTED,
+    UPPER_ARM_TARGET_DEBUG_ADVANCE_REJECTED
 } Upper_Arm_Target_Debug_Stage_e;
 
 typedef enum {
@@ -127,6 +129,18 @@ typedef struct {
     App_Arm_Flow_Status_e arm_target_pick_flow_status;
     float arm_target_pick_center_mm[3];
     float arm_target_pick_tool_pitch_deg;
+    float arm_target_approach_y_raw_mm;
+    float arm_target_approach_y_command_mm;
+    float arm_target_near_y_min_mm;
+    float arm_target_near_y_shortfall_mm;
+    uint8_t arm_target_near_y_clamped;
+    uint32_t arm_target_near_y_clamp_count;
+    uint32_t arm_target_near_y_reject_count;
+    float arm_target_advance_requested_mm;
+    float arm_target_advance_selected_mm;
+    uint8_t arm_target_advance_reduced;
+    uint32_t arm_target_advance_reduce_count;
+    uint32_t arm_target_advance_reject_count;
     uint32_t arm_target_pick_start_count;
     uint32_t arm_target_pick_complete_count;
     uint32_t arm_target_pick_fail_count;

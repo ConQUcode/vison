@@ -78,8 +78,16 @@
 #define APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM \
     (APP_ARM_POSTURE_TEST_Z_MM + 35.0f)
 #define APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG   (-15.0f)
-#define APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM             15.0f
+#define APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM             30.0f
+/* 从接近点向抓取方向逐毫米预检，选择不超过期望值的最大连续可达推进量。 */
+#define APP_ARM_AC_CLOSED_LOOP_ADVANCE_SEARCH_STEP_MM  1.0f
 #define APP_ARM_AC_CLOSED_LOOP_PLACE_FORWARD_MARGIN_MM 100.0f
+/*
+ * AC闭环近端保护：变换后的Y在当前侧距基座270mm以内时，最多允许
+ * 30mm欠距并钳位到270mm；欠距更大或坐标落在错误侧时拒绝执行。
+ */
+#define APP_ARM_AC_CLOSED_LOOP_NEAR_Y_MIN_MM          270.0f
+#define APP_ARM_AC_CLOSED_LOOP_NEAR_Y_CLAMP_MAX_MM     30.0f
 /*
  * AC闭环视觉实测横向补偿：该偏置加在ArmTarget已经换算到机械臂基座系
  * 之后的X坐标上，不修改上位机相机光学坐标和相机外参。

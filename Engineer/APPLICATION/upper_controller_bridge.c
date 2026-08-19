@@ -13,6 +13,7 @@
 #include "app_config.h"
 #include "arm.h"
 #include "arm_config.h"
+#include "arm_kinematics.h"
 #include "arm_tool.h"
 #include "camera_target_transform_config.h"
 #include "mg995_servo.h"
@@ -94,6 +95,130 @@ static uint32_t UpperControllerNextChassisCommandId(void)
         upper_next_chassis_command_id = 1u;
     }
     return upper_next_chassis_command_id;
+}
+
+/** 将当前侧允许的小幅近端欠距钳位到已验证边界，异常侧别或超差仍拒绝。 */
+static uint8_t UpperControllerClampAcNearY(
+    App_Fruit_Side_e side, float raw_y_mm, float *command_y_mm)
+{
+    float side_sign;
+    float side_distance_mm;
+    float shortfall_mm;
+
+    if (command_y_mm == NULL || !isfinite(raw_y_mm) ||
+        (side != APP_FRUIT_SIDE_LEFT && side != APP_FRUIT_SIDE_RIGHT)) {
+        g_upper_controller_debug.arm_target_near_y_reject_count++;
+        return 0u;
+    }
+    side_sign = side == APP_FRUIT_SIDE_RIGHT ? -1.0f : 1.0f;
+    side_distance_mm = side_sign * raw_y_mm;
+    shortfall_mm = APP_ARM_AC_CLOSED_LOOP_NEAR_Y_MIN_MM - side_distance_mm;
+    g_upper_controller_debug.arm_target_approach_y_raw_mm = raw_y_mm;
+    g_upper_controller_debug.arm_target_near_y_min_mm =
+        APP_ARM_AC_CLOSED_LOOP_NEAR_Y_MIN_MM;
+    g_upper_controller_debug.arm_target_near_y_shortfall_mm =
+        shortfall_mm > 0.0f ? shortfall_mm : 0.0f;
+    g_upper_controller_debug.arm_target_near_y_clamped = 0u;
+
+    if (shortfall_mm > APP_ARM_AC_CLOSED_LOOP_NEAR_Y_CLAMP_MAX_MM) {
+        g_upper_controller_debug.arm_target_near_y_reject_count++;
+        return 0u;
+    }
+    if (shortfall_mm > 0.0f) {
+        *command_y_mm = side_sign * APP_ARM_AC_CLOSED_LOOP_NEAR_Y_MIN_MM;
+        g_upper_controller_debug.arm_target_near_y_clamped = 1u;
+        g_upper_controller_debug.arm_target_near_y_clamp_count++;
+    } else {
+        *command_y_mm = raw_y_mm;
+    }
+    g_upper_controller_debug.arm_target_approach_y_command_mm =
+        *command_y_mm;
+    return 1u;
+}
+
+/**
+ * 逐毫米检查接近点到抓取点的连续可达性，返回不超过配置值的最大正推进量。
+ * 本函数只做运动学和ID1范围计算，不提交命令；AC实际轨迹仍会执行完整预检。
+ */
+static uint8_t UpperControllerSelectAcAdvance(
+    const App_Arm_Pick_Target_s *target, float advance_sign,
+    float *selected_advance_mm)
+{
+    const Arm_State_s *arm = ArmGetState();
+    Arm_Position_s sample_center;
+    Arm_Tool_Center_IK_Result_s ik_result;
+    float seed_q_deg[3];
+    float candidate_advance_mm;
+    float selected_mm = 0.0f;
+
+    g_upper_controller_debug.arm_target_advance_requested_mm =
+        APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM;
+    g_upper_controller_debug.arm_target_advance_selected_mm = 0.0f;
+    g_upper_controller_debug.arm_target_advance_reduced = 0u;
+    if (target == NULL || selected_advance_mm == NULL || arm == NULL ||
+        !isfinite(advance_sign) || fabsf(advance_sign) < 0.5f ||
+        APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM <= 0.0f ||
+        APP_ARM_AC_CLOSED_LOOP_ADVANCE_SEARCH_STEP_MM <= 0.0f) {
+        g_upper_controller_debug.arm_target_advance_reject_count++;
+        return 0u;
+    }
+
+    memcpy(seed_q_deg, arm->q_feedback_deg, sizeof(seed_q_deg));
+    sample_center.x_mm = target->approach_x_mm;
+    sample_center.y_mm = target->approach_y_mm;
+    sample_center.z_mm = target->approach_z_mm;
+    memset(&ik_result, 0, sizeof(ik_result));
+    if (ArmInverseKinematicsToolCenterWithQ1Limits(
+            &sample_center, target->tool_pitch_deg, seed_q_deg,
+            ARM_AC_SIDE_PICK_Q1_MIN_DEG, ARM_AC_SIDE_PICK_Q1_MAX_DEG,
+            &ik_result) != ARM_IK_OK ||
+        !ArmToolPitchValidForPose(target->tool_pitch_deg,
+                                  ik_result.q_deg)) {
+        g_upper_controller_debug.arm_target_advance_reject_count++;
+        return 0u;
+    }
+    memcpy(seed_q_deg, ik_result.q_deg, sizeof(seed_q_deg));
+
+    for (candidate_advance_mm =
+             APP_ARM_AC_CLOSED_LOOP_ADVANCE_SEARCH_STEP_MM;
+         candidate_advance_mm <=
+             APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM + 0.0001f;
+         candidate_advance_mm +=
+             APP_ARM_AC_CLOSED_LOOP_ADVANCE_SEARCH_STEP_MM) {
+        float checked_advance_mm = candidate_advance_mm;
+
+        if (checked_advance_mm > APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM) {
+            checked_advance_mm = APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM;
+        }
+        sample_center.y_mm = target->approach_y_mm +
+            advance_sign * checked_advance_mm;
+        memset(&ik_result, 0, sizeof(ik_result));
+        if (ArmInverseKinematicsToolCenterWithQ1Limits(
+                &sample_center, target->tool_pitch_deg, seed_q_deg,
+                ARM_AC_SIDE_PICK_Q1_MIN_DEG, ARM_AC_SIDE_PICK_Q1_MAX_DEG,
+                &ik_result) != ARM_IK_OK ||
+            !ArmToolPitchValidForPose(target->tool_pitch_deg,
+                                      ik_result.q_deg)) {
+            break;
+        }
+        selected_mm = checked_advance_mm;
+        memcpy(seed_q_deg, ik_result.q_deg, sizeof(seed_q_deg));
+        if (checked_advance_mm >= APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM) {
+            break;
+        }
+    }
+
+    if (selected_mm <= 0.0f) {
+        g_upper_controller_debug.arm_target_advance_reject_count++;
+        return 0u;
+    }
+    *selected_advance_mm = selected_mm;
+    g_upper_controller_debug.arm_target_advance_selected_mm = selected_mm;
+    if (selected_mm + 0.0001f < APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM) {
+        g_upper_controller_debug.arm_target_advance_reduced = 1u;
+        g_upper_controller_debug.arm_target_advance_reduce_count++;
+    }
+    return 1u;
 }
 
 /** 上报ArmTarget拒绝/失败并结束本次任务；保持原位，不自动取消或HOME。 */
@@ -1261,6 +1386,16 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
     g_upper_controller_debug.arm_target_base_mm[0] = NAN;
     g_upper_controller_debug.arm_target_base_mm[1] = NAN;
     g_upper_controller_debug.arm_target_base_mm[2] = NAN;
+    g_upper_controller_debug.arm_target_approach_y_raw_mm = NAN;
+    g_upper_controller_debug.arm_target_approach_y_command_mm = NAN;
+    g_upper_controller_debug.arm_target_near_y_min_mm =
+        APP_ARM_AC_CLOSED_LOOP_NEAR_Y_MIN_MM;
+    g_upper_controller_debug.arm_target_near_y_shortfall_mm = NAN;
+    g_upper_controller_debug.arm_target_near_y_clamped = 0u;
+    g_upper_controller_debug.arm_target_advance_requested_mm =
+        APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM;
+    g_upper_controller_debug.arm_target_advance_selected_mm = NAN;
+    g_upper_controller_debug.arm_target_advance_reduced = 0u;
     now_ms = HAL_GetTick();
 
     /*
@@ -1329,6 +1464,7 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
             App_Fruit_Side_e side =
                 (App_Fruit_Side_e)g_upper_controller_debug.ac_active_side;
             float advance_sign;
+            float selected_advance_mm;
             float pick_x_bias_mm;
             uint8_t start_ok;
 
@@ -1352,14 +1488,26 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
             target.approach_valid = 1u;
             target.approach_x_mm =
                 transform_result.base_point_mm[0] + pick_x_bias_mm;
-            target.approach_y_mm = transform_result.base_point_mm[1];
+            if (UpperControllerClampAcNearY(
+                    side, transform_result.base_point_mm[1],
+                    &target.approach_y_mm) == 0u) {
+                UpperControllerHandleArmTargetFailure(
+                    UPPER_ARM_TARGET_DEBUG_NEAR_LIMIT_REJECTED);
+                return;
+            }
             target.approach_z_mm = APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM;
             target.x_mm = target.approach_x_mm;
-            target.y_mm = target.approach_y_mm +
-                advance_sign * APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM;
             target.z_mm = APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM;
             target.tool_pitch_deg =
                 APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG;
+            if (UpperControllerSelectAcAdvance(
+                    &target, advance_sign, &selected_advance_mm) == 0u) {
+                UpperControllerHandleArmTargetFailure(
+                    UPPER_ARM_TARGET_DEBUG_ADVANCE_REJECTED);
+                return;
+            }
+            target.y_mm = target.approach_y_mm +
+                advance_sign * selected_advance_mm;
             /*
              * AC闭环抓后放置沿用开环profile，但Y峰值按本次视觉目标动态
              * 收紧：只允许比最终抓取点再向当前侧前方多配置余量。

@@ -19,7 +19,8 @@
 | BD路径Y限制 | `405 mm` | 只用于BD双侧离线回放，不影响AC的445mm边界 |
 | BD观察俯仰 | `-58 deg` | 用户选定的向下观察角，完整路径已通过ID1检查 |
 | BD观察速度 | `150 mm/s` | 首次单点确认速度 |
-| AC闭环抓取固定Z/俯仰 | `Z=-100 mm / pitch=-90 deg` | ArmTarget换算后只取X/Y，夹爪竖直向下抓取 |
+| AC闭环抓取固定Z/俯仰 | `Z=-105 mm / pitch=-15 deg` | ArmTarget换算后取X/Y，期望侧向推进30mm，并按1mm粒度降级到最大连续可达的正推进量 |
+| AC闭环近端钳位 | `270 mm / 最大欠距30 mm` | 当前侧距离240~270mm钳位到270mm，更近或侧别错误则拒绝 |
 | 右侧MG995 | `PI6 / TIM8_CH2 / 1500 us` | 舵机90deg，对应摄像头0deg |
 | 左侧MG995 | `PI7 / TIM8_CH3 / 1500 us` | 舵机90deg，对应摄像头0deg |
 | AC左侧定姿路径 | `[0,380,-140] -> [0,440,-140] mm` | 使用A左放置profile |
@@ -189,10 +190,16 @@ NaN/Inf仍拒绝。建议上位机至少10Hz持续刷新；300ms未刷新时底�
 `P_E=R_E_C*P_C+t_E_C`，矩阵三列依次为相机C-X/C-Y/C-Z轴在E系中的
 单位方向。固件会拒绝非正交矩阵和行列式不是`+1`的镜像矩阵。
 
-拍照触发处调用`UpperControllerCaptureCameraPose(capture_id, now_ms)`保存
-当时姿态。当前协议`ArmTarget`没有帧ID，阶段性实现只使用最近一次AC观察快照，
-最大年龄5000ms；换算成功后抓取`X/Y`取基座坐标，`Z`固定为`-100mm`，
-夹爪世界绝对俯仰固定为`-90deg`。详细坐标系、已知点验证清单、Watch和离线测试见
+当前`ArmTarget`到达时调用`UpperControllerCaptureCameraPose(capture_id, now_ms)`
+刷新姿态，再执行相机点到基座点换算。闭环抓取固定`Z=-105mm`、世界绝对俯仰
+`-15deg`；变换后的Y按当前侧计算距离，240~270mm钳位到270mm，欠距超过30mm
+或坐标落在错误侧时回调失败。钳位后从接近点向当前侧期望推进30mm，按1mm
+采样检查AC专用q1范围、q2/q3自动限位和ID1俯仰范围；若30mm不可达则执行
+最大连续可达的正推进量（例如20mm），只有连1mm都不可达时才回调失败。
+Watch查看`arm_target_approach_y_raw_mm`、`arm_target_approach_y_command_mm`、
+`arm_target_near_y_shortfall_mm`、`arm_target_near_y_clamped`、
+`arm_target_advance_requested_mm`、`arm_target_advance_selected_mm`、
+`arm_target_advance_reduced`及对应钳位/降级/拒绝计数。详细坐标系和离线测试见
 `docs/CAMERA_TARGET_TRANSFORM.md`。
 
 ## 机械臂点位和放置 profile
@@ -323,8 +330,8 @@ status 0进入左观察、1进入右观察、2当前无效；callback_id 2的sta
 执行中，status 0表示观察到位且pose snapshot已保存。摄像头逻辑目标为向下
 `-45deg`或向上`+45deg`，PWM提交后等待500ms再回完成。夹爪和AC闭环任务都按真实
 命令终态回调，不用固定延时冒充到位。`VelocityCommand`已接连续底盘接口。
-`ArmTarget`收到后执行相机点到基座点换算；满足观察保持、快照新鲜和机械臂空闲
-后，以固定`Z=-100mm`和固定俯仰`-90deg`调用`AppArmFlowStartPick()`，
+`ArmTarget`收到后执行相机点到基座点换算；满足观察保持和机械臂空闲后，
+以固定`Z=-105mm`和固定俯仰`-15deg`调用`AppArmFlowStartPick()`，
 并用callback_id 3报告抓取执行中/完成；成功
 启动后会消费观察状态，下一次抓取必须重新观察。新协议已删除`FruitDetection`。
 
