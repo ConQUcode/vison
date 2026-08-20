@@ -104,7 +104,7 @@ angular_z执行范围：[-1.5,+1.5] rad/s
 MG995台架模式仍保留，切到 `APP_MODE_MG995_TEST` 后由
 `mg995_servo.c/.h` 控制；`g_mg995_servo_debug.state` 应为
 `MG995_SERVO_STATE_READY`，`initialized=1`；左右摄像头角度均为`0 deg`，
-两侧均为`pulse_us=1500/angle_deg=90`。
+左侧为`pulse_us=1500/逻辑angle_deg=90`；右侧逻辑angle_deg仍为90，但因机械安装方向相反且零位偏高15deg，采用`+15deg`补偿，实际约为`pulse_us=1583/物理105deg`。摄像头坐标换算仍以逻辑90deg为水平中心。
 MG995必须使用独立5~6V大电流供电并与STM32共地。
 
 保留的 `APP_MODE_ARM_POSTURE_TEST` 固定先抓AC左侧，再抓右侧并持续循环：

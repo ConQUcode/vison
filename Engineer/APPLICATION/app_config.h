@@ -119,8 +119,7 @@
 
 /*
  * BD区树上水果左右观察点。当前数值先沿用已验证的左右观察姿态，但命名
- * 与AC独立；后续BD抓取测试只改APP_ARM_BD_OBSERVATION_*，不污染AC。
- * BD区收到ArmTarget后暂不复用AC地面抓取流程，只保持观测和坐标调试。
+ * 与AC独立；BD抓取使用观测后相机解算出的完整基座系XYZ，工具保持水平。
  */
 #define APP_ARM_BD_OBSERVATION_SIDE_LEFT                  1u
 #define APP_ARM_BD_OBSERVATION_SIDE_RIGHT                 2u
@@ -150,6 +149,8 @@
 #define APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM             405.0f
 #define APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG         (-58.0f)
 #define APP_ARM_BD_OBSERVATION_SPEED_MM_S             150.0f
+/* BD闭环抓取：相机解算后的基座系XYZ直接作为目标，工具绝对俯仰保持水平。 */
+#define APP_ARM_BD_CLOSED_LOOP_PICK_TOOL_PITCH_DEG      0.0f
 
 /*
  * 底盘转弯避让姿态V1：HOME后只做单次关节动作，底座居中、大臂保持
@@ -203,13 +204,14 @@
  */
 #define APP_ARM_PICK_BASE_AIM_MAX_ABS_Q1_DEG            89.5f
 /*
- * 下一次抓取预对准时同步进入俯仰可达姿态。该姿态小臂绝对俯仰为-10deg，
- * 后续夹爪绝对俯仰-90deg所需的ID1相对角为-80deg，给关节到位误差留出
- * 俯仰限位余量，不能把准备姿态配置在-90deg相对角的精确边界上。
+ * 下一次抓取预对准时同步进入俯仰可达姿态。该姿态小臂绝对俯仰为30deg，
+ * 观察后先连续抬升到高位准备姿态，再进入目标接近路径；该姿态工具中心
+ * 约为Z=358mm。ID1相对角-80deg对应夹爪绝对俯仰-50deg，给相对俯仰
+ * 下限留出10deg余量；后续笛卡尔接近命令再切换到抓取绝对俯仰。
  */
-#define APP_ARM_PICK_STAGING_Q2_DEG                      80.0f
-#define APP_ARM_PICK_STAGING_Q3_DEG                    (-90.0f)
-/* 准备阶段ID1与DM三轴同时运动；该相对角对应绝对俯仰-90deg。 */
+#define APP_ARM_PICK_STAGING_Q2_DEG                     100.0f
+#define APP_ARM_PICK_STAGING_Q3_DEG                   (-110.0f)
+/* 准备阶段ID1与DM三轴同时运动；该相对角在当前staging对应绝对俯仰-50deg。 */
 #define APP_ARM_PICK_STAGING_TOOL_RELATIVE_PITCH_DEG   (-80.0f)
 /* 仅提高水果抓取工具中心轨迹速度，不修改底层全局关节安全限速。 */
 #define APP_ARM_TOOL_CENTER_TEST_SPEED_MM_S           200.0f

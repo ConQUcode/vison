@@ -189,16 +189,16 @@
 
 /* 四点循环仅保留为台架测试；正式上位机接口版默认关闭。 */
 
-/* 正常轨迹逐轴达妙命令上限；底座Q1独立提速，Q2/Q3保持保守档位。 */
-#define ARM_JOINT_Q1_COMMAND_SPEED_DEG_S        200.0f
-#define ARM_JOINT_Q2_COMMAND_SPEED_DEG_S        150.0f
-#define ARM_JOINT_Q3_COMMAND_SPEED_DEG_S        150.0f
+/* 正常轨迹逐轴达妙命令上限；q1适度降速，q2/q3同步提速。 */
+#define ARM_JOINT_Q1_COMMAND_SPEED_DEG_S        180.0f
+#define ARM_JOINT_Q2_COMMAND_SPEED_DEG_S        180.0f
+#define ARM_JOINT_Q3_COMMAND_SPEED_DEG_S        180.0f
 #define ARM_LINEAR_DEFAULT_SPEED_MM_S           700.0f
 #define ARM_LINEAR_MAX_SPEED_MM_S               700.0f
 #define ARM_LINEAR_MAX_ACCEL_MM_S2             5000.0f
-#define ARM_LINEAR_Q1_MAX_SPEED_DEG_S            200.0f
-#define ARM_LINEAR_Q2_MAX_SPEED_DEG_S            150.0f
-#define ARM_LINEAR_Q3_MAX_SPEED_DEG_S            150.0f
+#define ARM_LINEAR_Q1_MAX_SPEED_DEG_S            180.0f
+#define ARM_LINEAR_Q2_MAX_SPEED_DEG_S            180.0f
+#define ARM_LINEAR_Q3_MAX_SPEED_DEG_S            180.0f
 #define ARM_LINEAR_Q1_MAX_ACCEL_DEG_S2           800.0f
 #define ARM_LINEAR_Q2_MAX_ACCEL_DEG_S2           800.0f
 #define ARM_LINEAR_Q3_MAX_ACCEL_DEG_S2           800.0f

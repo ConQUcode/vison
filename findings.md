@@ -586,3 +586,16 @@
 - 最终远端生产规划扫描在`X=-160mm/Z=-115mm/pitch=-15deg`下确认：Y<=536mm完整推进30mm，537mm为29mm，565mm为1mm，566mm为0mm拒绝，567mm起approach失败。
 - 最终状态机审计发现：超时卸力正常到位会保留`SERVO_TIMEOUT`，但卸力尝试耗尽的可降级分支曾无条件覆盖为`GRIPPER_STALL`。已改为超时降级始终保留`SERVO_TIMEOUT`；接触卡滞耗尽仍记录`GRIPPER_STALL`，便于赛后区分。
 - 完整HOST回放、ARM GCC `-Werror`、相机变换29项测试和`git diff --check`均通过；后者只有现有行尾提示。
+# Phase 55 连续放置经过点与观察后高位抓取路径
+
+- Phase54通过两条命令保证ID1延迟，但`WAIT_TRANSFER`要求q2=75deg经过点完整到位，实机会出现硬停顿。若不扩展底层分段ID1插值，最稳妥的连续方案是一条`当前抓取姿态 -> transfer waypoint -> release`关节轨迹全程锁存ID1，后方到位后再单独提交释放ID1角；这满足“不在低位动ID1”且waypoint不停顿。
+- 观察后ArmTarget已有连续关节staging：当前q1下先到q2/q3=`[80,-90]deg`，再连续对准目标q1，随后才执行staging到approach的工具中心直线。现有staging是关节安全准备点，不保证工具中心高于观察点，需要用生产FK和完整路径重新选点。
+- 最终选定高位抓取staging为`[目标q1,100,-110]deg`、ID1相对俯仰`-80deg`；生产FK给出工具中心约`Z=358.4mm`，比`[0,+/-150,300]mm`观察点高约58mm。相比候选`[110,-110]deg`，该点仍满足先抬高，同时保留旧近端边界。现有base-aim命令本来就把staging作为连续关节waypoint，因此无需增加新状态。
+- AC抓后连续路线改为一条命令从抓取姿态经过`[+/-90,75,-62.7]deg`到后方release q，且`tool_relative_pitch_valid=0`；ID1只在后方到位后改变。HOST关节路径回放通过左右镜像，名义经过点抬升`331.370mm`，`max|Y|=449.671/455mm`。
+- 高位staging使旧共享规划器近端向量`275通过/274拒绝`失效：`Y=275mm`现返回规划状态4。定稿前必须重算近端/远端边界并同步钳位常量与永久回放。
+- 候选对比扫描确认：`[110,-110]deg`会把X=0近端边界外移到286mm；最终`[100,-110]deg`恢复`275通过/274拒绝`。两者远端均保持536满30、537降29、565降1、566为0、567 approach失败，因此最终无需修改近端钳位或推进测试向量。
+- 最终验证：HOST回放通过连续抓后转移、观察到高位staging双侧镜像、后续抓放过渡、30/29/1/0mm推进降级、现场坐标和规划器边界；ARM GCC全量`-Werror`通过。Keil工具在当前环境不可用，未进行Keil重建或烧录。
+- 右侧MG995校准第一次符号验证失败：`-15deg`使实机反而更高，说明该舵机正方向与左侧相反。已修正为右侧专用物理PWM补偿`+15deg`；逻辑90deg仍代表摄像头水平，实际脉宽约1583us，对应物理105deg。
+- Phase 57 source audit: `UpperControllerArmTargetGateFlags()` previously rejected every non-AC observation group. `on_receive_ArmTarget()` then unconditionally built the AC place profile, clamped Y, fixed Z to `APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM`, applied AC advance and `-15deg`. B区 now needs a pick-only completion path because `AppArmSidePickPlaceBuildPlaceProfile()` explicitly documents AC-only profiles.
+- Phase 57 validation: B分支编译通过，AC既有共享推进与放置回放保持通过。B区实际链路为 `task_id=5,status=1 -> task_id=2,status=0/1 -> ArmTarget`，变换后的 `base_point_mm` 直接作为Y/Z和目标高度，X仅叠加AC侧别补偿；目标俯仰为0deg。B区抓取完成后不自动放置，等待后续独立BD放置策略。
+- Phase 58 source finding: before the change, current-area handling only moved both cameras to `-45deg` for AC and left BD at the previous angle. The area-group branch now explicitly maps AC to `UPPER_CAMERA_LOOK_DOWN_DEG` and BD to `UPPER_CAMERA_LOOK_UP_DEG` (`+45deg`).

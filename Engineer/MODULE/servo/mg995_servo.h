@@ -23,6 +23,9 @@
 #define MG995_SERVO_MIN_ANGLE_DEG              0.0f
 #define MG995_SERVO_CENTER_ANGLE_DEG           90.0f
 #define MG995_SERVO_MAX_ANGLE_DEG             180.0f
+/* 右侧舵机机械安装零位偏高15deg，按实机方向需增加15deg输出；
+ * 逻辑角度/摄像头坐标仍以90deg为中心。 */
+#define MG995_SERVO_RIGHT_MECHANICAL_OFFSET_DEG (15.0f)
 
 /* 摄像头坐标：舵机90deg为水平0deg，正角度表示摄像头向上。 */
 #define MG995_CAMERA_MIN_ANGLE_DEG             (-90.0f)

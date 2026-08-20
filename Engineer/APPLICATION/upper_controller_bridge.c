@@ -324,7 +324,9 @@ static uint8_t UpperControllerArmTargetGateFlags(void)
         flags |= UPPER_ARM_TARGET_GATE_SIDE_PICK_RUNNING;
     }
     if (g_upper_controller_debug.observe_area_group !=
-        UPPER_OBSERVE_AREA_AC) {
+            UPPER_OBSERVE_AREA_AC &&
+        g_upper_controller_debug.observe_area_group !=
+            UPPER_OBSERVE_AREA_BD) {
         flags |= UPPER_ARM_TARGET_GATE_BD_PICK_UNSUPPORTED;
     }
     return flags;
@@ -395,14 +397,14 @@ static void UpperControllerApplyCurrentArea(
         new_area;
     g_upper_controller_debug.current_area_valid = 1u;
     g_upper_controller_debug.current_area_update_count++;
-    /*
-     * AC区地面水果识别需要左右摄像头提前斜向下看。上位机声明当前
-     * 区域为A/C后，下位机直接复用camera gimbal的向下角度语义，
-     * 同步把左右摄像头置为-45deg；BD区观察/抓取后续单独确认。
-     */
+    /* AC区地面水果向下看；BD区树上水果向上看。区域声明到达后立即
+     * 同步设置左右摄像头，后续task_id=2只负责选择观察侧别。 */
     if (UpperControllerAreaGroup(new_area) == UPPER_OBSERVE_AREA_AC) {
         (void)Mg995ServoSetCameraAngles(UPPER_CAMERA_LOOK_DOWN_DEG,
                                         UPPER_CAMERA_LOOK_DOWN_DEG);
+    } else if (UpperControllerAreaGroup(new_area) == UPPER_OBSERVE_AREA_BD) {
+        (void)Mg995ServoSetCameraAngles(UPPER_CAMERA_LOOK_UP_DEG,
+                                        UPPER_CAMERA_LOOK_UP_DEG);
     }
     upper_current_area_callback_pending = 1u;
     g_upper_controller_debug.current_area_callback_pending = 1u;
@@ -1384,6 +1386,19 @@ static void UpperControllerPollArmTargetPick(void)
     }
     if (status == APP_ARM_FLOW_DONE) {
         if (upper_arm_target_flow_state == UPPER_ARM_TARGET_FLOW_PICK) {
+            /* BD目前只定义了观察后抓取，没有独立放置profile；抓取完成
+             * 后保持闭爪并直接向上位机报告完成，避免误用AC放置路线。 */
+            if (g_upper_controller_debug.observe_area_group ==
+                    UPPER_OBSERVE_AREA_BD) {
+                g_upper_controller_debug.arm_target_pick_running = 0u;
+                upper_arm_target_flow_state = UPPER_ARM_TARGET_FLOW_IDLE;
+                (void)UpperControllerSendCallback(
+                    UPPER_CALLBACK_ARM_TARGET, UPPER_CALLBACK_COMPLETED);
+                g_arm_target_debug.stage = UPPER_ARM_TARGET_DEBUG_PICK_DONE;
+                g_upper_controller_debug.arm_target_pick_complete_count++;
+                g_upper_controller_debug.discrete_complete_count++;
+                return;
+            }
             App_Arm_Flow_Start_Result_e start_result =
                 AppArmFlowStartPlace(&upper_arm_target_place_profile,
                                      HAL_GetTick());
@@ -1681,50 +1696,66 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
                     UPPER_ARM_TARGET_DEBUG_PICK_REJECTED);
                 return;
             }
-            if (AppArmSidePickPlaceBuildPlaceProfile(
-                    side, &upper_arm_target_place_profile) == 0u) {
-                UpperControllerHandleArmTargetFailure(
-                    UPPER_ARM_TARGET_DEBUG_PLACE_REJECTED);
-                return;
+            if (g_upper_controller_debug.observe_area_group ==
+                    UPPER_OBSERVE_AREA_AC) {
+                if (AppArmSidePickPlaceBuildPlaceProfile(
+                        side, &upper_arm_target_place_profile) == 0u) {
+                    UpperControllerHandleArmTargetFailure(
+                        UPPER_ARM_TARGET_DEBUG_PLACE_REJECTED);
+                    return;
+                }
             }
-            advance_sign = side == APP_FRUIT_SIDE_RIGHT ? -1.0f : 1.0f;
             pick_x_bias_mm = side == APP_FRUIT_SIDE_RIGHT ?
                 APP_ARM_AC_CLOSED_LOOP_RIGHT_PICK_X_BIAS_MM :
                 APP_ARM_AC_CLOSED_LOOP_LEFT_PICK_X_BIAS_MM;
             memset(&target, 0, sizeof(target));
-            target.approach_valid = 1u;
-            target.approach_x_mm =
-                transform_result.base_point_mm[0] + pick_x_bias_mm;
-            if (UpperControllerClampAcNearY(
-                    side, transform_result.base_point_mm[1],
-                    &target.approach_y_mm) == 0u) {
-                UpperControllerHandleArmTargetFailure(
-                    UPPER_ARM_TARGET_DEBUG_NEAR_LIMIT_REJECTED);
-                return;
-            }
-            target.approach_z_mm = APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM;
-            target.x_mm = target.approach_x_mm;
-            target.z_mm = APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM;
-            target.tool_pitch_deg =
-                APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG;
-            if (AppArmFlowSelectReachablePickAdvance(
-                    &target, advance_sign,
-                    APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM,
-                    APP_ARM_AC_CLOSED_LOOP_ADVANCE_SEARCH_STEP_MM,
-                    &advance_result) == 0u) {
+            target.x_mm = transform_result.base_point_mm[0] + pick_x_bias_mm;
+            if (g_upper_controller_debug.observe_area_group ==
+                    UPPER_OBSERVE_AREA_BD) {
+                /* BD不做AC近端钳位、固定Z或推进；Y/Z严格使用相机解算值。 */
+                target.y_mm = transform_result.base_point_mm[1];
+                target.z_mm = transform_result.base_point_mm[2];
+                target.tool_pitch_deg =
+                    APP_ARM_BD_CLOSED_LOOP_PICK_TOOL_PITCH_DEG;
+                target.approach_valid = 0u;
+            } else {
+                advance_sign = side == APP_FRUIT_SIDE_RIGHT ? -1.0f : 1.0f;
+                target.approach_valid = 1u;
+                target.approach_x_mm = target.x_mm;
+                if (UpperControllerClampAcNearY(
+                        side, transform_result.base_point_mm[1],
+                        &target.approach_y_mm) == 0u) {
+                    UpperControllerHandleArmTargetFailure(
+                        UPPER_ARM_TARGET_DEBUG_NEAR_LIMIT_REJECTED);
+                    return;
+                }
+                target.approach_z_mm = APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM;
+                target.y_mm = target.approach_y_mm;
+                target.z_mm = APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM;
+                target.tool_pitch_deg =
+                    APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG;
+                if (AppArmFlowSelectReachablePickAdvance(
+                        &target, advance_sign,
+                        APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM,
+                        APP_ARM_AC_CLOSED_LOOP_ADVANCE_SEARCH_STEP_MM,
+                        &advance_result) == 0u) {
+                    UpperControllerRecordAcAdvanceResult(&advance_result);
+                    UpperControllerHandleArmTargetFailure(
+                        UPPER_ARM_TARGET_DEBUG_ADVANCE_REJECTED);
+                    return;
+                }
                 UpperControllerRecordAcAdvanceResult(&advance_result);
-                UpperControllerHandleArmTargetFailure(
-                    UPPER_ARM_TARGET_DEBUG_ADVANCE_REJECTED);
-                return;
             }
-            UpperControllerRecordAcAdvanceResult(&advance_result);
             /*
              * AC闭环抓后放置沿用开环profile，但Y峰值按本次视觉目标动态
              * 收紧：只允许比最终抓取点再向当前侧前方多配置余量。
              */
-            upper_arm_target_place_profile.transfer_path_y_max_mm =
-                fabsf(target.y_mm) +
-                APP_ARM_AC_CLOSED_LOOP_PLACE_FORWARD_MARGIN_MM;
+            if (g_upper_controller_debug.observe_area_group ==
+                    UPPER_OBSERVE_AREA_AC) {
+                upper_arm_target_place_profile.transfer_path_y_max_mm =
+                    fabsf(target.y_mm) +
+                    APP_ARM_AC_CLOSED_LOOP_PLACE_FORWARD_MARGIN_MM;
+            }
             g_upper_controller_debug.arm_target_pick_center_mm[0] =
                 target.x_mm;
             g_upper_controller_debug.arm_target_pick_center_mm[1] =

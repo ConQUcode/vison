@@ -65,8 +65,8 @@ typedef enum {
 /** 显式profile放置子流程步骤；旧编号尽量保持稳定，执行顺序看状态机。 */
 typedef enum {
     APP_ARM_PLACE_STEP_IDLE = 0,
-    APP_ARM_PLACE_STEP_SUBMIT_TRANSFER,        /* ID1保持不动，独立抬升到过渡点。 */
-    APP_ARM_PLACE_STEP_WAIT_TRANSFER,          /* 到位后才允许ID1动作和后转。 */
+    APP_ARM_PLACE_STEP_SUBMIT_TRANSFER,        /* AC连续抬升并后转，ID1保持不动。 */
+    APP_ARM_PLACE_STEP_WAIT_TRANSFER,          /* 非AC放置的过渡等待。 */
     APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_PLACE, /* 左逆时针/右顺时针转到后方。 */
     APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_PLACE,
     APP_ARM_PLACE_STEP_SUBMIT_RELEASE_POSE,    /* 释放关节角+ID1相对俯仰联合命令。 */

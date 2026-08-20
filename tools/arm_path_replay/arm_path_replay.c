@@ -191,6 +191,39 @@ static uint8_t staging_pose_safe(const float q_deg[3],
     return 1u;
 }
 
+/* Joint placement may intentionally rotate q1 beyond the automatic +/-90deg
+ * Cartesian range. Keep the remaining production joint-path safety checks. */
+static uint8_t transfer_joint_pose_safe(const float q_deg[3],
+                                        float relative_pitch_deg,
+                                        Arm_Position_s *center)
+{
+    float absolute_pitch_deg =
+        q_deg[ARM_JOINT_SHOULDER] +
+        (-180.0f - q_deg[ARM_JOINT_ELBOW]) +
+        relative_pitch_deg;
+
+    if (!ArmJointPoseWithinSoftLimits(q_deg) ||
+        !pitch_safe(q_deg, absolute_pitch_deg) ||
+        !ArmForwardKinematicsToolCenter(q_deg, absolute_pitch_deg,
+                                        center)) {
+        return 0u;
+    }
+    if (fabsf(wrap180(q_deg[ARM_JOINT_BASE_YAW])) <=
+            ARM_FRONT_BARRIER_BASE_Q1_ABS_MAX_DEG +
+                ARM_LIMIT_TOLERANCE_DEG &&
+        center->x_mm > ARM_FRONT_BARRIER_TOOL_X_MARGIN_MM &&
+        q_deg[ARM_JOINT_SHOULDER] >
+            ARM_FRONT_BARRIER_SHOULDER_Q2_MAX_DEG) {
+        return 0u;
+    }
+    if (center->x_mm < ARM_REAR_ZONE_X_BOUNDARY_MM -
+                           ARM_REAR_ZONE_X_MARGIN_MM &&
+        center->z_mm < ARM_REAR_ZONE_MIN_TOOL_Z_MM) {
+        return 0u;
+    }
+    return 1u;
+}
+
 static int verify_ac_transfer_segment(
     const float left_start_q_deg[3], const float right_start_q_deg[3],
     const float left_target_q_deg[3], const float right_target_q_deg[3],
@@ -233,10 +266,10 @@ static int verify_ac_transfer_segment(
             right_q_deg[joint] = right_start_q_deg[joint] + ratio *
                 (right_target_q_deg[joint] - right_start_q_deg[joint]);
         }
-        if (!staging_pose_safe(left_q_deg, left_relative_pitch_deg,
-                               &left_center) ||
-            !staging_pose_safe(right_q_deg, right_relative_pitch_deg,
-                               &right_center)) {
+        if (!transfer_joint_pose_safe(left_q_deg, left_relative_pitch_deg,
+                                      &left_center) ||
+            !transfer_joint_pose_safe(right_q_deg, right_relative_pitch_deg,
+                                      &right_center)) {
             fprintf(stderr,
                     "FAIL AC transfer safety sample=%u "
                     "leftQ=(%.3f,%.3f,%.3f) "
@@ -339,15 +372,15 @@ static int verify_ac_post_grip_transfer(void)
         APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q2_DEG,
         APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q3_DEG
     };
-    const float left_safe_q_deg[3] = {
-        APP_FRUIT_A_LEFT_SAFE_Q1_DEG,
-        APP_FRUIT_A_TRANSFER_Q2_DEG,
-        APP_FRUIT_A_TRANSFER_Q3_DEG
+    const float left_release_q_deg[3] = {
+        APP_FRUIT_A_LEFT_PLACE_Q1_DEG,
+        APP_FRUIT_A_RELEASE_Q2_DEG,
+        APP_FRUIT_A_RELEASE_Q3_DEG
     };
-    const float right_safe_q_deg[3] = {
-        APP_FRUIT_A_RIGHT_SAFE_Q1_DEG,
-        APP_FRUIT_A_TRANSFER_Q2_DEG,
-        APP_FRUIT_A_TRANSFER_Q3_DEG
+    const float right_release_q_deg[3] = {
+        APP_FRUIT_A_RIGHT_PLACE_Q1_DEG,
+        APP_FRUIT_A_RELEASE_Q2_DEG,
+        APP_FRUIT_A_RELEASE_Q3_DEG
     };
     Arm_Tool_Center_IK_Result_s left_ik;
     Arm_Tool_Center_IK_Result_s right_ik;
@@ -389,20 +422,19 @@ static int verify_ac_post_grip_transfer(void)
     if (result != 0) return result;
     result = verify_ac_transfer_segment(
         left_waypoint_q_deg, right_waypoint_q_deg,
-        left_safe_q_deg, right_safe_q_deg,
+        left_release_q_deg, right_release_q_deg,
         left_relative_pitch_deg, right_relative_pitch_deg,
         0u, &max_abs_y_mm, NULL, NULL);
     if (result != 0) return result;
 
     printf("PASS AC post-grip transfer: ID1 locked until "
            "waypoint=(+/-90.0,%.1f,%.1f), waypointZ=%.3f raiseZ=%.3f "
-           "safe=(+/-90.0,%.1f,%.1f) "
-           "maxAbsY=%.3f limit=%.1f\n",
+           "rear=(+/-178.0,%.1f,%.1f) maxAbsY=%.3f limit=%.1f\n",
            APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q2_DEG,
            APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q3_DEG,
            waypoint_z_mm, z_raise_mm,
-           APP_FRUIT_A_TRANSFER_Q2_DEG,
-           APP_FRUIT_A_TRANSFER_Q3_DEG,
+           APP_FRUIT_A_RELEASE_Q2_DEG,
+           APP_FRUIT_A_RELEASE_Q3_DEG,
            max_abs_y_mm, APP_ARM_POSTURE_TEST_TRANSFER_PATH_Y_MAX_MM);
     return 0;
 }
@@ -670,6 +702,114 @@ static int verify_post_place_cycle_transition(void)
         }
     }
     printf("PASS post-place staging and mirrored pick transitions\n");
+    return 0;
+}
+
+static int verify_observation_to_high_pick_staging(void)
+{
+    const Arm_Position_s observation_center[2] = {
+        {APP_ARM_AC_OBSERVATION_LEFT_X_MM,
+         APP_ARM_AC_OBSERVATION_LEFT_Y_MM,
+         APP_ARM_AC_OBSERVATION_LEFT_Z_MM},
+        {APP_ARM_AC_OBSERVATION_RIGHT_X_MM,
+         APP_ARM_AC_OBSERVATION_RIGHT_Y_MM,
+         APP_ARM_AC_OBSERVATION_RIGHT_Z_MM}
+    };
+    const float target_q1_deg[2] = {
+        APP_ARM_PICK_BASE_AIM_MAX_ABS_Q1_DEG,
+        -APP_ARM_PICK_BASE_AIM_MAX_ABS_Q1_DEG
+    };
+    Arm_Position_s final_center[2];
+
+    for (uint8_t side = 0u; side < 2u; ++side) {
+        const float seed_q_deg[3] = {
+            side == 0u ? 90.0f : -90.0f, 123.0f, -84.0f
+        };
+        Arm_Tool_Center_IK_Result_s observation_ik;
+        float segment_q_deg[3][3];
+
+        memset(&observation_ik, 0, sizeof(observation_ik));
+        if (ArmInverseKinematicsToolCenter(
+                &observation_center[side],
+                APP_ARM_AC_OBSERVATION_TOOL_PITCH_DEG,
+                seed_q_deg, &observation_ik) != ARM_IK_OK) {
+            fprintf(stderr, "FAIL high staging observation IK side=%u\n",
+                    side);
+            return 77;
+        }
+        memcpy(segment_q_deg[0], observation_ik.q_deg,
+               sizeof(segment_q_deg[0]));
+        segment_q_deg[1][0] = observation_ik.q_deg[0];
+        segment_q_deg[1][1] = APP_ARM_PICK_STAGING_Q2_DEG;
+        segment_q_deg[1][2] = APP_ARM_PICK_STAGING_Q3_DEG;
+        segment_q_deg[2][0] = target_q1_deg[side];
+        segment_q_deg[2][1] = APP_ARM_PICK_STAGING_Q2_DEG;
+        segment_q_deg[2][2] = APP_ARM_PICK_STAGING_Q3_DEG;
+
+        for (uint8_t segment = 0u; segment < 2u; ++segment) {
+            float max_delta_deg = 0.0f;
+            uint16_t intervals;
+
+            for (uint8_t joint = 0u; joint < 3u; ++joint) {
+                float delta_deg = joint == ARM_JOINT_BASE_YAW ?
+                    fabsf(wrap180(segment_q_deg[segment + 1u][joint] -
+                                  segment_q_deg[segment][joint])) :
+                    fabsf(segment_q_deg[segment + 1u][joint] -
+                          segment_q_deg[segment][joint]);
+                max_delta_deg = fmaxf(max_delta_deg, delta_deg);
+            }
+            intervals = (uint16_t)ceilf(max_delta_deg);
+            if (intervals < 1u) intervals = 1u;
+            for (uint16_t sample = 0u; sample <= intervals; ++sample) {
+                float ratio = (float)sample / (float)intervals;
+                float q_deg[3];
+                Arm_Position_s center;
+
+                q_deg[0] = segment_q_deg[segment][0] + ratio *
+                    wrap180(segment_q_deg[segment + 1u][0] -
+                            segment_q_deg[segment][0]);
+                for (uint8_t joint = 1u; joint < 3u; ++joint) {
+                    q_deg[joint] = segment_q_deg[segment][joint] + ratio *
+                        (segment_q_deg[segment + 1u][joint] -
+                         segment_q_deg[segment][joint]);
+                }
+                if (!staging_pose_safe(
+                        q_deg, APP_ARM_PICK_STAGING_TOOL_RELATIVE_PITCH_DEG,
+                        &center)) {
+                    fprintf(stderr,
+                            "FAIL observation-high staging side=%u segment=%u "
+                            "sample=%u q=(%.3f,%.3f,%.3f)\n",
+                            side, segment, sample,
+                            q_deg[0], q_deg[1], q_deg[2]);
+                    return 78;
+                }
+                if (segment == 1u && sample == intervals) {
+                    final_center[side] = center;
+                }
+            }
+        }
+        if (final_center[side].z_mm <
+                observation_center[side].z_mm + 50.0f) {
+            fprintf(stderr,
+                    "FAIL high staging raise side=%u observationZ=%.3f "
+                    "stagingZ=%.3f\n",
+                    side, observation_center[side].z_mm,
+                    final_center[side].z_mm);
+            return 79;
+        }
+    }
+    if (fabsf(final_center[0].x_mm - final_center[1].x_mm) > 0.001f ||
+        fabsf(final_center[0].y_mm + final_center[1].y_mm) > 0.001f ||
+        fabsf(final_center[0].z_mm - final_center[1].z_mm) > 0.001f) {
+        fprintf(stderr, "FAIL high staging is not mirrored\n");
+        return 80;
+    }
+    printf("PASS observation to high pick staging: q2=%.1f q3=%.1f "
+           "centerZ=%.3f raiseZ=%.3f\n",
+           APP_ARM_PICK_STAGING_Q2_DEG,
+           APP_ARM_PICK_STAGING_Q3_DEG,
+           final_center[0].z_mm,
+           final_center[0].z_mm - observation_center[0].z_mm);
     return 0;
 }
 
@@ -1103,6 +1243,9 @@ int main(void)
     if (result != 0) return result;
 
     result = verify_ac_post_grip_transfer();
+    if (result != 0) return result;
+
+    result = verify_observation_to_high_pick_staging();
     if (result != 0) return result;
 
     result = verify_post_place_cycle_transition();

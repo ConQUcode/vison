@@ -48,6 +48,23 @@ static uint16_t Mg995ServoAngleToPulse(float angle_deg)
     return (uint16_t)(pulse + 0.5f);
 }
 
+static uint16_t Mg995ServoAngleToPulseForServo(
+    Mg995_Servo_Id_e servo, float angle_deg)
+{
+    float physical_angle_deg = angle_deg;
+
+    if (servo == MG995_SERVO_RIGHT) {
+        physical_angle_deg += MG995_SERVO_RIGHT_MECHANICAL_OFFSET_DEG;
+    }
+    /* 保持公共API的0..180deg逻辑范围，同时防止安装补偿越界PWM。 */
+    if (physical_angle_deg < MG995_SERVO_MIN_ANGLE_DEG) {
+        physical_angle_deg = MG995_SERVO_MIN_ANGLE_DEG;
+    } else if (physical_angle_deg > MG995_SERVO_MAX_ANGLE_DEG) {
+        physical_angle_deg = MG995_SERVO_MAX_ANGLE_DEG;
+    }
+    return Mg995ServoAngleToPulse(physical_angle_deg);
+}
+
 static void Mg995ServoWrite(Mg995_Servo_Id_e servo,
                             float angle_deg,
                             uint16_t pulse_us)
@@ -90,8 +107,10 @@ uint8_t Mg995ServoInit(void)
         MG995_SERVO_LEFT, MG995_CAMERA_STARTUP_ANGLE_DEG);
     right_servo_angle_deg = Mg995CameraToServoAngle(
         MG995_SERVO_RIGHT, MG995_CAMERA_STARTUP_ANGLE_DEG);
-    left_pulse_us = Mg995ServoAngleToPulse(left_servo_angle_deg);
-    right_pulse_us = Mg995ServoAngleToPulse(right_servo_angle_deg);
+    left_pulse_us = Mg995ServoAngleToPulseForServo(
+        MG995_SERVO_LEFT, left_servo_angle_deg);
+    right_pulse_us = Mg995ServoAngleToPulseForServo(
+        MG995_SERVO_RIGHT, right_servo_angle_deg);
     Mg995ServoWrite(MG995_SERVO_RIGHT,
                     right_servo_angle_deg,
                     right_pulse_us);
@@ -125,7 +144,7 @@ uint8_t Mg995ServoSetAngle(Mg995_Servo_Id_e servo, float angle_deg)
         Mg995ServoAngleValid(angle_deg) == 0u) {
         return 0u;
     }
-    pulse_us = Mg995ServoAngleToPulse(angle_deg);
+    pulse_us = Mg995ServoAngleToPulseForServo(servo, angle_deg);
     Mg995ServoWrite(servo, angle_deg, pulse_us);
     g_mg995_servo_debug.set_count++;
     return 1u;
@@ -142,8 +161,10 @@ uint8_t Mg995ServoSetBothAngles(float left_angle_deg,
         Mg995ServoAngleValid(right_angle_deg) == 0u) {
         return 0u;
     }
-    left_pulse_us = Mg995ServoAngleToPulse(left_angle_deg);
-    right_pulse_us = Mg995ServoAngleToPulse(right_angle_deg);
+    left_pulse_us = Mg995ServoAngleToPulseForServo(
+        MG995_SERVO_LEFT, left_angle_deg);
+    right_pulse_us = Mg995ServoAngleToPulseForServo(
+        MG995_SERVO_RIGHT, right_angle_deg);
     Mg995ServoWrite(MG995_SERVO_LEFT, left_angle_deg, left_pulse_us);
     Mg995ServoWrite(MG995_SERVO_RIGHT, right_angle_deg, right_pulse_us);
     g_mg995_servo_debug.set_count++;
