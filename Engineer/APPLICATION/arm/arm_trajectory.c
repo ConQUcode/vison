@@ -8,6 +8,7 @@
 #include "arm_config.h"
 #include "arm_internal.h"
 #include "arm_kinematics.h"
+#include "arm_path_planner.h"
 #include "arm_tool.h"
 #include "dmmotor.h"
 #include "stm32f4xx_hal.h"
@@ -29,25 +30,10 @@
 #define ARM_LINEAR_QUINTIC_PEAK_FACTOR     1.875f
 #define ARM_LINEAR_QUINTIC_ACCEL_FACTOR    5.7735f
 
-#define ARM_LINEAR_Q1_STEP_MAX_DEG         5.0f
-#define ARM_LINEAR_Q2_STEP_MAX_DEG         2.0f
-#define ARM_LINEAR_Q3_STEP_MAX_DEG         2.0f
 #define ARM_COMPOSITE_JOINT_STEP_DEG        1.0f
 #define ARM_SAMPLE_PROGRESS_EPSILON          0.000001f
 #define ARM_COMPOSITE_BLEND_JOINT_INTERVALS 12u
 #define ARM_COMPOSITE_BLEND_LINEAR_INTERVALS 12u
-
-/* g_arm_motion_debug.preflight_failed_check_mask 位定义。 */
-#define ARM_PREFLIGHT_FAIL_IK                 (1u << 0)
-#define ARM_PREFLIGHT_FAIL_FK_ERROR           (1u << 1)
-#define ARM_PREFLIGHT_FAIL_JOINT_LIMIT        (1u << 2)
-#define ARM_PREFLIGHT_FAIL_AUTO_REGION        (1u << 3)
-#define ARM_PREFLIGHT_FAIL_TOOL_PITCH         (1u << 4)
-#define ARM_PREFLIGHT_FAIL_WORKSPACE          (1u << 5)
-#define ARM_PREFLIGHT_FAIL_JOINT_STEP         (1u << 6)
-
-#define ARM_PATH_CANDIDATE_NONE                0xFFu
-#define ARM_PATH_COST_INFINITY                 1.0e30f
 
 typedef enum {
     ARM_TRAJECTORY_PATH_NONE = 0,
@@ -150,25 +136,6 @@ static uint8_t ArmCartesianAutoPoseIsSafe(const float q_deg[3])
     return ArmAutoPoseIsSafe(q_deg);
 }
 
-static Arm_IK_Status_e ArmCartesianInverseToolCenterAll(
-    const Arm_Position_s *target_center_mm,
-    float tool_pitch_deg,
-    const float seed_q_deg[3],
-    Arm_Tool_Center_IK_Candidate_s candidates[
-        ARM_TOOL_CENTER_IK_MAX_CANDIDATES],
-    uint8_t *candidate_count)
-{
-    if (ArmCartesianAcSidePickActive() != 0u) {
-        return ArmInverseKinematicsToolCenterAllWithQ1Limits(
-            target_center_mm, tool_pitch_deg, seed_q_deg,
-            ARM_AC_SIDE_PICK_Q1_MIN_DEG, ARM_AC_SIDE_PICK_Q1_MAX_DEG,
-            candidates, candidate_count);
-    }
-    return ArmInverseKinematicsToolCenterAll(
-        target_center_mm, tool_pitch_deg, seed_q_deg,
-        candidates, candidate_count);
-}
-
 static Arm_IK_Status_e ArmCartesianInverseToolCenter(
     const Arm_Position_s *target_center_mm,
     float tool_pitch_deg,
@@ -195,8 +162,9 @@ static uint8_t ArmCartesianJointStepContinuous(
  * 非阻塞通信状态机，避免有效通信被误判为反馈过期。这里只服务通信和
  * 既有工具状态，不修改主臂参考，也不会提前发送尚未通过预检的轨迹。
  */
-static void ArmCartesianPreflightServiceTool(void)
+static void ArmCartesianPreflightServiceTool(void *context)
 {
+    (void)context;
     ArmToolTask(HAL_GetTick());
     g_arm_motion_debug.preflight_tool_service_count++;
 }
@@ -228,25 +196,15 @@ static float ArmCartesianWrapTo180(float angle_deg)
  * 底座转到约180deg后，连杆径向量可能再次让世界X为正，但此时机械臂
  * 实际朝向后方，不应误触发只针对正前方栏框的大臂角度限制。
  */
+#if ARM_WORKSPACE_SAFETY_ENABLE != 0u && \
+    ARM_FRONT_BARRIER_SHOULDER_LIMIT_ENABLE != 0u
 static uint8_t ArmWorkspaceBaseFacesFront(float q1_deg)
 {
     return fabsf(ArmCartesianWrapTo180(q1_deg)) <=
         ARM_FRONT_BARRIER_BASE_Q1_ABS_MAX_DEG +
             ARM_LIMIT_TOLERANCE_DEG;
 }
-
-static float ArmCartesianCandidateTransitionCost(
-    const float previous_q_deg[3], const float next_q_deg[3])
-{
-    float dq1 = ArmCartesianWrapTo180(next_q_deg[0] - previous_q_deg[0]) /
-                ARM_LINEAR_Q1_STEP_MAX_DEG;
-    float dq2 = (next_q_deg[1] - previous_q_deg[1]) /
-                ARM_LINEAR_Q2_STEP_MAX_DEG;
-    float dq3 = (next_q_deg[2] - previous_q_deg[2]) /
-                ARM_LINEAR_Q3_STEP_MAX_DEG;
-
-    return dq1 * dq1 + dq2 * dq2 + dq3 * dq3;
-}
+#endif
 
 static float ArmCartesianPositionDistance(const Arm_Position_s *a,
                                           const Arm_Position_s *b)
@@ -657,32 +615,19 @@ static uint8_t ArmCartesianAppendToolCenterSegment(
     const Arm_Position_s *target_center,
     float previous_q_deg[3],
     uint8_t segment_index,
-    float max_speed_mm_s)
+    float max_speed_mm_s,
+    Arm_Cartesian_Safety_Profile_e safety_profile)
 {
     float length_mm = ArmCartesianPositionDistance(start_center,
                                                    target_center);
-    float previous_cost[ARM_TOOL_CENTER_IK_MAX_CANDIDATES];
-    float current_cost[ARM_TOOL_CENTER_IK_MAX_CANDIDATES];
-    Arm_Tool_Center_IK_Candidate_s previous_candidates[
-        ARM_TOOL_CENTER_IK_MAX_CANDIDATES];
-    uint8_t previous_candidate_count = 0u;
-    uint16_t intervals = (uint16_t)ceilf(
-        length_mm / ARM_LINEAR_SAMPLE_SPACING_MM);
+    Arm_Path_Plan_Request_s request;
+    Arm_Path_Plan_Workspace_s workspace;
+    Arm_Path_Plan_Result_s result;
     uint16_t first_index;
-    uint8_t best_last_candidate = ARM_PATH_CANDIDATE_NONE;
-    uint8_t unsafe_vertical_escape =
-        ArmWorkspacePointIsRear(start_center) &&
-        start_center->z_mm < ARM_REAR_ZONE_MIN_TOOL_Z_MM &&
-        fabsf(target_center->x_mm - start_center->x_mm) <= 0.5f &&
-        fabsf(target_center->y_mm - start_center->y_mm) <= 0.5f &&
-        target_center->z_mm >= ARM_REAR_CROSSING_TOOL_Z_MM ? 1u : 0u;
 
-    if (intervals < 1u) {
-        intervals = 1u;
-    }
     if (segment_index >= ARM_TRAJECTORY_MAX_ROUTE_SEGMENTS ||
-        (uint32_t)arm_cartesian_runtime.sample_count + intervals >
-            ARM_LINEAR_MAX_SAMPLES) {
+        arm_cartesian_runtime.sample_count == 0u ||
+        arm_cartesian_runtime.sample_count > ARM_LINEAR_MAX_SAMPLES) {
         g_arm_motion_debug.workspace_safety_result =
             ARM_WORKSPACE_SAFETY_SAMPLE_CAPACITY;
         return 0u;
@@ -693,242 +638,51 @@ static uint8_t ArmCartesianAppendToolCenterSegment(
         *start_center;
     arm_cartesian_runtime.route_segment_target_position[segment_index] =
         *target_center;
-    arm_cartesian_runtime.sample_progress[first_index] = 0.0f;
+    memset(&request, 0, sizeof(request));
+    request.start_center_mm = *start_center;
+    request.target_center_mm = *target_center;
+    memcpy(request.start_q_deg, previous_q_deg,
+           sizeof(request.start_q_deg));
+    request.tool_pitch_deg = arm_cartesian_runtime.active_tool_pitch_deg;
+    request.sample_spacing_mm = ARM_LINEAR_SAMPLE_SPACING_MM;
+    request.safety_profile = safety_profile;
+    request.segment_index = segment_index;
+    request.service_hook = ArmCartesianPreflightServiceTool;
 
-    for (uint8_t candidate = 0u;
-         candidate < ARM_TOOL_CENTER_IK_MAX_CANDIDATES; ++candidate) {
-        previous_cost[candidate] = ARM_PATH_COST_INFINITY;
-    }
-    memset(previous_candidates, 0, sizeof(previous_candidates));
+    workspace.sample_q_deg =
+        &arm_cartesian_runtime.sample_q_deg[first_index];
+    workspace.sample_progress =
+        &arm_cartesian_runtime.sample_progress[first_index];
+    workspace.candidate_predecessor =
+        &arm_cartesian_runtime.tool_candidate_predecessor[first_index];
+    workspace.candidate_count =
+        &arm_cartesian_runtime.tool_candidate_count[first_index];
+    workspace.selected_candidate =
+        &arm_cartesian_runtime.tool_selected_candidate[first_index];
+    workspace.capacity = (uint16_t)(ARM_LINEAR_MAX_SAMPLES - first_index);
 
-    /*
-     * 第一遍：每个采样点保留全部安全候选，用动态规划寻找整段连续解。
-     * 不在单点上贪心选择，避免工具轴心经过底座中心附近时选错径向分支。
-     */
-    for (uint16_t i = 1u; i <= intervals; ++i) {
-        float ratio = (float)i / (float)intervals;
-        uint16_t sample_index = (uint16_t)(first_index + i);
-        Arm_Position_s sample_center;
-        Arm_Tool_Center_IK_Candidate_s candidates[
-            ARM_TOOL_CENTER_IK_MAX_CANDIDATES];
-        Arm_IK_Status_e ik_status;
-        uint8_t candidate_count = 0u;
-        uint8_t reachable_count = 0u;
-        uint32_t failed_check_mask = 0u;
-
-        ArmCartesianPreflightServiceTool();
-
-        sample_center.x_mm = start_center->x_mm + ratio *
-            (target_center->x_mm - start_center->x_mm);
-        sample_center.y_mm = start_center->y_mm + ratio *
-            (target_center->y_mm - start_center->y_mm);
-        sample_center.z_mm = start_center->z_mm + ratio *
-            (target_center->z_mm - start_center->z_mm);
-        if (unsafe_vertical_escape == 0u &&
-            !ArmWorkspacePointSafe(&sample_center,
-                                   i == intervals ? 1u : 0u)) {
-            return 0u;
-        }
-        memset(candidates, 0, sizeof(candidates));
-        ik_status = ArmCartesianInverseToolCenterAll(
-            &sample_center,
-            arm_cartesian_runtime.active_tool_pitch_deg,
-            previous_q_deg, candidates, &candidate_count);
-        arm_cartesian_runtime.tool_candidate_count[sample_index] =
-            candidate_count;
-        for (uint8_t candidate = 0u;
-             candidate < ARM_TOOL_CENTER_IK_MAX_CANDIDATES; ++candidate) {
-            current_cost[candidate] = ARM_PATH_COST_INFINITY;
-            arm_cartesian_runtime.tool_candidate_predecessor[sample_index]
-                [candidate] = ARM_PATH_CANDIDATE_NONE;
-        }
-        if (ik_status != ARM_IK_OK || candidate_count == 0u) {
-            failed_check_mask |= ARM_PREFLIGHT_FAIL_IK;
-        } else {
-            for (uint8_t candidate = 0u; candidate < candidate_count;
-                 ++candidate) {
-                uint8_t candidate_safe = 1u;
-                uint32_t candidate_fail_mask = 0u;
-
-                if (candidates[candidate].position_error_mm >
-                    ARM_LINEAR_FK_ERROR_MAX_MM) {
-                    candidate_fail_mask |= ARM_PREFLIGHT_FAIL_FK_ERROR;
-                    candidate_safe = 0u;
-                }
-                if (!ArmJointPoseWithinSoftLimits(
-                        candidates[candidate].q_deg)) {
-                    candidate_fail_mask |= ARM_PREFLIGHT_FAIL_JOINT_LIMIT;
-                    candidate_safe = 0u;
-                }
-                if (!ArmCartesianAutoPoseIsSafe(candidates[candidate].q_deg)) {
-                    candidate_fail_mask |= ARM_PREFLIGHT_FAIL_AUTO_REGION;
-                    candidate_safe = 0u;
-                }
-                if (!ArmCartesianToolPitchAllowedForQ(
-                        candidates[candidate].q_deg)) {
-                    candidate_fail_mask |= ARM_PREFLIGHT_FAIL_TOOL_PITCH;
-                    candidate_safe = 0u;
-                }
-                if (!ArmWorkspacePoseSafe(
-                        candidates[candidate].q_deg,
-                        i == intervals ? 1u : 0u, NULL)) {
-                    candidate_fail_mask |= ARM_PREFLIGHT_FAIL_WORKSPACE;
-                    candidate_safe = 0u;
-                }
-                failed_check_mask |= candidate_fail_mask;
-                if (candidate_safe == 0u) {
-                    continue;
-                }
-
-                if (i == 1u) {
-                    if (ArmCartesianJointStepContinuous(
-                            previous_q_deg, candidates[candidate].q_deg)) {
-                        current_cost[candidate] =
-                            ArmCartesianCandidateTransitionCost(
-                                previous_q_deg,
-                                candidates[candidate].q_deg);
-                        reachable_count++;
-                    }
-                } else {
-                    for (uint8_t predecessor = 0u;
-                         predecessor < previous_candidate_count;
-                         ++predecessor) {
-                        float cost;
-
-                        if (previous_cost[predecessor] >=
-                                ARM_PATH_COST_INFINITY ||
-                            !ArmCartesianJointStepContinuous(
-                                previous_candidates[predecessor].q_deg,
-                                candidates[candidate].q_deg)) {
-                            continue;
-                        }
-                        cost = previous_cost[predecessor] +
-                            ArmCartesianCandidateTransitionCost(
-                                previous_candidates[predecessor].q_deg,
-                                candidates[candidate].q_deg);
-                        if (cost < current_cost[candidate]) {
-                            current_cost[candidate] = cost;
-                            arm_cartesian_runtime.
-                                tool_candidate_predecessor[sample_index]
-                                    [candidate] = predecessor;
-                        }
-                    }
-                    if (current_cost[candidate] < ARM_PATH_COST_INFINITY) {
-                        reachable_count++;
-                    }
-                }
-            }
-            if (reachable_count == 0u) {
-                failed_check_mask |= ARM_PREFLIGHT_FAIL_JOINT_STEP;
-            }
-        }
-        if ((failed_check_mask & ARM_PREFLIGHT_FAIL_IK) != 0u ||
-            reachable_count == 0u) {
-            g_arm_motion_debug.preflight_failed_segment = segment_index;
-            g_arm_motion_debug.preflight_failed_sample = i;
-            g_arm_motion_debug.preflight_failed_check_mask =
-                failed_check_mask;
-            g_arm_motion_debug.preflight_failed_center_mm = sample_center;
-            if (candidate_count != 0u) {
-                memcpy(g_arm_motion_debug.preflight_failed_q_deg,
-                       candidates[0].q_deg,
-                       sizeof(g_arm_motion_debug.preflight_failed_q_deg));
-            }
-            if (g_arm_motion_debug.workspace_safety_result ==
-                ARM_WORKSPACE_SAFETY_OK) {
-                g_arm_motion_debug.workspace_safety_result =
-                    ARM_WORKSPACE_SAFETY_PREFLIGHT_IK;
-            }
-            ArmCartesianRecordRejected(
-                ik_status == ARM_IK_OK ? ARM_IK_COLLISION_RISK : ik_status);
-            return 0u;
-        }
-        arm_cartesian_runtime.sample_progress[sample_index] = ratio;
-        for (uint8_t candidate = 0u; candidate < candidate_count;
-             ++candidate) {
-            previous_cost[candidate] = current_cost[candidate];
-        }
-        for (uint8_t candidate = candidate_count;
-             candidate < ARM_TOOL_CENTER_IK_MAX_CANDIDATES; ++candidate) {
-            previous_cost[candidate] = ARM_PATH_COST_INFINITY;
-        }
-        memcpy(previous_candidates, candidates,
-               sizeof(previous_candidates));
-        previous_candidate_count = candidate_count;
-    }
-
-    for (uint8_t candidate = 0u;
-         candidate < arm_cartesian_runtime.tool_candidate_count[
-             first_index + intervals]; ++candidate) {
-        if (previous_cost[candidate] < ARM_PATH_COST_INFINITY &&
-            (best_last_candidate == ARM_PATH_CANDIDATE_NONE ||
-             previous_cost[candidate] < previous_cost[best_last_candidate])) {
-            best_last_candidate = candidate;
-        }
-    }
-    if (best_last_candidate == ARM_PATH_CANDIDATE_NONE) {
+    if (!ArmPathPlanToolCenterSegment(&request, &workspace, &result)) {
+        g_arm_motion_debug.preflight_failed_segment = result.failed_segment;
+        g_arm_motion_debug.preflight_failed_sample = result.failed_sample;
+        g_arm_motion_debug.preflight_failed_check_mask =
+            result.failed_check_mask;
+        g_arm_motion_debug.preflight_failed_center_mm =
+            result.failed_center_mm;
+        memcpy(g_arm_motion_debug.preflight_failed_q_deg,
+               result.failed_q_deg,
+               sizeof(g_arm_motion_debug.preflight_failed_q_deg));
+        g_arm_motion_debug.workspace_safety_result =
+            result.workspace_safety_result;
+        ArmCartesianRecordRejected(
+            result.ik_status == ARM_IK_OK ?
+                ARM_IK_COLLISION_RISK : result.ik_status);
         return 0u;
     }
-
-    /* 先按前驱表从段末回溯候选编号，再正向重新生成候选并写入轨迹。 */
-    arm_cartesian_runtime.tool_selected_candidate[first_index + intervals] =
-        best_last_candidate;
-    for (uint16_t i = intervals; i > 1u; --i) {
-        uint16_t sample_index = (uint16_t)(first_index + i);
-        uint8_t selected =
-            arm_cartesian_runtime.tool_selected_candidate[sample_index];
-        uint8_t predecessor;
-
-        if (selected >= ARM_TOOL_CENTER_IK_MAX_CANDIDATES) {
-            ArmCartesianRecordRejected(ARM_IK_NUMERICAL_ERROR);
-            return 0u;
-        }
-        predecessor =
-            arm_cartesian_runtime.tool_candidate_predecessor[sample_index]
-                                                               [selected];
-        if (predecessor == ARM_PATH_CANDIDATE_NONE ||
-            predecessor >= ARM_TOOL_CENTER_IK_MAX_CANDIDATES) {
-            ArmCartesianRecordRejected(ARM_IK_NUMERICAL_ERROR);
-            return 0u;
-        }
-        arm_cartesian_runtime.tool_selected_candidate[sample_index - 1u] =
-            predecessor;
-    }
-    for (uint16_t i = 1u; i <= intervals; ++i) {
-        float ratio = (float)i / (float)intervals;
-        uint16_t sample_index = (uint16_t)(first_index + i);
-        Arm_Position_s sample_center;
-        Arm_Tool_Center_IK_Candidate_s candidates[
-            ARM_TOOL_CENTER_IK_MAX_CANDIDATES];
-        uint8_t candidate_count = 0u;
-        uint8_t selected =
-            arm_cartesian_runtime.tool_selected_candidate[sample_index];
-
-        ArmCartesianPreflightServiceTool();
-
-        sample_center.x_mm = start_center->x_mm + ratio *
-            (target_center->x_mm - start_center->x_mm);
-        sample_center.y_mm = start_center->y_mm + ratio *
-            (target_center->y_mm - start_center->y_mm);
-        sample_center.z_mm = start_center->z_mm + ratio *
-            (target_center->z_mm - start_center->z_mm);
-        memset(candidates, 0, sizeof(candidates));
-        if (ArmCartesianInverseToolCenterAll(
-                &sample_center,
-                arm_cartesian_runtime.active_tool_pitch_deg,
-                previous_q_deg, candidates, &candidate_count) != ARM_IK_OK ||
-            selected >= candidate_count) {
-            ArmCartesianRecordRejected(ARM_IK_NUMERICAL_ERROR);
-            return 0u;
-        }
-        memcpy(arm_cartesian_runtime.sample_q_deg[sample_index],
-               candidates[selected].q_deg,
-               sizeof(arm_cartesian_runtime.sample_q_deg[sample_index]));
-        memcpy(previous_q_deg, candidates[selected].q_deg,
-               sizeof(candidates[selected].q_deg));
-    }
+    memcpy(previous_q_deg, workspace.sample_q_deg[result.interval_count],
+           sizeof(request.start_q_deg));
     arm_cartesian_runtime.sample_count =
-        (uint16_t)(arm_cartesian_runtime.sample_count + intervals);
+        (uint16_t)(arm_cartesian_runtime.sample_count +
+                   result.interval_count);
     arm_cartesian_runtime.route_segment_end[segment_index] =
         (uint16_t)(arm_cartesian_runtime.sample_count - 1u);
     arm_cartesian_runtime.route_segment_duration_ms[segment_index] =
@@ -1825,6 +1579,74 @@ void ArmTrajectoryCancel(void)
     ArmCartesianSetState(ARM_MOTION_HOLDING, HAL_GetTick());
 }
 
+uint8_t ArmTrajectoryPreflightToolCenterSegment(
+    const Arm_Path_Plan_Request_s *request,
+    Arm_Path_Plan_Result_s *result)
+{
+    Arm_Path_Plan_Request_s serviced_request;
+    const Arm_Path_Plan_Request_s *planner_request = request;
+    Arm_Path_Plan_Workspace_s workspace;
+
+    if (result == NULL) {
+        return 0u;
+    }
+    if (ArmTrajectoryIsBusy()) {
+        memset(result, 0, sizeof(*result));
+        result->status = ARM_PATH_PLAN_INVALID;
+        result->ik_status = ARM_IK_INVALID_ARGUMENT;
+        return 0u;
+    }
+    workspace.sample_q_deg = arm_cartesian_runtime.sample_q_deg;
+    workspace.sample_progress = arm_cartesian_runtime.sample_progress;
+    workspace.candidate_predecessor =
+        arm_cartesian_runtime.tool_candidate_predecessor;
+    workspace.candidate_count = arm_cartesian_runtime.tool_candidate_count;
+    workspace.selected_candidate =
+        arm_cartesian_runtime.tool_selected_candidate;
+    workspace.capacity = ARM_LINEAR_MAX_SAMPLES;
+    if (request != NULL && request->service_hook == NULL) {
+        serviced_request = *request;
+        serviced_request.service_hook = ArmCartesianPreflightServiceTool;
+        planner_request = &serviced_request;
+    }
+    return ArmPathPlanToolCenterSegment(
+        planner_request, &workspace, result);
+}
+
+uint8_t ArmTrajectorySelectReachableToolCenterAdvance(
+    const Arm_Path_Advance_Request_s *request,
+    Arm_Path_Advance_Result_s *result)
+{
+    Arm_Path_Advance_Request_s serviced_request;
+    const Arm_Path_Advance_Request_s *planner_request = request;
+    Arm_Path_Plan_Workspace_s workspace;
+
+    if (result == NULL) {
+        return 0u;
+    }
+    if (ArmTrajectoryIsBusy()) {
+        memset(result, 0, sizeof(*result));
+        result->plan_result.status = ARM_PATH_PLAN_INVALID;
+        result->plan_result.ik_status = ARM_IK_INVALID_ARGUMENT;
+        return 0u;
+    }
+    workspace.sample_q_deg = arm_cartesian_runtime.sample_q_deg;
+    workspace.sample_progress = arm_cartesian_runtime.sample_progress;
+    workspace.candidate_predecessor =
+        arm_cartesian_runtime.tool_candidate_predecessor;
+    workspace.candidate_count = arm_cartesian_runtime.tool_candidate_count;
+    workspace.selected_candidate =
+        arm_cartesian_runtime.tool_selected_candidate;
+    workspace.capacity = ARM_LINEAR_MAX_SAMPLES;
+    if (request != NULL && request->service_hook == NULL) {
+        serviced_request = *request;
+        serviced_request.service_hook = ArmCartesianPreflightServiceTool;
+        planner_request = &serviced_request;
+    }
+    return ArmPathSelectReachableAdvance(
+        planner_request, &workspace, result);
+}
+
 static float ArmCartesianVectorLength(const float vector[3])
 {
     return sqrtf(vector[0] * vector[0] + vector[1] * vector[1] +
@@ -2481,9 +2303,10 @@ Arm_Motion_Result_e ArmSetToolCenterTarget(
     return ARM_MOTION_RESULT_OK;
 }
 
-Arm_Motion_Result_e ArmMoveLinearToolCenter(
+static Arm_Motion_Result_e ArmMoveLinearToolCenterWithSafetyProfile(
     const Arm_Position_s *target_center,
-    float max_speed_mm_s)
+    float max_speed_mm_s,
+    Arm_Cartesian_Safety_Profile_e safety_profile)
 {
     Arm_Tool_Center_IK_Result_s target_ik;
     Arm_Position_s start_center;
@@ -2628,7 +2451,8 @@ Arm_Motion_Result_e ArmMoveLinearToolCenter(
     for (uint8_t segment = 0u; segment < segment_count; ++segment) {
         if (!ArmCartesianAppendToolCenterSegment(
                 &route_points[segment], &route_points[segment + 1u],
-                previous_q_deg, segment, max_speed_mm_s)) {
+                previous_q_deg, segment, max_speed_mm_s,
+                safety_profile)) {
             g_arm_motion_debug.preflight_duration_ms =
                 HAL_GetTick() - preflight_start_tick;
             return ARM_MOTION_RESULT_PREFLIGHT_FAILED;
@@ -2660,6 +2484,14 @@ Arm_Motion_Result_e ArmMoveLinearToolCenter(
         ARM_MOTION_RUNNING, now_ms);
     ArmCartesianStartRouteSegment(0u, now_ms);
     return ARM_MOTION_RESULT_OK;
+}
+
+Arm_Motion_Result_e ArmMoveLinearToolCenter(
+    const Arm_Position_s *target_center,
+    float max_speed_mm_s)
+{
+    return ArmMoveLinearToolCenterWithSafetyProfile(
+        target_center, max_speed_mm_s, ARM_CARTESIAN_SAFETY_NORMAL);
 }
 
 Arm_Motion_Result_e ArmTrajectoryMoveJointThenLinear(
@@ -2873,19 +2705,22 @@ Arm_Motion_Result_e ArmTrajectoryStageCartesianCommand(
             }
             return ArmWorkspaceCrossesBoundary(&start_center,
                                                 &command->target_mm) ?
-                ArmMoveLinearToolCenter(
+                ArmMoveLinearToolCenterWithSafetyProfile(
                     &command->target_mm,
                     command->max_speed_mm_s > 0.0f ?
                         command->max_speed_mm_s :
-                        ARM_LINEAR_DEFAULT_SPEED_MM_S) :
+                        ARM_LINEAR_DEFAULT_SPEED_MM_S,
+                    command->safety_profile) :
                 ArmSetToolCenterTarget(&command->target_mm, NULL);
         }
         return ArmSetCartesianTarget(&command->target_mm, NULL);
     }
     if (command->control_point == ARM_CONTROL_POINT_TOOL_CENTER) {
-        return ArmMoveLinearToolCenter(&command->target_mm,
+        return ArmMoveLinearToolCenterWithSafetyProfile(
+            &command->target_mm,
             command->max_speed_mm_s > 0.0f ? command->max_speed_mm_s :
-                                             ARM_LINEAR_DEFAULT_SPEED_MM_S);
+                                             ARM_LINEAR_DEFAULT_SPEED_MM_S,
+            command->safety_profile);
     }
     if (command->control_point == ARM_CONTROL_POINT_WRIST_CENTER) {
         return ArmMoveLinear(&command->target_mm,

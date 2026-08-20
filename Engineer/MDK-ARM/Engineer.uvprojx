@@ -1306,6 +1306,11 @@
               <FilePath>..\APPLICATION\arm\arm_kinematics.c</FilePath>
             </File>
             <File>
+              <FileName>arm_path_planner.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APPLICATION\arm\arm_path_planner.c</FilePath>
+            </File>
+            <File>
               <FileName>arm_trajectory.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\APPLICATION\arm\arm_trajectory.c</FilePath>

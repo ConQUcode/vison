@@ -24,6 +24,7 @@ App_Arm_Pick_Place_Test_Debug_s g_app_arm_pick_place_test_debug;
 #include "arm.h"
 #include "arm_config.h"
 #include "arm_tool.h"
+#include "arm_trajectory.h"
 
 #define APP_ARM_FLOW_RAD_TO_DEG 57.29577951308232f
 #define APP_ARM_FLOW_TRANSFER_SAMPLE_STEP_DEG 1.0f
@@ -624,6 +625,126 @@ uint8_t AppArmFlowBuildPickStaging(float target_x_mm, float target_y_mm,
     return 1u;
 }
 
+static App_Arm_Advance_Reject_Reason_e AppArmFlowAdvanceRejectReason(
+    const Arm_Path_Plan_Result_s *plan)
+{
+    if (plan == NULL || plan->status == ARM_PATH_PLAN_INVALID) {
+        return APP_ARM_ADVANCE_REJECT_INVALID;
+    }
+    if (plan->status == ARM_PATH_PLAN_SAMPLE_CAPACITY) {
+        return APP_ARM_ADVANCE_REJECT_SAMPLE_CAPACITY;
+    }
+    if ((plan->failed_check_mask &
+         ARM_PATH_PREFLIGHT_FAIL_TOOL_PITCH) != 0u) {
+        return APP_ARM_ADVANCE_REJECT_TOOL_PITCH;
+    }
+    if ((plan->failed_check_mask &
+         ARM_PATH_PREFLIGHT_FAIL_WORKSPACE) != 0u) {
+        return APP_ARM_ADVANCE_REJECT_WORKSPACE;
+    }
+    if ((plan->failed_check_mask &
+         ARM_PATH_PREFLIGHT_FAIL_JOINT_STEP) != 0u) {
+        return APP_ARM_ADVANCE_REJECT_CONTINUITY;
+    }
+    if ((plan->failed_check_mask &
+         (ARM_PATH_PREFLIGHT_FAIL_JOINT_LIMIT |
+          ARM_PATH_PREFLIGHT_FAIL_AUTO_REGION)) != 0u) {
+        return APP_ARM_ADVANCE_REJECT_JOINT_LIMIT;
+    }
+    return APP_ARM_ADVANCE_REJECT_IK;
+}
+
+static void AppArmFlowStoreAdvancePlanResult(
+    App_Arm_Advance_Result_s *result,
+    const Arm_Path_Plan_Result_s *plan)
+{
+    result->planner_status = (uint32_t)plan->status;
+    result->ik_status = (uint32_t)plan->ik_status;
+    result->workspace_safety_result =
+        (uint32_t)plan->workspace_safety_result;
+    result->failed_check_mask = plan->failed_check_mask;
+    result->failed_sample = plan->failed_sample;
+    result->failed_center_mm[0] = plan->failed_center_mm.x_mm;
+    result->failed_center_mm[1] = plan->failed_center_mm.y_mm;
+    result->failed_center_mm[2] = plan->failed_center_mm.z_mm;
+}
+
+uint8_t AppArmFlowSelectReachablePickAdvance(
+    App_Arm_Pick_Target_s *target, float advance_sign,
+    float requested_advance_mm, float sample_step_mm,
+    App_Arm_Advance_Result_s *result)
+{
+    App_Arm_Pick_Staging_s staging;
+    Arm_Path_Advance_Request_s advance_request;
+    Arm_Path_Advance_Result_s advance_result;
+    float step_count;
+
+    if (result == NULL) {
+        return 0u;
+    }
+    memset(result, 0, sizeof(*result));
+    result->requested_mm = requested_advance_mm;
+    result->reject_reason = APP_ARM_ADVANCE_REJECT_INVALID;
+    if (target == NULL || target->approach_valid == 0u ||
+        !isfinite(advance_sign) || fabsf(fabsf(advance_sign) - 1.0f) >
+            0.001f ||
+        !isfinite(requested_advance_mm) || requested_advance_mm <= 0.0f ||
+        !isfinite(sample_step_mm) || sample_step_mm <= 0.0f ||
+        !isfinite(target->approach_x_mm) ||
+        !isfinite(target->approach_y_mm) ||
+        !isfinite(target->approach_z_mm) ||
+        !isfinite(target->tool_pitch_deg)) {
+        return 0u;
+    }
+    step_count = requested_advance_mm / sample_step_mm;
+    if (!isfinite(step_count) ||
+        fabsf(step_count - floorf(step_count + 0.5f)) > 0.0001f) {
+        return 0u;
+    }
+    if (ArmTrajectoryIsBusy()) {
+        result->reject_reason = APP_ARM_ADVANCE_REJECT_BUSY;
+        return 0u;
+    }
+    if (!AppArmFlowBuildPickStaging(
+            target->approach_x_mm, target->approach_y_mm, &staging)) {
+        return 0u;
+    }
+
+    memset(&advance_request, 0, sizeof(advance_request));
+    memcpy(advance_request.staging_q_deg, staging.q_deg,
+           sizeof(advance_request.staging_q_deg));
+    advance_request.approach_center_mm.x_mm = target->approach_x_mm;
+    advance_request.approach_center_mm.y_mm = target->approach_y_mm;
+    advance_request.approach_center_mm.z_mm = target->approach_z_mm;
+    advance_request.tool_pitch_deg = target->tool_pitch_deg;
+    advance_request.advance_sign = advance_sign;
+    advance_request.requested_advance_mm = requested_advance_mm;
+    advance_request.sample_step_mm = sample_step_mm;
+    advance_request.safety_profile = ARM_CARTESIAN_SAFETY_AC_SIDE_PICK;
+    if (!ArmTrajectorySelectReachableToolCenterAdvance(
+            &advance_request, &advance_result)) {
+        result->approach_failed = advance_result.approach_failed;
+        AppArmFlowStoreAdvancePlanResult(
+            result, &advance_result.plan_result);
+        result->reject_reason = advance_result.approach_failed != 0u ?
+            APP_ARM_ADVANCE_REJECT_APPROACH :
+            AppArmFlowAdvanceRejectReason(&advance_result.plan_result);
+        return 0u;
+    }
+
+    target->x_mm = target->approach_x_mm;
+    target->y_mm = target->approach_y_mm +
+        advance_sign * advance_result.selected_advance_mm;
+    target->z_mm = target->approach_z_mm;
+    result->selected_mm = advance_result.selected_advance_mm;
+    result->reject_reason = APP_ARM_ADVANCE_REJECT_NONE;
+    AppArmFlowStoreAdvancePlanResult(
+        result, advance_result.advance_limited != 0u ?
+            &advance_result.limiting_plan_result :
+            &advance_result.plan_result);
+    return 1u;
+}
+
 static uint8_t AppArmFlowBuildActivePickStaging(
     App_Arm_Pick_Staging_s *staging)
 {
@@ -874,11 +995,10 @@ static uint8_t AppArmFlowTransferPathWithinLimits(
 }
 
 /**
- * AC快速放置：抓取后只要求先朝脱离waypoint运动并完成抬高校验，
- * 然后在同一条关节route里直接转到后方release。这个脱离点只用于
- * 避免底座旋转时扫到后方栏框，不再要求完整到达safe_q_deg。
+ * AC抓后先独立到达抬升waypoint。普通关节命令锁存动作开始时的
+ * ID1相对角；只有该命令完成后，状态机才允许提交释放俯仰和后转命令。
  */
-static uint8_t AppArmFlowSubmitTransferClearanceToRelease(uint32_t now_ms)
+static uint8_t AppArmFlowSubmitTransferClearance(uint32_t now_ms)
 {
     Arm_Joint_Command_s command;
     Arm_Command_Result_e result;
@@ -889,26 +1009,17 @@ static uint8_t AppArmFlowSubmitTransferClearanceToRelease(uint32_t now_ms)
                        (uint32_t)ARM_COMMAND_PREFLIGHT_FAILED, now_ms);
         return 0u;
     }
-    (void)relative_pitch_deg;
     memset(&command, 0, sizeof(command));
     command.command_id = AppArmCommandIdNext();
     command.move_type = ARM_MOVE_LINEAR;
-    memcpy(command.q_deg, app_place_profile.release_q_deg,
+    memcpy(command.q_deg, app_place_profile.transfer_waypoint_q_deg,
            sizeof(command.q_deg));
-    command.waypoint_valid = app_place_profile.transfer_waypoint_valid;
-    if (command.waypoint_valid != 0u) {
-        memcpy(command.waypoint_q_deg,
-               app_place_profile.transfer_waypoint_q_deg,
-               sizeof(command.waypoint_q_deg));
-    }
-    command.tool_relative_pitch_valid = 1u;
-    command.tool_relative_pitch_deg =
-        app_place_profile.release_tool_relative_pitch_deg;
+    command.waypoint_valid = 0u;
+    command.tool_relative_pitch_valid = 0u;
     memcpy(g_app_arm_pick_place_test_debug.target_q_deg, command.q_deg,
            sizeof(command.q_deg));
     g_app_arm_pick_place_test_debug.pitch_target_deg =
-        ArmToolSmallLinkPitchFromJoint(command.q_deg) +
-        command.tool_relative_pitch_deg;
+        ArmToolSmallLinkPitchFromJoint(command.q_deg) + relative_pitch_deg;
     result = ArmSubmitJointCommand(&command);
     g_app_arm_pick_place_test_debug.active_command_id = command.command_id;
     g_app_arm_pick_place_test_debug.submit_result = (uint32_t)result;
@@ -1102,9 +1213,9 @@ static void AppArmFlowPollPlace(const Arm_Host_Status_s *host,
     switch (app_place_step) {
     case APP_ARM_PLACE_STEP_SUBMIT_TRANSFER:
         if (app_place_profile.transfer_path_constraints_enabled != 0u) {
-            if (AppArmFlowSubmitTransferClearanceToRelease(now_ms)) {
+            if (AppArmFlowSubmitTransferClearance(now_ms)) {
                 AppArmFlowSetPlaceStep(
-                    APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_PLACE, now_ms);
+                    APP_ARM_PLACE_STEP_WAIT_TRANSFER, now_ms);
             }
         } else if (AppArmFlowSubmitTransferViaWaypoint(now_ms)) {
             AppArmFlowSetPlaceStep(
@@ -1438,6 +1549,23 @@ uint8_t AppArmFlowBuildPickStaging(float target_x_mm, float target_y_mm,
     (void)target_x_mm;
     (void)target_y_mm;
     (void)staging;
+    return 0u;
+}
+
+uint8_t AppArmFlowSelectReachablePickAdvance(
+    App_Arm_Pick_Target_s *target, float advance_sign,
+    float requested_advance_mm, float sample_step_mm,
+    App_Arm_Advance_Result_s *result)
+{
+    (void)target;
+    (void)advance_sign;
+    (void)requested_advance_mm;
+    (void)sample_step_mm;
+    if (result != NULL) {
+        memset(result, 0, sizeof(*result));
+        result->requested_mm = requested_advance_mm;
+        result->reject_reason = APP_ARM_ADVANCE_REJECT_INVALID;
+    }
     return 0u;
 }
 

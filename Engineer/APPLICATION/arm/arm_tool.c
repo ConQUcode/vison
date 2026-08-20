@@ -693,7 +693,9 @@ static void ArmToolStartRelief(Arm_Gripper_Relief_Outcome_e outcome,
     g_arm_tool_debug.gripper_state = ARM_GRIPPER_RELIEVING;
     g_arm_tool_debug.gripper_target_state =
         outcome == ARM_GRIPPER_RELIEF_CONTACT ?
-        ARM_GRIPPER_HELD_CONTACT : ARM_GRIPPER_FAULT;
+        ARM_GRIPPER_HELD_CONTACT :
+        (outcome == ARM_GRIPPER_RELIEF_TIMEOUT ?
+         ARM_GRIPPER_FORCED_HELD : ARM_GRIPPER_FAULT);
     if (g_arm_tool_debug.init_state != ARM_TOOL_INIT_DONE) {
         g_arm_tool_debug.init_state = ARM_TOOL_INIT_RELIEVING;
     }
@@ -740,21 +742,27 @@ static uint8_t ArmToolUpdateStallWindow(uint32_t now_ms)
 static void ArmToolHandleReliefAttemptTimeout(uint32_t now_ms)
 {
     if (ArmToolQueueNextRelief(now_ms) == 0u) {
-        uint8_t contact_attempts_exhausted =
-            arm_gripper_relief_outcome == ARM_GRIPPER_RELIEF_CONTACT &&
+        uint8_t recoverable_close_exhausted =
+            (arm_gripper_relief_outcome == ARM_GRIPPER_RELIEF_CONTACT ||
+             (arm_gripper_relief_outcome == ARM_GRIPPER_RELIEF_TIMEOUT &&
+              g_arm_tool_debug.servo_feedback_valid[1] != 0u)) &&
             g_arm_tool_debug.gripper_relief_attempt_count >=
                 ARM_GRIPPER_RELIEF_MAX_ATTEMPTS;
 
         g_arm_tool_debug.gripper_jam_count++;
         g_arm_tool_debug.gripper_state =
-            contact_attempts_exhausted != 0u ?
+            recoverable_close_exhausted != 0u ?
                 ARM_GRIPPER_FORCED_HELD : ARM_GRIPPER_FAULT;
         g_arm_tool_debug.gripper_fault_latched =
-            contact_attempts_exhausted != 0u ? 0u : 1u;
-        if (contact_attempts_exhausted != 0u) {
+            recoverable_close_exhausted != 0u ? 0u : 1u;
+        if (recoverable_close_exhausted != 0u) {
             g_arm_tool_debug.gripper_forced_held_count++;
         }
-        g_arm_tool_debug.error_code = ARM_TOOL_ERROR_GRIPPER_STALL;
+        g_arm_tool_debug.error_code =
+            recoverable_close_exhausted != 0u &&
+            arm_gripper_relief_outcome == ARM_GRIPPER_RELIEF_TIMEOUT ?
+                ARM_TOOL_ERROR_SERVO_TIMEOUT :
+                ARM_TOOL_ERROR_GRIPPER_STALL;
         if (g_arm_tool_debug.init_state == ARM_TOOL_INIT_RELIEVING) {
             g_arm_tool_debug.init_state = ARM_TOOL_INIT_ERROR;
         }
@@ -869,6 +877,15 @@ static void ArmToolProcessRelief(uint32_t now_ms)
         g_arm_tool_debug.gripper_state = ARM_GRIPPER_HELD_CONTACT;
         g_arm_tool_debug.gripper_target_state = ARM_GRIPPER_HELD_CONTACT;
         g_arm_tool_debug.error_code = ARM_TOOL_ERROR_NONE;
+    } else if (arm_gripper_relief_outcome == ARM_GRIPPER_RELIEF_TIMEOUT) {
+        /*
+         * ID2仍有有效反馈但闭合较差时，完成一次卸力后按持果继续。
+         * 保留SERVO_TIMEOUT供Watch诊断；离线/发送/初始化故障仍走FAULT。
+         */
+        g_arm_tool_debug.gripper_state = ARM_GRIPPER_FORCED_HELD;
+        g_arm_tool_debug.gripper_target_state = ARM_GRIPPER_FORCED_HELD;
+        g_arm_tool_debug.gripper_fault_latched = 0u;
+        g_arm_tool_debug.gripper_forced_held_count++;
     } else if (arm_gripper_relief_outcome == ARM_GRIPPER_RELIEF_JAM) {
         g_arm_tool_debug.gripper_state = ARM_GRIPPER_JAMMED;
         g_arm_tool_debug.gripper_fault_latched = 1u;

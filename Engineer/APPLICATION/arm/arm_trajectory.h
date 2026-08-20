@@ -7,6 +7,7 @@
 #define __ARM_TRAJECTORY_H__
 
 #include "arm.h"
+#include "arm_path_planner.h"
 
 /** 初始化轨迹缓存和所有权状态。 */
 void ArmTrajectoryInit(void);
@@ -18,6 +19,16 @@ uint8_t ArmTrajectoryIsBusy(void);
 uint8_t ArmTrajectoryRealtimeActive(void);
 /** 取消轨迹并释放控制权，不负责解除机械臂硬故障。 */
 void ArmTrajectoryCancel(void);
+/**
+ * 使用正式轨迹的CCM工作区执行只读工具中心单段预检，不启动运动。
+ * 仅允许在轨迹空闲时调用；结果和正式工具中心轨迹使用同一规划内核。
+ */
+uint8_t ArmTrajectoryPreflightToolCenterSegment(
+    const Arm_Path_Plan_Request_s *request,
+    Arm_Path_Plan_Result_s *result);
+uint8_t ArmTrajectorySelectReachableToolCenterAdvance(
+    const Arm_Path_Advance_Request_s *request,
+    Arm_Path_Advance_Result_s *result);
 Arm_Motion_Result_e ArmTrajectoryMoveJoint(const float target_q_deg[3]);
 Arm_Motion_Result_e ArmTrajectoryMoveJointWithRelativeToolPitch(
     const float target_q_deg[3],

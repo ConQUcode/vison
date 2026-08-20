@@ -204,6 +204,10 @@
 #define ARM_LINEAR_Q3_MAX_ACCEL_DEG_S2           800.0f
 #define ARM_LINEAR_SAMPLE_SPACING_MM               1.0f
 #define ARM_LINEAR_MAX_SAMPLES                   1536u
+/* 相邻笛卡尔IK样本允许的最大关节变化，规划器和执行审计共用。 */
+#define ARM_LINEAR_Q1_STEP_MAX_DEG                  5.0f
+#define ARM_LINEAR_Q2_STEP_MAX_DEG                  2.0f
+#define ARM_LINEAR_Q3_STEP_MAX_DEG                  2.0f
 
 /*
  * 夹爪中心工作区安全参数，单位均为mm。

@@ -1,5 +1,6 @@
 #include "arm_kinematics.h"
 #include "arm_config.h"
+#include "arm_path_planner.h"
 #include "arm_tool.h"
 #include "app_config.h"
 #include "app_fruit_task_config.h"
@@ -11,19 +12,15 @@
 
 #define HOST_PI 3.14159265358979323846f
 #define HOST_MAX_POINTS ARM_LINEAR_MAX_SAMPLES
-#define HOST_NONE 0xFFu
 #define HOST_INF 1.0e30f
-
-typedef struct {
-    Arm_Position_s center;
-    uint8_t count;
-    Arm_Tool_Center_IK_Candidate_s candidate[
-        ARM_TOOL_CENTER_IK_MAX_CANDIDATES];
-    uint8_t predecessor[ARM_TOOL_CENTER_IK_MAX_CANDIDATES];
-    float cost[ARM_TOOL_CENTER_IK_MAX_CANDIDATES];
-} Host_Point_s;
-
-static Host_Point_s points[HOST_MAX_POINTS];
+static float host_sample_q_deg[HOST_MAX_POINTS][3];
+static float host_sample_progress[HOST_MAX_POINTS];
+static uint8_t host_candidate_predecessor[HOST_MAX_POINTS]
+                                         [ARM_TOOL_CENTER_IK_MAX_CANDIDATES];
+static uint8_t host_candidate_count[HOST_MAX_POINTS];
+static uint8_t host_selected_candidate[HOST_MAX_POINTS];
+static Arm_Position_s host_route[ARM_TRAJECTORY_MAX_ROUTE_SEGMENTS + 1u];
+static uint8_t host_route_segment_count;
 
 static float wrap180(float value)
 {
@@ -32,68 +29,73 @@ static float wrap180(float value)
     return value;
 }
 
-static uint8_t continuous(const float a[3], const float b[3])
-{
-    return fabsf(wrap180(b[0] - a[0])) <= 5.0f &&
-           fabsf(b[1] - a[1]) <= 2.0f &&
-           fabsf(b[2] - a[2]) <= 2.0f;
-}
-
-static float transition_cost(const float a[3], const float b[3])
-{
-    float d0 = wrap180(b[0] - a[0]) / 5.0f;
-    float d1 = (b[1] - a[1]) / 2.0f;
-    float d2 = (b[2] - a[2]) / 2.0f;
-    return d0 * d0 + d1 * d1 + d2 * d2;
-}
-
 static uint8_t pitch_safe(const float q[3], float pitch_deg)
 {
-    float small_link_pitch = q[1] + (-180.0f - q[2]);
-    float relative_pitch = pitch_deg - small_link_pitch;
-    float position = ARM_TOOL_PITCH_NEUTRAL_POS +
-        ARM_TOOL_PITCH_DIRECTION * relative_pitch * 1000.0f /
-        ARM_TOOL_SERVO_RANGE_DEG;
-    return position >= ARM_TOOL_PITCH_SERVO_MIN_POS &&
-           position <= ARM_TOOL_PITCH_SERVO_MAX_POS;
+    return ArmToolPitchValidForPose(pitch_deg, q);
 }
 
-static uint8_t pose_safe(const Arm_Tool_Center_IK_Candidate_s *candidate,
-                         float pitch_deg)
+static int solve_segment(
+    const Arm_Position_s *start, const Arm_Position_s *target,
+    float pitch_deg, Arm_Cartesian_Safety_Profile_e safety_profile,
+    const float start_q[3], const char *csv_name, float final_q[3],
+    Arm_Path_Plan_Result_s *plan_result)
 {
-    return ArmJointPoseWithinSoftLimits(candidate->q_deg) &&
-           ArmAutoPoseIsSafe(candidate->q_deg) &&
-           pitch_safe(candidate->q_deg, pitch_deg) &&
-           !(candidate->tool_center_mm.x_mm >
-                 ARM_FRONT_BARRIER_TOOL_X_MARGIN_MM &&
-             candidate->q_deg[ARM_JOINT_SHOULDER] >
-                 ARM_FRONT_BARRIER_SHOULDER_Q2_MAX_DEG);
-}
+    Arm_Path_Plan_Request_s request;
+    Arm_Path_Plan_Workspace_s workspace;
+    Arm_Path_Plan_Result_s local_result;
+    FILE *csv = NULL;
 
-static uint16_t append_segment(Arm_Position_s start, Arm_Position_s end,
-                               uint16_t count)
-{
-    float dx = end.x_mm - start.x_mm;
-    float dy = end.y_mm - start.y_mm;
-    float dz = end.z_mm - start.z_mm;
-    uint16_t intervals = (uint16_t)ceilf(
-        sqrtf(dx * dx + dy * dy + dz * dz) /
-        ARM_LINEAR_SAMPLE_SPACING_MM);
-    if (intervals < 1u) intervals = 1u;
-    for (uint16_t i = 1u; i <= intervals; ++i) {
-        float ratio = (float)i / (float)intervals;
-        if (count >= HOST_MAX_POINTS) return 0u;
-        points[count].center.x_mm = start.x_mm + ratio * dx;
-        points[count].center.y_mm = start.y_mm + ratio * dy;
-        points[count].center.z_mm = start.z_mm + ratio * dz;
-        count++;
+    memset(&request, 0, sizeof(request));
+    request.start_center_mm = *start;
+    request.target_center_mm = *target;
+    memcpy(request.start_q_deg, start_q, sizeof(request.start_q_deg));
+    request.tool_pitch_deg = pitch_deg;
+    request.sample_spacing_mm = ARM_LINEAR_SAMPLE_SPACING_MM;
+    request.safety_profile = safety_profile;
+
+    workspace.sample_q_deg = host_sample_q_deg;
+    workspace.sample_progress = host_sample_progress;
+    workspace.candidate_predecessor = host_candidate_predecessor;
+    workspace.candidate_count = host_candidate_count;
+    workspace.selected_candidate = host_selected_candidate;
+    workspace.capacity = HOST_MAX_POINTS;
+    if (!ArmPathPlanToolCenterSegment(
+            &request, &workspace, &local_result)) {
+        fprintf(stderr,
+                "FAIL shared planner status=%d ik=%d mask=0x%08lx "
+                "sample=%u reachable=%.3f/%.3f center=(%.3f,%.3f,%.3f)\n",
+                (int)local_result.status, (int)local_result.ik_status,
+                (unsigned long)local_result.failed_check_mask,
+                local_result.failed_sample,
+                local_result.reachable_distance_mm,
+                local_result.requested_distance_mm,
+                local_result.failed_center_mm.x_mm,
+                local_result.failed_center_mm.y_mm,
+                local_result.failed_center_mm.z_mm);
+        if (plan_result != NULL) *plan_result = local_result;
+        return 4;
     }
-    return count;
+    if (csv_name != NULL) {
+        csv = fopen(csv_name, "w");
+        if (csv == NULL) return 2;
+        fprintf(csv, "sample,progress,q1,q2,q3\n");
+        for (uint16_t i = 0u; i < local_result.sample_count; ++i) {
+            fprintf(csv, "%u,%.9g,%.6f,%.6f,%.6f\n", i,
+                    host_sample_progress[i], host_sample_q_deg[i][0],
+                    host_sample_q_deg[i][1], host_sample_q_deg[i][2]);
+        }
+        fclose(csv);
+    }
+    if (final_q != NULL) {
+        memcpy(final_q, host_sample_q_deg[local_result.interval_count],
+               sizeof(request.start_q_deg));
+    }
+    if (plan_result != NULL) *plan_result = local_result;
+    return 0;
 }
 
-static uint16_t build_route(Arm_Position_s start, Arm_Position_s target)
+static uint8_t build_route(Arm_Position_s start, Arm_Position_s target)
 {
-    Arm_Position_s route[ARM_TRAJECTORY_MAX_ROUTE_SEGMENTS + 1u];
     float clearance = fmaxf(ARM_REAR_CROSSING_TOOL_Z_MM,
                             fmaxf(start.z_mm, target.z_mm));
     float start_radius = hypotf(start.x_mm, start.y_mm);
@@ -102,136 +104,58 @@ static uint16_t build_route(Arm_Position_s start, Arm_Position_s target)
     float target_sign = target.x_mm >= 0.0f ? 1.0f : -1.0f;
     uint8_t arc_steps = (uint8_t)(90.0f /
         ARM_REAR_BYPASS_ARC_STEP_DEG + 0.5f);
-    uint8_t segment_count = 0u;
-    uint16_t count = 1u;
-
-    route[0] = start;
-    route[++segment_count] = start;
-    route[segment_count].z_mm = clearance;
+    host_route_segment_count = 0u;
+    host_route[0] = start;
+    host_route[++host_route_segment_count] = start;
+    host_route[host_route_segment_count].z_mm = clearance;
     for (uint8_t step = 1u; step <= arc_steps; ++step) {
         float angle = step * ARM_REAR_BYPASS_ARC_STEP_DEG * HOST_PI / 180.0f;
-        route[++segment_count].x_mm = start_sign * start_radius * cosf(angle);
-        route[segment_count].y_mm = -start_sign * start_radius * sinf(angle);
-        route[segment_count].z_mm = clearance;
+        host_route[++host_route_segment_count].x_mm =
+            start_sign * start_radius * cosf(angle);
+        host_route[host_route_segment_count].y_mm =
+            -start_sign * start_radius * sinf(angle);
+        host_route[host_route_segment_count].z_mm = clearance;
     }
-    route[++segment_count].x_mm = 0.0f;
-    route[segment_count].y_mm = -target_sign * target_radius;
-    route[segment_count].z_mm = clearance;
+    host_route[++host_route_segment_count].x_mm = 0.0f;
+    host_route[host_route_segment_count].y_mm =
+        -target_sign * target_radius;
+    host_route[host_route_segment_count].z_mm = clearance;
     for (uint8_t step = 1u; step <= arc_steps; ++step) {
         float angle = (90.0f - step * ARM_REAR_BYPASS_ARC_STEP_DEG) *
                       HOST_PI / 180.0f;
-        route[++segment_count].x_mm = target_sign * target_radius * cosf(angle);
-        route[segment_count].y_mm = -target_sign * target_radius * sinf(angle);
-        route[segment_count].z_mm = clearance;
+        host_route[++host_route_segment_count].x_mm =
+            target_sign * target_radius * cosf(angle);
+        host_route[host_route_segment_count].y_mm =
+            -target_sign * target_radius * sinf(angle);
+        host_route[host_route_segment_count].z_mm = clearance;
     }
-    route[++segment_count] = target;
-    points[0].center = start;
-    for (uint8_t segment = 0u; segment < segment_count; ++segment) {
-        count = append_segment(route[segment], route[segment + 1u], count);
-        if (count == 0u) return 0u;
-    }
-    printf("segments=%u samples=%u\n", segment_count, count);
-    return count;
+    host_route[++host_route_segment_count] = target;
+    return host_route_segment_count;
 }
 
-static int solve_route(uint16_t count, float pitch_deg,
+static int solve_route(uint8_t segment_count, float pitch_deg,
                        const float start_q[3], const char *csv_name,
                        float final_q[3])
 {
-    FILE *csv = fopen(csv_name, "w");
     float seed[3] = {start_q[0], start_q[1], start_q[2]};
-    uint8_t selected[HOST_MAX_POINTS];
-    uint8_t best = HOST_NONE;
+    uint32_t total_samples = 1u;
 
-    if (csv == NULL) return 2;
-    fprintf(csv, "sample,x,y,z,candidate,q1,q2,q3,cost,predecessor\n");
-    for (uint16_t i = 1u; i < count; ++i) {
-        float direction_seed[3] = {seed[0], seed[1], seed[2]};
-        if (hypotf(points[i].center.x_mm, points[i].center.y_mm) <=
-            0.0001f) {
-            direction_seed[0] = atan2f(points[i - 1u].center.y_mm,
-                                       points[i - 1u].center.x_mm) *
-                                180.0f / HOST_PI;
-        }
-        Arm_IK_Status_e status = ArmInverseKinematicsToolCenterAll(
-            &points[i].center, pitch_deg, direction_seed,
-            points[i].candidate,
-            &points[i].count);
-        uint8_t reachable = 0u;
-        for (uint8_t c = 0u; c < ARM_TOOL_CENTER_IK_MAX_CANDIDATES; ++c) {
-            points[i].cost[c] = HOST_INF;
-            points[i].predecessor[c] = HOST_NONE;
-        }
-        if (status != ARM_IK_OK) {
-            printf("IK failure sample=%u center=(%.3f,%.3f,%.3f) status=%d\n",
-                   i, points[i].center.x_mm, points[i].center.y_mm,
-                   points[i].center.z_mm, status);
-            fclose(csv);
-            return 3;
-        }
-        for (uint8_t c = 0u; c < points[i].count; ++c) {
-            if (!pose_safe(&points[i].candidate[c], pitch_deg)) continue;
-            if (i == 1u) {
-                if (continuous(start_q, points[i].candidate[c].q_deg)) {
-                    points[i].cost[c] = transition_cost(
-                        start_q, points[i].candidate[c].q_deg);
-                    reachable++;
-                }
-            } else {
-                for (uint8_t p = 0u; p < points[i - 1u].count; ++p) {
-                    float cost;
-                    if (points[i - 1u].cost[p] >= HOST_INF ||
-                        !continuous(points[i - 1u].candidate[p].q_deg,
-                                    points[i].candidate[c].q_deg)) continue;
-                    cost = points[i - 1u].cost[p] + transition_cost(
-                        points[i - 1u].candidate[p].q_deg,
-                        points[i].candidate[c].q_deg);
-                    if (cost < points[i].cost[c]) {
-                        points[i].cost[c] = cost;
-                        points[i].predecessor[c] = p;
-                    }
-                }
-                if (points[i].cost[c] < HOST_INF) reachable++;
-            }
-            fprintf(csv, "%u,%.6f,%.6f,%.6f,%u,%.6f,%.6f,%.6f,%.9g,%u\n",
-                    i, points[i].center.x_mm, points[i].center.y_mm,
-                    points[i].center.z_mm, c,
-                    points[i].candidate[c].q_deg[0],
-                    points[i].candidate[c].q_deg[1],
-                    points[i].candidate[c].q_deg[2], points[i].cost[c],
-                    points[i].predecessor[c]);
-        }
-        if (reachable == 0u) {
-            printf("No continuous safe candidate sample=%u center=(%.3f,%.3f,%.3f) candidates=%u\n",
-                   i, points[i].center.x_mm, points[i].center.y_mm,
-                   points[i].center.z_mm, points[i].count);
-            fclose(csv);
-            return 4;
-        }
+    for (uint8_t segment = 0u; segment < segment_count; ++segment) {
+        Arm_Path_Plan_Result_s plan_result;
+        const char *segment_csv = segment + 1u == segment_count ?
+            csv_name : NULL;
+        int result = solve_segment(
+            &host_route[segment], &host_route[segment + 1u], pitch_deg,
+            ARM_CARTESIAN_SAFETY_NORMAL, seed, segment_csv, seed,
+            &plan_result);
+
+        if (result != 0) return result;
+        total_samples += plan_result.interval_count;
     }
-    for (uint8_t c = 0u; c < points[count - 1u].count; ++c) {
-        if (points[count - 1u].cost[c] < HOST_INF &&
-            (best == HOST_NONE || points[count - 1u].cost[c] <
-                                  points[count - 1u].cost[best])) best = c;
-    }
-    selected[count - 1u] = best;
-    for (uint16_t i = count - 1u; i > 1u; --i) {
-        selected[i - 1u] = points[i].predecessor[selected[i]];
-        if (selected[i - 1u] == HOST_NONE) {
-            fclose(csv);
-            return 5;
-        }
-    }
-    printf("PASS final q=(%.3f, %.3f, %.3f) cost=%.6f\n",
-           points[count - 1u].candidate[best].q_deg[0],
-           points[count - 1u].candidate[best].q_deg[1],
-           points[count - 1u].candidate[best].q_deg[2],
-           points[count - 1u].cost[best]);
-    if (final_q != NULL) {
-        memcpy(final_q, points[count - 1u].candidate[best].q_deg,
-               sizeof(points[count - 1u].candidate[best].q_deg));
-    }
-    fclose(csv);
+    printf("segments=%u samples=%lu PASS final q=(%.3f, %.3f, %.3f)\n",
+           segment_count, (unsigned long)total_samples,
+           seed[0], seed[1], seed[2]);
+    if (final_q != NULL) memcpy(final_q, seed, sizeof(seed));
     return 0;
 }
 
@@ -470,8 +394,9 @@ static int verify_ac_post_grip_transfer(void)
         0u, &max_abs_y_mm, NULL, NULL);
     if (result != 0) return result;
 
-    printf("PASS AC post-grip transfer: waypoint=(+/-90.0,%.1f,%.1f) "
-           "waypointZ=%.3f raiseZ=%.3f safe=(+/-90.0,%.1f,%.1f) "
+    printf("PASS AC post-grip transfer: ID1 locked until "
+           "waypoint=(+/-90.0,%.1f,%.1f), waypointZ=%.3f raiseZ=%.3f "
+           "safe=(+/-90.0,%.1f,%.1f) "
            "maxAbsY=%.3f limit=%.1f\n",
            APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q2_DEG,
            APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q3_DEG,
@@ -501,7 +426,7 @@ static int verify_bd_observation_side(
     Arm_Position_s staging_center = {0};
     float final_q_deg[3];
     uint16_t joint_intervals;
-    uint16_t count;
+    uint16_t linear_intervals;
     int result;
 
     if (target_center == NULL || side_name == NULL || csv_name == NULL) {
@@ -548,24 +473,40 @@ static int verify_bd_observation_side(
         staging_center = center;
     }
 
-    memset(points, 0, sizeof(points));
-    points[0].center = staging_center;
-    count = append_segment(staging_center, *target_center, 1u);
-    if (count == 0u) return 33;
-    for (uint16_t i = 0u; i < count; ++i) {
-        if (fabsf(points[i].center.y_mm) >
+    linear_intervals = (uint16_t)ceilf(
+        hypotf(target_center->x_mm - staging_center.x_mm,
+               target_center->y_mm - staging_center.y_mm) /
+        ARM_LINEAR_SAMPLE_SPACING_MM);
+    linear_intervals = (uint16_t)fmaxf(
+        (float)linear_intervals,
+        ceilf(fabsf(target_center->z_mm - staging_center.z_mm) /
+              ARM_LINEAR_SAMPLE_SPACING_MM));
+    if (linear_intervals < 1u) linear_intervals = 1u;
+    for (uint16_t i = 0u; i <= linear_intervals; ++i) {
+        float ratio = (float)i / (float)linear_intervals;
+        Arm_Position_s center = {
+            staging_center.x_mm + ratio *
+                (target_center->x_mm - staging_center.x_mm),
+            staging_center.y_mm + ratio *
+                (target_center->y_mm - staging_center.y_mm),
+            staging_center.z_mm + ratio *
+                (target_center->z_mm - staging_center.z_mm)
+        };
+
+        if (fabsf(center.y_mm) >
                 APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM + 0.001f) {
             fprintf(stderr,
                     "FAIL BD linear Y sample=%u y=%.3f limit=%.3f\n",
-                    i, points[i].center.y_mm,
+                    i, center.y_mm,
                     APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM);
             return 34;
         }
-        max_abs_y_mm = fmaxf(max_abs_y_mm,
-                             fabsf(points[i].center.y_mm));
-        min_z_mm = fminf(min_z_mm, points[i].center.z_mm);
+        max_abs_y_mm = fmaxf(max_abs_y_mm, fabsf(center.y_mm));
+        min_z_mm = fminf(min_z_mm, center.z_mm);
     }
-    result = solve_route(count, APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG,
+    host_route[0] = staging_center;
+    host_route[1] = *target_center;
+    result = solve_route(1u, APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG,
                          staging_q_deg, csv_name, final_q_deg);
     if (result != 0 ||
         fabsf(wrap180(final_q_deg[ARM_JOINT_BASE_YAW] -
@@ -700,7 +641,6 @@ static int verify_post_place_cycle_transition(void)
             APP_ARM_POSTURE_TEST_ADVANCE_X_MM, advance_y_mm[side],
             APP_ARM_POSTURE_TEST_ADVANCE_Z_MM
         };
-        uint16_t count;
         int result;
 
         if (!ArmForwardKinematicsToolCenter(
@@ -708,10 +648,9 @@ static int verify_post_place_cycle_transition(void)
                 &staging_center)) {
             return 28;
         }
-        memset(points, 0, sizeof(points));
-        points[0].center = staging_center;
-        count = append_segment(staging_center, approach_center, 1u);
-        result = solve_route(count, APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG,
+        host_route[0] = staging_center;
+        host_route[1] = approach_center;
+        result = solve_route(1u, APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG,
                              staging_q_deg, approach_csv[side],
                              approach_q_deg);
         if (result != 0) {
@@ -720,10 +659,9 @@ static int verify_post_place_cycle_transition(void)
             return 29;
         }
 
-        memset(points, 0, sizeof(points));
-        points[0].center = approach_center;
-        count = append_segment(approach_center, advance_center, 1u);
-        result = solve_route(count, APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG,
+        host_route[0] = approach_center;
+        host_route[1] = advance_center;
+        result = solve_route(1u, APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG,
                              approach_q_deg, advance_csv[side], NULL);
         if (result != 0) {
             fprintf(stderr, "FAIL staging advance side=%u result=%d\n",
@@ -879,6 +817,277 @@ static int verify_world_y_mirror(void)
     return 0;
 }
 
+static Arm_Path_Plan_Workspace_s host_planner_workspace(void)
+{
+    Arm_Path_Plan_Workspace_s workspace;
+
+    workspace.sample_q_deg = host_sample_q_deg;
+    workspace.sample_progress = host_sample_progress;
+    workspace.candidate_predecessor = host_candidate_predecessor;
+    workspace.candidate_count = host_candidate_count;
+    workspace.selected_candidate = host_selected_candidate;
+    workspace.capacity = HOST_MAX_POINTS;
+    return workspace;
+}
+
+static uint8_t run_advance_case_at_x(
+    float side_sign, float approach_x_mm, float approach_y_abs_mm,
+    Arm_Path_Advance_Result_s *result)
+{
+    Arm_Path_Advance_Request_s request;
+    Arm_Path_Plan_Workspace_s workspace = host_planner_workspace();
+
+    memset(&request, 0, sizeof(request));
+    request.staging_q_deg[0] =
+        side_sign * APP_ARM_PICK_BASE_AIM_MAX_ABS_Q1_DEG;
+    request.staging_q_deg[1] = APP_ARM_PICK_STAGING_Q2_DEG;
+    request.staging_q_deg[2] = APP_ARM_PICK_STAGING_Q3_DEG;
+    request.approach_center_mm.x_mm = approach_x_mm;
+    request.approach_center_mm.y_mm = side_sign * approach_y_abs_mm;
+    request.approach_center_mm.z_mm =
+        APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM;
+    request.tool_pitch_deg =
+        APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG;
+    request.advance_sign = side_sign;
+    request.requested_advance_mm =
+        APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM;
+    request.sample_step_mm =
+        APP_ARM_AC_CLOSED_LOOP_ADVANCE_SEARCH_STEP_MM;
+    request.safety_profile = ARM_CARTESIAN_SAFETY_AC_SIDE_PICK;
+    return ArmPathSelectReachableAdvance(&request, &workspace, result);
+}
+
+static uint8_t run_advance_case(
+    float side_sign, float approach_y_abs_mm,
+    Arm_Path_Advance_Result_s *result)
+{
+    return run_advance_case_at_x(
+        side_sign, -160.0f, approach_y_abs_mm, result);
+}
+
+static int verify_shared_advance_selection(void)
+{
+    const float approach_y_abs_mm[] = {400.0f, 537.0f, 565.0f};
+    const float expected_advance_mm[] = {30.0f, 29.0f, 1.0f};
+    Arm_Path_Advance_Result_s first_fallback;
+
+    memset(&first_fallback, 0, sizeof(first_fallback));
+    for (uint8_t side = 0u; side < 2u; ++side) {
+        float side_sign = side == 0u ? 1.0f : -1.0f;
+
+        for (uint8_t test = 0u; test < 3u; ++test) {
+            Arm_Path_Advance_Result_s result;
+
+            if (!run_advance_case(
+                    side_sign, approach_y_abs_mm[test], &result) ||
+                fabsf(result.selected_advance_mm -
+                       expected_advance_mm[test]) > 0.001f ||
+                result.approach_failed != 0u ||
+                result.plan_result.status != ARM_PATH_PLAN_OK ||
+                (test == 0u && result.advance_limited != 0u) ||
+                (test != 0u &&
+                 (result.advance_limited == 0u ||
+                  result.limiting_plan_result.status == ARM_PATH_PLAN_OK ||
+                  result.limiting_plan_result.failed_sample == 0u))) {
+                fprintf(stderr,
+                        "FAIL shared advance side=%.0f y=%.1f ok=%u "
+                        "selected=%.3f approach_failed=%u status=%d\n",
+                        side_sign, approach_y_abs_mm[test],
+                        result.selected_advance_mm > 0.0f ? 1u : 0u,
+                        result.selected_advance_mm,
+                        result.approach_failed,
+                        (int)result.plan_result.status);
+                return 50;
+            }
+            if (side == 0u && test == 1u) {
+                first_fallback = result;
+            }
+        }
+
+        {
+            Arm_Path_Advance_Result_s zero_result;
+
+            if (run_advance_case(side_sign, 566.0f, &zero_result) ||
+                zero_result.approach_failed != 0u ||
+                zero_result.plan_result.failed_sample != 1u ||
+                zero_result.plan_result.reachable_distance_mm >= 1.0f) {
+                fprintf(stderr,
+                        "FAIL shared zero-advance side=%.0f "
+                        "approach_failed=%u sample=%u reachable=%.3f\n",
+                        side_sign, zero_result.approach_failed,
+                        zero_result.plan_result.failed_sample,
+                        zero_result.plan_result.reachable_distance_mm);
+                return 51;
+            }
+        }
+    }
+
+    {
+        Arm_Path_Advance_Result_s repeated;
+        Arm_Path_Advance_Result_s approach_failure;
+        Arm_Path_Advance_Result_s field_result;
+        Arm_Path_Advance_Result_s near_pass;
+        Arm_Path_Advance_Result_s near_reject;
+
+        if (!run_advance_case(1.0f, 537.0f, &repeated) ||
+            repeated.selected_advance_mm !=
+                first_fallback.selected_advance_mm ||
+            repeated.plan_result.status != first_fallback.plan_result.status ||
+            repeated.limiting_plan_result.status !=
+                first_fallback.limiting_plan_result.status ||
+            repeated.limiting_plan_result.ik_status !=
+                first_fallback.limiting_plan_result.ik_status ||
+            repeated.limiting_plan_result.failed_check_mask !=
+                first_fallback.limiting_plan_result.failed_check_mask ||
+            repeated.limiting_plan_result.failed_sample !=
+                first_fallback.limiting_plan_result.failed_sample) {
+            fprintf(stderr, "FAIL shared advance repeated preflight mismatch\n");
+            return 52;
+        }
+        if (run_advance_case(1.0f, 900.0f, &approach_failure) ||
+            approach_failure.approach_failed == 0u ||
+            approach_failure.plan_result.status == ARM_PATH_PLAN_OK) {
+            fprintf(stderr,
+                    "FAIL shared approach diagnostic failed=%u status=%d\n",
+                    approach_failure.approach_failed,
+                    (int)approach_failure.plan_result.status);
+            return 53;
+        }
+        if (!run_advance_case_at_x(
+                -1.0f, 97.403122f, 415.169006f, &field_result) ||
+            fabsf(field_result.selected_advance_mm - 30.0f) > 0.001f ||
+            field_result.approach_failed != 0u ||
+            field_result.plan_result.status != ARM_PATH_PLAN_OK) {
+            fprintf(stderr,
+                    "FAIL field advance selected=%.3f approach=%u status=%d\n",
+                    field_result.selected_advance_mm,
+                    field_result.approach_failed,
+                    (int)field_result.plan_result.status);
+            return 74;
+        }
+        if (!run_advance_case_at_x(
+                1.0f, 0.0f, 275.0f, &near_pass) ||
+            fabsf(near_pass.selected_advance_mm - 30.0f) > 0.001f ||
+            near_pass.approach_failed != 0u ||
+            near_pass.plan_result.status != ARM_PATH_PLAN_OK ||
+            run_advance_case_at_x(
+                1.0f, 0.0f, 274.0f, &near_reject) ||
+            near_reject.approach_failed == 0u ||
+            near_reject.plan_result.status == ARM_PATH_PLAN_OK) {
+            fprintf(stderr,
+                    "FAIL near boundary pass=%.3f reject_approach=%u "
+                    "reject_status=%d\n",
+                    near_pass.selected_advance_mm,
+                    near_reject.approach_failed,
+                    (int)near_reject.plan_result.status);
+            return 75;
+        }
+    }
+
+    printf("PASS shared advance: mirrored 30/29/1mm, 0mm reject, field "
+           "30mm, near 275/274mm, diagnostics and repeat consistency\n");
+    return 0;
+}
+
+static int verify_planner_boundaries(void)
+{
+    const float outside_tolerance_deg = ARM_LIMIT_TOLERANCE_DEG + 0.01f;
+    float q_deg[3] = {0.0f, 90.0f, -90.0f};
+    uint16_t pitch_position;
+    Arm_Path_Plan_Request_s request;
+    Arm_Path_Plan_Result_s result;
+    Arm_Path_Plan_Workspace_s workspace = host_planner_workspace();
+
+    q_deg[0] = ARM_AUTO_Q1_MAX_DEG;
+    if (!ArmAutoPoseIsSafe(q_deg)) return 54;
+    q_deg[0] = ARM_AUTO_Q1_MAX_DEG + outside_tolerance_deg;
+    if (ArmAutoPoseIsSafe(q_deg) ||
+        !ArmAutoPoseIsSafeWithQ1Limits(
+            q_deg, ARM_AC_SIDE_PICK_Q1_MIN_DEG,
+            ARM_AC_SIDE_PICK_Q1_MAX_DEG)) return 55;
+    q_deg[0] = ARM_AC_SIDE_PICK_Q1_MAX_DEG;
+    if (!ArmAutoPoseIsSafeWithQ1Limits(
+            q_deg, ARM_AC_SIDE_PICK_Q1_MIN_DEG,
+            ARM_AC_SIDE_PICK_Q1_MAX_DEG)) return 56;
+    q_deg[0] = ARM_AC_SIDE_PICK_Q1_MAX_DEG + outside_tolerance_deg;
+    if (ArmAutoPoseIsSafeWithQ1Limits(
+            q_deg, ARM_AC_SIDE_PICK_Q1_MIN_DEG,
+            ARM_AC_SIDE_PICK_Q1_MAX_DEG)) return 57;
+    q_deg[0] = ARM_AUTO_Q1_MIN_DEG;
+    if (!ArmAutoPoseIsSafe(q_deg)) return 58;
+    q_deg[0] = ARM_AUTO_Q1_MIN_DEG - outside_tolerance_deg;
+    if (ArmAutoPoseIsSafe(q_deg) ||
+        !ArmAutoPoseIsSafeWithQ1Limits(
+            q_deg, ARM_AC_SIDE_PICK_Q1_MIN_DEG,
+            ARM_AC_SIDE_PICK_Q1_MAX_DEG)) return 59;
+
+    q_deg[0] = 0.0f;
+    q_deg[1] = ARM_AUTO_Q2_MIN_DEG;
+    if (!ArmAutoPoseIsSafe(q_deg)) return 60;
+    q_deg[1] = ARM_AUTO_Q2_MIN_DEG - outside_tolerance_deg;
+    if (ArmAutoPoseIsSafe(q_deg)) return 61;
+    q_deg[1] = ARM_AUTO_Q2_MAX_DEG;
+    if (!ArmAutoPoseIsSafe(q_deg)) return 62;
+    q_deg[1] = ARM_AUTO_Q2_MAX_DEG + outside_tolerance_deg;
+    if (ArmAutoPoseIsSafe(q_deg)) return 63;
+    q_deg[1] = 90.0f;
+    q_deg[2] = ARM_AUTO_Q3_MIN_DEG;
+    if (!ArmAutoPoseIsSafe(q_deg)) return 64;
+    q_deg[2] = ARM_AUTO_Q3_MIN_DEG - outside_tolerance_deg;
+    if (ArmAutoPoseIsSafe(q_deg)) return 65;
+    q_deg[2] = ARM_AUTO_Q3_MAX_DEG;
+    if (!ArmAutoPoseIsSafe(q_deg)) return 66;
+    q_deg[2] = ARM_AUTO_Q3_MAX_DEG + outside_tolerance_deg;
+    if (ArmAutoPoseIsSafe(q_deg)) return 67;
+
+    q_deg[2] = -90.0f;
+    if (!ArmToolPitchPositionForPose(
+            ARM_TOOL_PITCH_RELATIVE_MIN_DEG, 0.0f, &pitch_position) ||
+        pitch_position != ARM_TOOL_PITCH_SERVO_MAX_POS ||
+        !ArmToolPitchPositionForPose(
+            ARM_TOOL_PITCH_RELATIVE_MAX_DEG, 0.0f, &pitch_position) ||
+        pitch_position != ARM_TOOL_PITCH_SERVO_MIN_POS ||
+        ArmToolPitchPositionForPose(
+            ARM_TOOL_PITCH_RELATIVE_MIN_DEG - 0.01f,
+            0.0f, &pitch_position) ||
+        ArmToolPitchPositionForPose(
+            ARM_TOOL_PITCH_RELATIVE_MAX_DEG + 0.01f,
+            0.0f, &pitch_position)) return 68;
+
+    memset(&request, 0, sizeof(request));
+    request.start_q_deg[0] = 0.0f;
+    request.start_q_deg[1] = 80.0f;
+    request.start_q_deg[2] = -90.0f;
+    request.tool_pitch_deg = -15.0f;
+    request.sample_spacing_mm = 1.0f;
+    request.safety_profile = ARM_CARTESIAN_SAFETY_NORMAL;
+    if (!ArmForwardKinematicsToolCenter(
+            request.start_q_deg, request.tool_pitch_deg,
+            &request.start_center_mm)) return 69;
+    request.target_center_mm = request.start_center_mm;
+    request.target_center_mm.x_mm +=
+        (float)(ARM_LINEAR_MAX_SAMPLES - 1u);
+    if (ArmPathPlanToolCenterSegment(&request, &workspace, &result) ||
+        result.status == ARM_PATH_PLAN_SAMPLE_CAPACITY) return 70;
+    request.target_center_mm.x_mm += 1.0f;
+    if (ArmPathPlanToolCenterSegment(&request, &workspace, &result) ||
+        result.status != ARM_PATH_PLAN_SAMPLE_CAPACITY ||
+        result.workspace_safety_result !=
+            ARM_WORKSPACE_SAFETY_SAMPLE_CAPACITY) return 71;
+    request.target_center_mm = request.start_center_mm;
+    request.target_center_mm.x_mm = NAN;
+    if (ArmPathPlanToolCenterSegment(&request, &workspace, &result) ||
+        result.status != ARM_PATH_PLAN_INVALID) return 72;
+    request.target_center_mm = request.start_center_mm;
+    request.tool_pitch_deg = INFINITY;
+    if (ArmPathPlanToolCenterSegment(&request, &workspace, &result) ||
+        result.status != ARM_PATH_PLAN_INVALID) return 73;
+
+    printf("PASS planner boundaries: q1 normal/AC, q2/q3, ID1, "
+           "1536 samples and NaN/Inf\n");
+    return 0;
+}
+
 int main(void)
 {
     const float pitch_deg = -30.0f;
@@ -886,7 +1095,7 @@ int main(void)
     Arm_Position_s release = {-22.0f, 0.0f, 230.0f};
     Arm_Tool_Center_IK_Result_s start_ik;
     float seed[3] = {0.0f, 114.0f, -43.0f};
-    uint16_t count;
+    uint8_t segment_count;
     float release_q[3];
     int result;
 
@@ -902,17 +1111,22 @@ int main(void)
     result = verify_world_y_mirror();
     if (result != 0) return result;
 
+    result = verify_shared_advance_selection();
+    if (result != 0) return result;
+
+    result = verify_planner_boundaries();
+    if (result != 0) return result;
+
     memset(&start_ik, 0, sizeof(start_ik));
     if (ArmInverseKinematicsToolCenter(&pick, pitch_deg, seed, &start_ik) !=
         ARM_IK_OK) return 10;
-    count = build_route(pick, release);
-    result = solve_route(count, pitch_deg, start_ik.q_deg,
+    segment_count = build_route(pick, release);
+    result = solve_route(segment_count, pitch_deg, start_ik.q_deg,
                          "forward_candidates.csv", release_q);
     if (result != 0) return result;
 
-    memset(points, 0, sizeof(points));
-    count = build_route(release, pick);
-    result = solve_route(count, pitch_deg, release_q,
+    segment_count = build_route(release, pick);
+    result = solve_route(segment_count, pitch_deg, release_q,
                          "reverse_candidates.csv", NULL);
     return result;
 }

@@ -1,6 +1,6 @@
 # 参数位置和调参说明
 
-更新时间：2026-08-17
+更新时间：2026-08-20
 
 修改参数后需要重新编译。底盘和机械臂首次动作应架空测试；当前已实测
 方向符号不得凭直觉改动，每次只调整一个参数组。
@@ -16,11 +16,12 @@
 | AC/BD左观察点 | `q1=+90 deg / [0,+150,300] mm` | 当前闭环观察点，夹爪中心坐标 |
 | AC/BD右观察点 | `q1=-90 deg / [0,-150,300] mm` | 严格镜像保存并参与回放 |
 | BD当前同步过渡关节 | `[+90,90,-80] deg` | ID1相对-48deg，完整路径最低Z=77.557mm、最大 `|Y|=318.051 mm` |
-| BD路径Y限制 | `405 mm` | 只用于BD双侧离线回放，不影响AC的445mm边界 |
+| BD路径Y限制 | `405 mm` | 只用于BD双侧离线回放，不影响AC的455mm边界 |
 | BD观察俯仰 | `-58 deg` | 用户选定的向下观察角，完整路径已通过ID1检查 |
 | BD观察速度 | `150 mm/s` | 首次单点确认速度 |
-| AC闭环抓取固定Z/俯仰 | `Z=-105 mm / pitch=-15 deg` | ArmTarget换算后取X/Y，期望侧向推进30mm，并按1mm粒度降级到最大连续可达的正推进量 |
-| AC闭环近端钳位 | `270 mm / 最大欠距30 mm` | 当前侧距离240~270mm钳位到270mm，更近或侧别错误则拒绝 |
+| AC闭环抓取固定Z/俯仰 | `Z=-115 mm / pitch=-15 deg` | ArmTarget换算后取X/Y，期望侧向推进30mm，并按1mm粒度降级到最大连续可达的正推进量 |
+| AC闭环近端钳位 | `275 mm / 最大欠距30 mm` | 当前侧距离245~275mm钳位到275mm，更近或侧别错误则拒绝 |
+| AC抓后ID1延迟动作 | `Z至少抬高50 mm` | 第一段锁存当前ID1相对角，到达q2=75deg经过点后才改变ID1并转向后方 |
 | 右侧MG995 | `PI6 / TIM8_CH2 / 1500 us` | 舵机90deg，对应摄像头0deg |
 | 左侧MG995 | `PI7 / TIM8_CH3 / 1500 us` | 舵机90deg，对应摄像头0deg |
 | AC左侧定姿路径 | `[0,380,-140] -> [0,440,-140] mm` | 使用A左放置profile |
@@ -191,16 +192,33 @@ NaN/Inf仍拒绝。建议上位机至少10Hz持续刷新；300ms未刷新时底�
 单位方向。固件会拒绝非正交矩阵和行列式不是`+1`的镜像矩阵。
 
 当前`ArmTarget`到达时调用`UpperControllerCaptureCameraPose(capture_id, now_ms)`
-刷新姿态，再执行相机点到基座点换算。闭环抓取固定`Z=-105mm`、世界绝对俯仰
-`-15deg`；变换后的Y按当前侧计算距离，240~270mm钳位到270mm，欠距超过30mm
-或坐标落在错误侧时回调失败。钳位后从接近点向当前侧期望推进30mm，按1mm
-采样检查AC专用q1范围、q2/q3自动限位和ID1俯仰范围；若30mm不可达则执行
-最大连续可达的正推进量（例如20mm），只有连1mm都不可达时才回调失败。
-Watch查看`arm_target_approach_y_raw_mm`、`arm_target_approach_y_command_mm`、
+刷新姿态，再执行相机点到基座点换算。闭环抓取固定`Z=-115mm`、世界绝对俯仰
+`-15deg`；变换后的Y按当前侧计算距离，245~275mm钳位到275mm，欠距超过30mm
+或坐标落在错误侧时回调失败。
+
+钳位后先用正式工具中心规划器检查`staging -> approach`完整路径，再从接近点
+向当前侧请求推进30mm。两段都按1mm采样，并使用正式轨迹相同的全部IK候选、
+候选连续性、AC专用q1范围、q2/q3自动限位、ID1俯仰、FK回代和工作区规则。
+若30mm不可达，则按最大连续可达前缀重新规划并执行`29..1mm`中的最大值；
+approach路径不可达或连1mm都不可达时才回调失败。协议桥不再直接调用IK或
+ID1可达性接口，也不会出现旧预检接受后因正式轨迹规则不同而再次拒绝。
+
+Watch先查看`arm_target_approach_y_raw_mm`、`arm_target_approach_y_command_mm`、
 `arm_target_near_y_shortfall_mm`、`arm_target_near_y_clamped`、
-`arm_target_advance_requested_mm`、`arm_target_advance_selected_mm`、
-`arm_target_advance_reduced`及对应钳位/降级/拒绝计数。详细坐标系和离线测试见
-`docs/CAMERA_TARGET_TRANSFORM.md`。
+`arm_target_advance_requested_mm`、`arm_target_advance_selected_mm`和
+`arm_target_advance_reduced`。拒绝时再查看：
+
+- `arm_target_advance_reject_reason`：区分参数/忙、IK、ID1俯仰、工作区、候选连续性和样本容量；
+- `arm_target_advance_approach_failed`：为1表示失败发生在staging到接近点，而不是接近点后的推进段；
+- `arm_target_advance_planner_status`、`arm_target_advance_ik_status`、`arm_target_advance_workspace_result`：底层规划、IK及工作区状态；
+- `arm_target_advance_failed_check_mask`：bit0 IK、bit1 FK误差、bit2关节限位、bit3自动区域、bit4 ID1俯仰、bit5工作区、bit6候选不连续；
+- `arm_target_advance_failed_sample`、`arm_target_advance_failed_center_mm`：首个失败采样点和工具中心坐标。
+
+推进发生降级但仍成功时，`arm_target_advance_reject_reason=NONE`；其余失败诊断
+保留原始30mm请求的首个限制点，而不是被截短后成功计划覆盖。
+
+详细坐标系和离线测试见`docs/CAMERA_TARGET_TRANSFORM.md`。HOST回放直接链接
+`arm_path_planner.c`，不得在测试中复制`pose_safe`、候选代价或路径动态规划。
 
 ## 机械臂点位和放置 profile
 
@@ -222,19 +240,19 @@ Watch查看`arm_target_approach_y_raw_mm`、`arm_target_approach_y_command_mm`�
 `+/-90 deg` 侧的抓取坐标；底层关节速度和加速度安全上限保持不变。
 不要直接把预对准改为 `+/-90`，否则可能跨过 `X=0` 并触发跨区保护。
 
-点1放置：`[90,27.3,-62.7] -> [90,90,-100] -> +135 -> +178 -> [178,120,-70]`；
-点2放置：`[-90,27.3,-62.7] -> [-90,90,-100] -> -135 -> -178 -> [-178,120,-70]`。
-第一组为抓取后的收拢waypoint。当前AC终点按锁存ID1相对俯仰逐1deg回放，
-第一段工具中心从`Z=-140`单调抬到`-120.007 mm`，抬高`19.993 mm`；
-完整两段名义峰值为`|Y|=440.000 mm`，profile运行时上限为445mm，保留5mm
-实机反馈误差余量。
+点1放置：先锁存ID1到`[90,75,-62.7]`，到位后才改变ID1并经
+`[90,90,-100] -> +135 -> +178 -> [178,120,-70]`；点2严格镜像为负q1。
+第一组是抓取后的独立抬升waypoint。提交前按实际三轴和ID1反馈逐1deg回放，
+要求工具中心到该点的Z净上升不少于50mm，且这一整条命令保持ID1相对小臂角
+不变；命令完整到位后，状态机才提交释放ID1俯仰和底座后转。
+当前固定测试起点下经过点工具中心约`Z=191.370mm`，运行时Y上限为455mm。
 该上限同时写入`App_Arm_Place_Profile_s.transfer_path_y_max_mm`。放置首段提交前
 按实际三轴和ID1反馈重算；观察`g_app_arm_pick_place_test_debug`中的
 `transfer_path_y_check_passed`、`transfer_path_peak_abs_y_mm`和
 `transfer_path_y_limit_mm`，以及`transfer_path_z_check_passed`、
 `transfer_path_start_z_mm`、`transfer_path_waypoint_z_mm`和
 `transfer_path_z_raise_mm`确认运行时预检结果。
-上述waypoint、445mm上限和`20+/-2 mm`抬高约束只由
+上述waypoint、455mm上限和`至少50 mm`抬高约束只由
 `AppArmSidePickPlacePrepare()`写入AC单侧profile副本。正式A区公共profile的
 `transfer_waypoint_valid`和`transfer_path_constraints_enabled`均保持0，
 仍直接进入原安全姿态；调AC参数时不要把它们写回公共profile。
@@ -272,7 +290,7 @@ profile中的同一q1，不再用定向旋转完成后的瞬时反馈重锁定�
 | `ARM_TOOL_PITCH_AXIS_TO_CENTER_MM` | 117 mm | ID1轴到夹爪中心 |
 | `ARM_SAFE_Q1/Q2/Q3_DEG` | `[0,90,-60]` | HOME关节目标 |
 | `ARM_Q1_SOFT_MIN/MAX_DEG` | `[-180,180]` | 关节命令软限位 |
-| `ARM_Q2_SOFT_MIN/MAX_DEG` | `[3,180]` | 大臂普通运动软限位；`0..3 deg`仅允许单向脱困 |
+| `ARM_Q2_SOFT_MIN/MAX_DEG` | `[0,180]` | 大臂普通运动和自动轨迹软限位 |
 | `ARM_Q3_SOFT_MIN/MAX_DEG` | `[-190,-35]` | 小臂软限位 |
 
 连杆长度必须测转轴中心到转轴中心，不要用 HOME 坐标补偿杆长误差。
@@ -300,9 +318,10 @@ profile中的同一q1，不再用定向旋转完成后的瞬时反馈重锁定�
 | `ARM_GRIPPER_RELIEF_MAX_ATTEMPTS` | 4 | 最多回退4次，累计最多40 |
 | `ARM_GRIPPER_RELIEF_ATTEMPT_TIMEOUT_MS` | 400 ms | 单次回退等待上限 |
 
-4 次均不能跟随时进入 `ARM_GRIPPER_FORCED_HELD` 并继续业务，不再进入会
-卡死采摘任务的夹爪故障。这个状态只表示“容错按抓住处理”，不证明一定
-抓到水果。ID2在张开或回等待位期间若反馈短时失效，会保持原目标并等待最多
+检测到接触后的4次回退均不能跟随，或ID2在线且反馈有效但闭爪超过1500ms，
+都会进入 `ARM_GRIPPER_FORCED_HELD` 并继续业务，不再进入会卡死采摘任务的
+夹爪故障；超时降级仍保留 `ARM_TOOL_ERROR_SERVO_TIMEOUT` 供Watch定位。这个
+状态只表示“容错按抓住处理”，不证明一定抓到水果。ID2在张开或回等待位期间若反馈短时失效，会保持原目标并等待最多
 `500 ms`；只有新鲜反馈恢复且确认到位后才继续放置，持续失联或原动作总截止
 时间到期仍会使机械臂流程失败，不会把“无反馈”误判为释放成功。
 
@@ -331,9 +350,32 @@ status 0进入左观察、1进入右观察、2当前无效；callback_id 2的sta
 `-45deg`或向上`+45deg`，PWM提交后等待500ms再回完成。夹爪和AC闭环任务都按真实
 命令终态回调，不用固定延时冒充到位。`VelocityCommand`已接连续底盘接口。
 `ArmTarget`收到后执行相机点到基座点换算；满足观察保持和机械臂空闲后，
-以固定`Z=-105mm`和固定俯仰`-15deg`调用`AppArmFlowStartPick()`，
+以固定`Z=-115mm`和固定俯仰`-15deg`调用`AppArmFlowStartPick()`，
 并用callback_id 3报告抓取执行中/完成；成功
 启动后会消费观察状态，下一次抓取必须重新观察。新协议已删除`FruitDetection`。
+
+`task_id=6,status=0`是机械臂HOME/reset。收到合法命令后不再因为此前ArmTarget
+失败而阻断。桥会先清理活动业务状态并取消当前命令，随后严格按完整上电
+初始化顺序执行：保持q1和ID1当前相对角，先同步将q2/q3回到
+`ARM_SAFE_Q2/Q3_DEG`；再保持q2/q3和ID1，将q1回到`ARM_SAFE_Q1_DEG`；
+主臂全部到位后，依次将ID1回相对小臂`0deg`中位、ID2回READY张开位450。
+callback_id 6依次报告执行中和完成，任一步拒绝或故障则保留失败状态。
+reset会清理当前`g_arm_target_debug`和抓放运行态，但不会清理
+`g_upper_arm_reject_diagnostic`。
+
+Watch中的`reset_home_state`直接显示当前提交/等待阶段；
+`reset_home_completed_mask`记录已经完成的阶段：bit0取消、bit1 q2+q3、bit2 q1、
+bit3 ID1、bit4 ID2，全部完成时为`0x1F`。reset失败时，独立拒绝快照中的
+同名字段会锁存失败发生阶段和此前已完成位，不会被运行态清理覆盖。
+
+机械臂拒绝后优先在Watch查看`g_upper_arm_reject_diagnostic`：`valid=1`表示已有
+快照，`count`每次失败递增，`source`区分ArmTarget与reset回HOME自身失败，
+`stage`记录业务拒绝阶段；reset自身失败应查看`reset_home_state`和
+`reset_home_completed_mask`。`flow_diagnostic_valid=1`时，`pick_step/place_step`、
+`failure_source`、命令结果、运动故障和预检失败点均属于本次运行中失败；为0时
+表示失败发生在抓放流程启动前，应重点查看`advance_reject_reason`、
+`advance_planner_status`和`advance_approach_failed`。该快照只有下一次机械臂失败
+或整机重新初始化才会覆盖/清零，因此上位机随后发HOME不会妨碍赛后定位。
 
 `task_id=5`的status 0/1/2/3对应当前区域A/B/C/D，接收时立即幂等保存，
 下一次桥任务再发送`callback_id=5`的执行中/完成，保证生成FSM先自动回可靠ACK；

@@ -65,8 +65,8 @@ typedef enum {
 /** 显式profile放置子流程步骤；旧编号尽量保持稳定，执行顺序看状态机。 */
 typedef enum {
     APP_ARM_PLACE_STEP_IDLE = 0,
-    APP_ARM_PLACE_STEP_SUBMIT_TRANSFER,        /* 经受约束过渡点收拢到安全姿态。 */
-    APP_ARM_PLACE_STEP_WAIT_TRANSFER,
+    APP_ARM_PLACE_STEP_SUBMIT_TRANSFER,        /* ID1保持不动，独立抬升到过渡点。 */
+    APP_ARM_PLACE_STEP_WAIT_TRANSFER,          /* 到位后才允许ID1动作和后转。 */
     APP_ARM_PLACE_STEP_SUBMIT_ROTATE_TO_PLACE, /* 左逆时针/右顺时针转到后方。 */
     APP_ARM_PLACE_STEP_WAIT_ROTATE_TO_PLACE,
     APP_ARM_PLACE_STEP_SUBMIT_RELEASE_POSE,    /* 释放关节角+ID1相对俯仰联合命令。 */
@@ -117,6 +117,32 @@ typedef struct {
     float approach_y_mm;
     float approach_z_mm;
 } App_Arm_Pick_Target_s;
+
+typedef enum {
+    APP_ARM_ADVANCE_REJECT_NONE = 0,
+    APP_ARM_ADVANCE_REJECT_INVALID,
+    APP_ARM_ADVANCE_REJECT_BUSY,
+    APP_ARM_ADVANCE_REJECT_APPROACH,
+    APP_ARM_ADVANCE_REJECT_IK,
+    APP_ARM_ADVANCE_REJECT_JOINT_LIMIT,
+    APP_ARM_ADVANCE_REJECT_TOOL_PITCH,
+    APP_ARM_ADVANCE_REJECT_WORKSPACE,
+    APP_ARM_ADVANCE_REJECT_CONTINUITY,
+    APP_ARM_ADVANCE_REJECT_SAMPLE_CAPACITY
+} App_Arm_Advance_Reject_Reason_e;
+
+typedef struct {
+    float requested_mm;
+    float selected_mm;
+    uint8_t approach_failed;
+    App_Arm_Advance_Reject_Reason_e reject_reason;
+    uint32_t planner_status;
+    uint32_t ik_status;
+    uint32_t workspace_safety_result;
+    uint32_t failed_check_mask;
+    uint16_t failed_sample;
+    float failed_center_mm[3];
+} App_Arm_Advance_Result_s;
 
 /**
  * 工具中心抓取前的统一关节准备姿态。q1由目标XY方位计算并限幅，q2/q3
@@ -220,6 +246,15 @@ extern App_Arm_Pick_Place_Test_Debug_s g_app_arm_pick_place_test_debug;
  */
 uint8_t AppArmFlowBuildPickStaging(float target_x_mm, float target_y_mm,
                                    App_Arm_Pick_Staging_s *staging);
+
+/**
+ * 用正式轨迹规划器选择Y方向最大连续可达推进量并更新target终点。
+ * 不提交运动；返回0时result给出明确拒绝原因。
+ */
+uint8_t AppArmFlowSelectReachablePickAdvance(
+    App_Arm_Pick_Target_s *target, float advance_sign,
+    float requested_advance_mm, float sample_step_mm,
+    App_Arm_Advance_Result_s *result);
 
 /** 清零两个子流程和Watch状态；上电初始化时调用一次。 */
 void AppArmFlowInit(void);

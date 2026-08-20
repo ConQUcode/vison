@@ -1,5 +1,48 @@
 # Findings
 
+## Phase 51 staged upper-controller HOME
+
+- Production full boot explicitly performs `q2+q3 synchronous HOME -> q1 HOME -> ArmToolInit(ID1/ID2)`. Coupling is enabled before the q2/q3 motion and the tool initialization is deferred until all three DM axes are home.
+- The current task 6 reset state machine already cancels active motion first, but then submits one joint command containing q1/q2/q3 plus an ID1 relative-pitch target. This does not preserve the boot ordering and does not explicitly restore ID2.
+- Phase 51 should retain the existing asynchronous command/host-status pattern, callback 6 semantics, reset failure latch, and no-heap behavior while splitting HOME into explicit stages.
+- Normal joint trajectories already latch the current ID1 angle relative to the small link when `tool_relative_pitch_valid=0`. Therefore the q2/q3 and q1 stages keep the ID1 servo control position instead of compensating to hold world pitch.
+- At the HOME joint pose, `ArmToolSmallLinkPitchFromJoint([0,110,-40])` is `-30deg`; commanding ID1 absolute pitch to this value restores relative pitch `0deg`/neutral position. ID2 should then use the same `GRIPPER_READY` action as the full boot sequence.
+- Reset rejection diagnostics need the reset state and a completed-stage mask; the generic ArmTarget stage alone cannot identify whether staged HOME failed during cancel, q2/q3, q1, ID1, or ID2.
+- Keil ArmCC 5.06u7 accepts the staged state machine with no warnings. Final image is Code=143924, RO-data=3660, RW-data=1432 and ZI-data=137560; the existing 132-byte rejection snapshot remains in normal `.bss`.
+
+## Phase 50 HOME/reset and latched rejection diagnostics
+
+- The HOME/reset implementation already had a complete cancel-then-HOME asynchronous state machine. The actual blockage was the temporary `UPPER_DEBUG_BLOCK_HOME_AFTER_ARM_FAILURE_ENABLE` branch in the protocol receive path.
+- Re-enabling HOME without another change would erase `g_arm_target_debug.stage` in `UpperControllerClearTaskStateForReset()`, so current state and historical failure evidence must remain separate.
+- `g_upper_arm_reject_diagnostic` now snapshots the ArmTarget stage, flow step and failure source, command/motion/tool faults, path preflight failure point, AC advance rejection details, and the public arm-host terminal status before live state is cleared.
+- `flow_diagnostic_valid` prevents pre-flow failures such as AC advance rejection from presenting stale `g_app_arm_pick_place_test_debug` fields as current evidence. In that case the latched `advance_*` fields are authoritative.
+- A failure of the reset cancel/HOME sequence also creates a snapshot with source `UPPER_ARM_REJECT_SOURCE_RESET_HOME` and records the submitted bridge command ID/result plus host terminal status.
+- HOME/reset never clears the latched snapshot. A later failure replaces its detailed fields and increments `count`; bridge initialization is the only automatic clear.
+- Keil MAP confirms the snapshot occupies 132 bytes in normal `.bss`. The complete Phase 50 image uses Code=143232, RO-data=3648, RW-data=1432 and ZI-data=137560 with no compiler or linker warnings.
+
+## Phase 49 shared arm path preflight
+
+- Platform is STM32F407 + Keil; the task is application-layer kinematics/path planning, not startup, RTOS, driver, or protocol transport.
+- Core FK/IK is relatively contained and already enumerates candidates, filters automatic joint limits, and verifies tool-center FK round trips.
+- Production path validation uses all-candidate dynamic programming, joint continuity, tool pitch, and workspace checks in `arm_trajectory.c`.
+- AC advance fallback in `upper_controller_bridge.c` currently uses greedy point IK plus pitch checks only, so it can disagree with production trajectory preflight.
+- HOST replay recompiles production kinematics but duplicates production path construction, safety predicates, continuity cost, and dynamic programming.
+- Phase 49 preserves current Z/pitch/limits/speeds/protocol and all existing user changes; only the known AC advance-preflight mismatch may change behavior.
+- Production segment planning performs two passes: dynamic programming stores only predecessor indices, then IK candidates are regenerated to populate the selected joint samples. The reusable workspace therefore needs predecessor/count/selected arrays but not every candidate pose.
+- `ArmMoveLinearToolCenter()` owns route construction and execution state; the reusable Phase 49 unit can initially target one explicit tool-center segment, which is sufficient for each production route segment and AC approach/advance checks.
+- Existing workspace helpers mutate `g_arm_motion_debug`; the shared planner must instead return diagnostics and let `arm_trajectory.c` translate them into legacy Watch fields.
+- Existing production planner services ID1 once per sample in both passes. The shared planner needs an explicit optional service hook so firmware timing remains equivalent while HOST tests remain hardware-independent.
+- The previous AC 30mm/near-clamp edits are now part of the repository baseline; Phase 49 starts with no pending changes in those four files and must not assume they are still an uncommitted patch.
+- Candidate cost and preflight failure masks are only used by the old segment function, so they can move wholly into the shared planner when the production adapter replaces that function.
+- Keil project, strict GCC script, and HOST replay build lists all require an explicit new `arm_path_planner.c` entry.
+- Production adapter can map the shared planner result back to all legacy preflight Watch fields without changing trajectory execution, duration calculation, sample storage, or command state transitions.
+- The resumed integration audit confirmed the shared advance API owns the full `staging FK -> staging-to-approach plan -> requested advance plan -> reachable-prefix quantization -> truncated replan` sequence. `AppArmFlowSelectReachablePickAdvance()` can therefore delegate this sequence without retaining any FK, segment, or fallback arithmetic.
+- After that delegation, strict ARM GCC and the existing HOST replay retained the reported baseline endpoints and sample counts. New tests should call `ArmPathSelectReachableAdvance()` directly and exercise full success, intermediate fallback, 1 mm acceptance, 0 mm rejection and approach-failure diagnostics without reimplementing planner rules.
+- A temporary production-API scan at the unchanged AC values (`q staging=[89.5,80,-90]deg`, `Z=-105mm`, pitch `-15deg`, request `30mm`, step `1mm`) found stable far-boundary vectors at `X=-160mm`: approach `Y=543mm` selects `29mm`, `Y=571mm` selects exactly `1mm`, and `Y=572mm` rejects at advance sample 1 with zero reachable prefix. Mirroring Y, advance sign and staging q1 supplies the right-side equivalents.
+- Limit-contract tests can use the production `ArmAutoPoseIsSafe*`, `ArmJointPoseWithinSoftLimits` and tool-pitch helpers. Current exact ranges are normal q1 `+/-90deg`, AC q1 `+/-115deg`, q2 `0..180deg`, q3 `-190..-35deg`, all with `0.2deg` numeric tolerance; ID1 relative pitch is `-90..+92.4deg` and servo position is `115..875`.
+- Final diagnostics retain both the actually executable truncated plan and the original requested-advance failure. Successful fallback keeps business rejection at NONE while Watch exposes the full 30mm request's limiting status/mask/sample/coordinate; `approach_failed` separately distinguishes staging-to-approach rejection.
+- Final Keil ArmCC 5.06u7 rebuild compiled and linked `arm_path_planner.c` with `0 Error(s), 0 Warning(s)`. MAP confirms production trajectory and advance wrappers call the shared planner. Final image size is Code=142816, RO-data=3648, RW-data=1432, ZI-data=137444; `Engineer.uvoptx` SHA-256 remained `6ae31918e053173831440f0220423ff8d652ee822188d32c34f9ddc02a018fcb`.
+
 ## Phase 30 AC post-grip Y limit
 
 - 当前AC放置从`APP_ARM_PLACE_STEP_SUBMIT_TRANSFER`开始，直接把抓取终点关节姿态联合插值到profile的`safe_q_deg`；现有状态机没有`430mm`专用Y限制。
@@ -505,3 +548,41 @@
 - Before this phase, `APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG` aliased `APP_ARM_POSTURE_TEST_TOOL_PITCH_DEG`, so ArmTarget closed-loop picking inherited the AC open-loop side-push pitch of `-5deg`.
 - The AC closed-loop target generation is now explicit: `X/Y` come from the camera-to-base transform, `Z` remains fixed at `APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM=-100mm`, and the gripper world absolute pitch is fixed at `-90deg` for vertical downward picking.
 - This change affects only the ArmTarget closed-loop pick submitted through `upper_controller_bridge.c`; AC open-loop side-push picking remains `-5deg`, and the observation posture remains `[0,+/-150,300]mm/pitch=-58deg`.
+# Phase 52 AC闭环接近路径修正
+
+- 实机目标经坐标变换及右侧X补偿后的 approach 为 `[437.806335,-538.556763,-105.0]mm`，30mm名义终点为 `[437.806335,-568.556763,-105.0]mm`。
+- 当前拒绝发生在 `staging -> approach` 的采样341，失败工具中心约为 `[395.945801,-487.063049,-22.566711]mm`；`failed_check_mask=IK`，尚未进入推进量降级选择。
+- 不能仅凭该日志认定名义终点可达；Phase 52 必须先用生产IK/规划器分别验证 approach 和最终点，再选择路径修复。
+- 当前 `Arm_Path_Advance_Request_s` 只有 staging 关节、approach 和推进参数；生产内核固定把接近过程表示成单段 `staging -> approach` 工具中心直线，无法表达绕开伸直边界的安全中间点。
+- 当前抓取 staging 为目标方位限幅后的 q1、`q2=80deg`、`q3=-90deg`；AC闭环抓取目标绝对俯仰为 `-15deg`。
+- 精确生产IK回放结果：approach `[437.806335,-538.556763,-105]mm` 和30mm名义终点 `[437.806335,-568.556763,-105]mm` 均返回 `ARM_IK_OUT_OF_REACH`。因此本次不是“终点可达但直线路径有问题”；中间点只能解决路径拓扑，不能使这两个端点变为可达。
+- approach 水平半径约694mm；按117mm工具长度和-15deg俯仰估算，腕部水平需求仍约581mm，超过260+260mm主臂总长，拒绝符合几何边界。
+# Phase 54 ID1延迟动作与50mm抓后抬升
+
+- 当前AC约束放置的首条命令直接以`release_q_deg`为终点、`transfer_waypoint_q_deg=[+/-90,75,-62.7]deg`为中间点，并从命令开始显式插值到释放ID1相对俯仰；因此机械臂尚未抬离地面时ID1已经动作。
+- 现有状态机已经有`WAIT_TRANSFER -> SUBMIT_ROTATE_TO_PLACE`边界，可把首条联合route拆成独立到达transfer waypoint的命令，不必修改底层轨迹格式。
+- 普通关节命令在`tool_relative_pitch_valid=0`时由轨迹层锁存动作开始时的ID1相对小臂角，因此第一段可以保持ID1机械相对位置不变；到位后现有`AppArmFlowSubmitDirectedReleaseRotation()`再设置释放俯仰。
+- 当前q2=75deg/q3=-62.7deg经过点在旧固定测试起点下工具中心Z约191.37mm，已有运行时FK会基于每次真实反馈检查抬升量。用户要求应落实为最小50mm门槛，而不是仅依赖名义点高度。
+- 最终实现将首条AC命令终点直接设为transfer waypoint，`waypoint_valid=0/tool_relative_pitch_valid=0`；状态机进入`WAIT_TRANSFER`并等待整条抬升命令完成，随后才进入`SUBMIT_ROTATE_TO_PLACE`。第二条命令继续使用既有safe waypoint到release的后转路径并设置释放ID1相对俯仰。
+- 50mm门槛使用运行时实际三轴和ID1反馈的工具中心FK，`TRANSFER_Z_TOLERANCE_MM=0`，不会把48mm等不足值放行。固定HOST向量实际抬升331.370mm，最大|Y|=449.671mm/455mm，左右严格镜像。
+- 最终HOST回放、ARM GCC `-Werror`和Keil ArmCC 5.06u7全量重建均通过。Keil镜像为Code=143972、RO-data=3660、RW-data=1432、ZI-data=137560，0错误0警告。
+
+# Phase 53 闭爪超时降级与AC抓取参数调整
+
+- 实机故障快照为 `pick_step=FAILED`、`command_state=FAULTED`、`command_result=NOT_READY`、`tool_error_code=SERVO_TIMEOUT`、`gripper_state=FAULT`；机械臂中心和俯仰均已到位，放置流程尚未启动。
+- 当前ID2为轮询反馈状态机：正常闭合截止时间1500ms；闭爪超时会进入`ARM_GRIPPER_RELIEF_TIMEOUT`卸力，但无论卸力到位还是尝试耗尽，最终都收敛为`ARM_GRIPPER_FAULT`。
+- 用户要求夹住不理想时继续放置。实现边界限定为：仅`RELIEF_TIMEOUT`在ID2仍在线/反馈有效的卸力路径中降级为`FORCED_HELD`；反馈离线、发送失败、初始化故障和非闭爪JAM保持FAULT。
+- AC闭环抓取绝对俯仰将从`-15deg`改为`-20deg`；近端是否扩大必须以共享生产规划器回放结果为准，不仅凭端点IK判断。
+- 首轮`-20deg`生产回放显示旧边界`X=-160/Y=543mm`从29mm降级改善为完整30mm推进，说明可达边界发生预期变化；旧HOST断言需要重新扫描而不能机械改值。
+- ARM GCC第一次从仓库根目录启动，脚本内部相对路径导致找不到`../Core/Src/tim.c`；这是调用目录错误，不是源码编译错误，后续从`Engineer/MDK-ARM`运行。
+- `-20deg`远端生产扫描（X=-160mm）结果：Y=545mm仍完整30mm，546mm选29mm，574mm选1mm，575mm为0mm拒绝，576mm起approach本身失败。相比`-15deg`旧向量542/543/571/572mm，完整推进、29mm、1mm和0mm边界均向外改善约3mm。
+- 从正确目录运行的ARM GCC严格检查已通过，包括`arm_tool.c`、共享规划器、桥和HOST_CONTROL分支。
+- `X=0/Z=-105/pitch=-20deg`的初步近端扫描显示Y=150..240mm均在staging-to-approach失败，Y=245mm起完整30mm推进通过；当前270mm业务钳位不会自动利用该余量，需要精扫240..245后同步边界才会实际更近。
+- 回放一致性测试第一次仍重复旧543mm样本，导致与新546mm fallback快照比较失败；这是测试向量同步遗漏，生产规划结果本身正常。
+- 1mm精扫确认X=0时244mm approach失败、245mm完整30mm成功；正式近端边界已改为245mm，最大钳位仍30mm，所以215..245mm钳到245mm，低于215mm仍拒绝。
+- 当前实机变换/补偿后的右侧approach `[97.403122,-415.169006,-105]mm` 在-20deg下通过完整30mm推进永久断言。
+- 用户最终撤回`-20deg/Z=-105mm`组合，要求恢复绝对俯仰`-15deg`并把固定Z下调10mm到`-115mm`；前述`-20deg`扫描仅保留为调参历史，不再代表当前固件。
+- 最终生产规划扫描在`X=0/Z=-115mm/pitch=-15deg`下确认：`|Y|=274mm`的approach失败，`275mm`起可完整推进30mm。因此近端边界改为275mm，最大欠距仍30mm，业务层接受`245..275mm`并钳到275mm，低于245mm或侧别错误仍拒绝。
+- 最终远端生产规划扫描在`X=-160mm/Z=-115mm/pitch=-15deg`下确认：Y<=536mm完整推进30mm，537mm为29mm，565mm为1mm，566mm为0mm拒绝，567mm起approach失败。
+- 最终状态机审计发现：超时卸力正常到位会保留`SERVO_TIMEOUT`，但卸力尝试耗尽的可降级分支曾无条件覆盖为`GRIPPER_STALL`。已改为超时降级始终保留`SERVO_TIMEOUT`；接触卡滞耗尽仍记录`GRIPPER_STALL`，便于赛后区分。
+- 完整HOST回放、ARM GCC `-Werror`、相机变换29项测试和`git diff --check`均通过；后者只有现有行尾提示。

@@ -58,35 +58,35 @@
 /*
  * AC抓取后的专用收拢路径；只由app_arm_side_pick_place写入A区profile副本，
  * 不能覆盖正式A区业务点共用的原始放置profile。
- * 离线名义Y峰值为440mm；运行时上限保留5mm实机反馈误差余量。
- * 第一段收拢要求至少抬高5mm，再继续向后放置。
+ * q2=75deg时离线名义Y峰值约450mm；运行时上限保留5mm实机反馈误差余量。
+ * 第一段锁存当前ID1相对角并要求工具中心至少抬高50mm；到位后ID1才动作。
  * ID1相对俯仰若只越过机械边界5deg以内，按边界值继续收拢。
  */
-#define APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q2_DEG       27.3f
+#define APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q2_DEG       75.0f
 #define APP_ARM_POSTURE_TEST_TRANSFER_WAYPOINT_Q3_DEG      (-62.7f)
-#define APP_ARM_POSTURE_TEST_TRANSFER_PATH_Y_MAX_MM         445.0f
-#define APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM              5.0f
-#define APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM          2.0f
+#define APP_ARM_POSTURE_TEST_TRANSFER_PATH_Y_MAX_MM         455.0f
+#define APP_ARM_POSTURE_TEST_TRANSFER_Z_RAISE_MM             50.0f
+#define APP_ARM_POSTURE_TEST_TRANSFER_Z_TOLERANCE_MM          0.0f
 #define APP_ARM_POSTURE_TEST_TRANSFER_PITCH_CLAMP_TOL_DEG     5.0f
 
 /*
  * AC闭环抓取：task_id=2先进入对应侧观察位，ArmTarget换算成功后把
- * 基座系X/Y作为接近点；Z在AC开环抓取高度基础上抬高35mm，夹爪世界
+ * 基座系X/Y作为接近点；Z在AC开环抓取高度基础上抬高25mm，夹爪世界
  * 绝对俯仰固定为-15deg；再沿当前侧Y方向
  * 低速推进配置距离后闭爪，随后复用AC开环放置profile归位。
  */
 #define APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM \
-    (APP_ARM_POSTURE_TEST_Z_MM + 35.0f)
+    (APP_ARM_POSTURE_TEST_Z_MM + 25.0f)
 #define APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG   (-15.0f)
 #define APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM             30.0f
 /* 从接近点向抓取方向逐毫米预检，选择不超过期望值的最大连续可达推进量。 */
 #define APP_ARM_AC_CLOSED_LOOP_ADVANCE_SEARCH_STEP_MM  1.0f
 #define APP_ARM_AC_CLOSED_LOOP_PLACE_FORWARD_MARGIN_MM 100.0f
 /*
- * AC闭环近端保护：变换后的Y在当前侧距基座270mm以内时，最多允许
- * 30mm欠距并钳位到270mm；欠距更大或坐标落在错误侧时拒绝执行。
+ * AC闭环近端保护：变换后的Y在当前侧距基座275mm以内时，最多允许
+ * 30mm欠距并钳位到275mm；欠距更大或坐标落在错误侧时拒绝执行。
  */
-#define APP_ARM_AC_CLOSED_LOOP_NEAR_Y_MIN_MM          270.0f
+#define APP_ARM_AC_CLOSED_LOOP_NEAR_Y_MIN_MM          275.0f
 #define APP_ARM_AC_CLOSED_LOOP_NEAR_Y_CLAMP_MAX_MM     30.0f
 /*
  * AC闭环视觉实测横向补偿：该偏置加在ArmTarget已经换算到机械臂基座系
@@ -146,7 +146,7 @@
 /* HOME后同步转向并收拢；目标俯仰-58deg时staging处ID1相对俯仰为-48deg。 */
 #define APP_ARM_BD_OBSERVATION_STAGING_Q2_DEG            90.0f
 #define APP_ARM_BD_OBSERVATION_STAGING_Q3_DEG          (-80.0f)
-/* 仅用于BD左右观察路径离线回放；AC继续使用独立的445mm抓后约束。 */
+/* 仅用于BD左右观察路径离线回放；AC继续使用独立的455mm抓后约束。 */
 #define APP_ARM_BD_OBSERVATION_PATH_Y_MAX_MM             405.0f
 #define APP_ARM_BD_OBSERVATION_TOOL_PITCH_DEG         (-58.0f)
 #define APP_ARM_BD_OBSERVATION_SPEED_MM_S             150.0f

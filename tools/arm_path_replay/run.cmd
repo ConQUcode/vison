@@ -11,6 +11,7 @@ set "TEMP=%~dp0_tmp"
   "%~dp0arm_path_replay.c" ^
   "%~dp0arm_tool_geometry_host.c" ^
   "%ROOT%\Engineer\APPLICATION\arm\arm_kinematics.c" ^
+  "%ROOT%\Engineer\APPLICATION\arm\arm_path_planner.c" ^
   -lm -o "%~dp0arm_path_replay.exe" || exit /b 1
 pushd "%~dp0"
 arm_path_replay.exe

@@ -13,7 +13,6 @@
 #include "app_config.h"
 #include "arm.h"
 #include "arm_config.h"
-#include "arm_kinematics.h"
 #include "arm_tool.h"
 #include "camera_target_transform_config.h"
 #include "mg995_servo.h"
@@ -43,8 +42,6 @@
 #define UPPER_CALLBACK_EXECUTING           1u
 /* 协议统一失败终态；ArmTarget使用callback_id=3上报。 */
 #define UPPER_CALLBACK_FAILED              2u
-/* 调试拒绝原因：ArmTarget失败后保持现场，暂不执行上位机HOME命令。 */
-#define UPPER_DEBUG_BLOCK_HOME_AFTER_ARM_FAILURE_ENABLE 1u
 #define UPPER_ARM_TARGET_MAX_ABS_M        10.0f
 #define UPPER_ARM_TARGET_MAX_Z_TYPE       15u
 #define UPPER_CHASSIS_COMMAND_ID_SEED 0xC2000000u
@@ -55,9 +52,15 @@
 #define UPPER_ARM_TARGET_GATE_PICK_RUNNING     (1u << 2)
 #define UPPER_ARM_TARGET_GATE_SIDE_PICK_RUNNING (1u << 3)
 #define UPPER_ARM_TARGET_GATE_BD_PICK_UNSUPPORTED (1u << 4)
+#define UPPER_RESET_HOME_DONE_CANCEL  (1u << 0)
+#define UPPER_RESET_HOME_DONE_ARM     (1u << 1)
+#define UPPER_RESET_HOME_DONE_BASE    (1u << 2)
+#define UPPER_RESET_HOME_DONE_PITCH   (1u << 3)
+#define UPPER_RESET_HOME_DONE_GRIPPER (1u << 4)
 
 Upper_Controller_Debug_s g_upper_controller_debug;
 Upper_Arm_Target_Debug_s g_arm_target_debug;
+Upper_Arm_Reject_Diagnostic_s g_upper_arm_reject_diagnostic;
 
 typedef enum {
     UPPER_ARM_TARGET_FLOW_IDLE = 0,
@@ -136,95 +139,141 @@ static uint8_t UpperControllerClampAcNearY(
     return 1u;
 }
 
-/**
- * 逐毫米检查接近点到抓取点的连续可达性，返回不超过配置值的最大正推进量。
- * 本函数只做运动学和ID1范围计算，不提交命令；AC实际轨迹仍会执行完整预检。
- */
-static uint8_t UpperControllerSelectAcAdvance(
-    const App_Arm_Pick_Target_s *target, float advance_sign,
-    float *selected_advance_mm)
+static void UpperControllerRecordAcAdvanceResult(
+    const App_Arm_Advance_Result_s *result)
 {
-    const Arm_State_s *arm = ArmGetState();
-    Arm_Position_s sample_center;
-    Arm_Tool_Center_IK_Result_s ik_result;
-    float seed_q_deg[3];
-    float candidate_advance_mm;
-    float selected_mm = 0.0f;
-
+    if (result == NULL) {
+        return;
+    }
     g_upper_controller_debug.arm_target_advance_requested_mm =
-        APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM;
-    g_upper_controller_debug.arm_target_advance_selected_mm = 0.0f;
-    g_upper_controller_debug.arm_target_advance_reduced = 0u;
-    if (target == NULL || selected_advance_mm == NULL || arm == NULL ||
-        !isfinite(advance_sign) || fabsf(advance_sign) < 0.5f ||
-        APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM <= 0.0f ||
-        APP_ARM_AC_CLOSED_LOOP_ADVANCE_SEARCH_STEP_MM <= 0.0f) {
+        result->requested_mm;
+    g_upper_controller_debug.arm_target_advance_selected_mm =
+        result->selected_mm;
+    g_upper_controller_debug.arm_target_advance_reject_reason =
+        result->reject_reason;
+    g_upper_controller_debug.arm_target_advance_approach_failed =
+        result->approach_failed;
+    g_upper_controller_debug.arm_target_advance_planner_status =
+        result->planner_status;
+    g_upper_controller_debug.arm_target_advance_ik_status =
+        result->ik_status;
+    g_upper_controller_debug.arm_target_advance_workspace_result =
+        result->workspace_safety_result;
+    g_upper_controller_debug.arm_target_advance_failed_check_mask =
+        result->failed_check_mask;
+    g_upper_controller_debug.arm_target_advance_failed_sample =
+        result->failed_sample;
+    memcpy(g_upper_controller_debug.arm_target_advance_failed_center_mm,
+           result->failed_center_mm,
+           sizeof(result->failed_center_mm));
+    g_upper_controller_debug.arm_target_advance_reduced =
+        result->selected_mm > 0.0f &&
+        result->selected_mm + 0.0001f < result->requested_mm;
+    if (result->reject_reason != APP_ARM_ADVANCE_REJECT_NONE) {
         g_upper_controller_debug.arm_target_advance_reject_count++;
-        return 0u;
-    }
-
-    memcpy(seed_q_deg, arm->q_feedback_deg, sizeof(seed_q_deg));
-    sample_center.x_mm = target->approach_x_mm;
-    sample_center.y_mm = target->approach_y_mm;
-    sample_center.z_mm = target->approach_z_mm;
-    memset(&ik_result, 0, sizeof(ik_result));
-    if (ArmInverseKinematicsToolCenterWithQ1Limits(
-            &sample_center, target->tool_pitch_deg, seed_q_deg,
-            ARM_AC_SIDE_PICK_Q1_MIN_DEG, ARM_AC_SIDE_PICK_Q1_MAX_DEG,
-            &ik_result) != ARM_IK_OK ||
-        !ArmToolPitchValidForPose(target->tool_pitch_deg,
-                                  ik_result.q_deg)) {
-        g_upper_controller_debug.arm_target_advance_reject_count++;
-        return 0u;
-    }
-    memcpy(seed_q_deg, ik_result.q_deg, sizeof(seed_q_deg));
-
-    for (candidate_advance_mm =
-             APP_ARM_AC_CLOSED_LOOP_ADVANCE_SEARCH_STEP_MM;
-         candidate_advance_mm <=
-             APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM + 0.0001f;
-         candidate_advance_mm +=
-             APP_ARM_AC_CLOSED_LOOP_ADVANCE_SEARCH_STEP_MM) {
-        float checked_advance_mm = candidate_advance_mm;
-
-        if (checked_advance_mm > APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM) {
-            checked_advance_mm = APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM;
-        }
-        sample_center.y_mm = target->approach_y_mm +
-            advance_sign * checked_advance_mm;
-        memset(&ik_result, 0, sizeof(ik_result));
-        if (ArmInverseKinematicsToolCenterWithQ1Limits(
-                &sample_center, target->tool_pitch_deg, seed_q_deg,
-                ARM_AC_SIDE_PICK_Q1_MIN_DEG, ARM_AC_SIDE_PICK_Q1_MAX_DEG,
-                &ik_result) != ARM_IK_OK ||
-            !ArmToolPitchValidForPose(target->tool_pitch_deg,
-                                      ik_result.q_deg)) {
-            break;
-        }
-        selected_mm = checked_advance_mm;
-        memcpy(seed_q_deg, ik_result.q_deg, sizeof(seed_q_deg));
-        if (checked_advance_mm >= APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM) {
-            break;
-        }
-    }
-
-    if (selected_mm <= 0.0f) {
-        g_upper_controller_debug.arm_target_advance_reject_count++;
-        return 0u;
-    }
-    *selected_advance_mm = selected_mm;
-    g_upper_controller_debug.arm_target_advance_selected_mm = selected_mm;
-    if (selected_mm + 0.0001f < APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM) {
+    } else if (g_upper_controller_debug.arm_target_advance_reduced != 0u) {
         g_upper_controller_debug.arm_target_advance_reduced = 1u;
         g_upper_controller_debug.arm_target_advance_reduce_count++;
     }
-    return 1u;
+}
+
+static void UpperControllerLatchArmFailure(
+    Upper_Arm_Reject_Source_e source,
+    Upper_Arm_Target_Debug_Stage_e failure_stage,
+    uint8_t flow_diagnostic_valid,
+    uint32_t bridge_command_id,
+    uint32_t bridge_submit_result)
+{
+    Arm_Host_Status_s host;
+
+    g_upper_arm_reject_diagnostic.valid = 0u;
+    g_upper_arm_reject_diagnostic.count++;
+    g_upper_arm_reject_diagnostic.tick_ms = HAL_GetTick();
+    g_upper_arm_reject_diagnostic.source = source;
+    g_upper_arm_reject_diagnostic.stage = failure_stage;
+    g_upper_arm_reject_diagnostic.reset_home_state =
+        g_upper_controller_debug.reset_home_state;
+    g_upper_arm_reject_diagnostic.reset_home_completed_mask =
+        g_upper_controller_debug.reset_home_completed_mask;
+    g_upper_arm_reject_diagnostic.flow_diagnostic_valid =
+        flow_diagnostic_valid;
+    g_upper_arm_reject_diagnostic.flow_status =
+        (App_Arm_Flow_Status_e)g_app_arm_pick_place_test_debug.flow_status;
+    g_upper_arm_reject_diagnostic.pick_step =
+        g_app_arm_pick_place_test_debug.pick_step;
+    g_upper_arm_reject_diagnostic.place_step =
+        g_app_arm_pick_place_test_debug.place_step;
+    g_upper_arm_reject_diagnostic.failure_source =
+        g_app_arm_pick_place_test_debug.failure_source;
+    g_upper_arm_reject_diagnostic.bridge_command_id = bridge_command_id;
+    g_upper_arm_reject_diagnostic.bridge_submit_result =
+        bridge_submit_result;
+    g_upper_arm_reject_diagnostic.active_command_id =
+        g_app_arm_pick_place_test_debug.active_command_id;
+    g_upper_arm_reject_diagnostic.command_state =
+        g_app_arm_pick_place_test_debug.command_state;
+    g_upper_arm_reject_diagnostic.command_result =
+        g_app_arm_pick_place_test_debug.command_result;
+    g_upper_arm_reject_diagnostic.arm_fault_code =
+        g_app_arm_pick_place_test_debug.arm_fault_code;
+    g_upper_arm_reject_diagnostic.motion_state =
+        g_app_arm_pick_place_test_debug.motion_state;
+    g_upper_arm_reject_diagnostic.motion_fault =
+        g_app_arm_pick_place_test_debug.motion_fault;
+    g_upper_arm_reject_diagnostic.tool_error_code =
+        g_app_arm_pick_place_test_debug.tool_error_code;
+    g_upper_arm_reject_diagnostic.ik_status =
+        g_app_arm_pick_place_test_debug.ik_status;
+    g_upper_arm_reject_diagnostic.workspace_safety_result =
+        g_app_arm_pick_place_test_debug.workspace_safety_result;
+    g_upper_arm_reject_diagnostic.failed_check_mask =
+        g_app_arm_pick_place_test_debug.preflight_failed_check_mask;
+    g_upper_arm_reject_diagnostic.failed_segment =
+        g_app_arm_pick_place_test_debug.preflight_failed_segment;
+    g_upper_arm_reject_diagnostic.failed_sample =
+        g_app_arm_pick_place_test_debug.preflight_failed_sample;
+    memcpy(g_upper_arm_reject_diagnostic.failed_center_mm,
+           g_app_arm_pick_place_test_debug.preflight_failed_center_mm,
+           sizeof(g_upper_arm_reject_diagnostic.failed_center_mm));
+    memcpy(g_upper_arm_reject_diagnostic.failed_q_deg,
+           g_app_arm_pick_place_test_debug.preflight_failed_q_deg,
+           sizeof(g_upper_arm_reject_diagnostic.failed_q_deg));
+    g_upper_arm_reject_diagnostic.advance_reject_reason =
+        g_upper_controller_debug.arm_target_advance_reject_reason;
+    g_upper_arm_reject_diagnostic.advance_planner_status =
+        g_upper_controller_debug.arm_target_advance_planner_status;
+    g_upper_arm_reject_diagnostic.advance_approach_failed =
+        g_upper_controller_debug.arm_target_advance_approach_failed;
+    g_upper_arm_reject_diagnostic.advance_requested_mm =
+        g_upper_controller_debug.arm_target_advance_requested_mm;
+    g_upper_arm_reject_diagnostic.advance_selected_mm =
+        g_upper_controller_debug.arm_target_advance_selected_mm;
+
+    memset(&host, 0, sizeof(host));
+    g_upper_arm_reject_diagnostic.host_status_valid =
+        ArmGetHostStatus(&host);
+    g_upper_arm_reject_diagnostic.host_fault_code = host.fault_code;
+    g_upper_arm_reject_diagnostic.host_last_command_id =
+        host.last_command_id;
+    g_upper_arm_reject_diagnostic.host_last_command_type =
+        host.last_command_type;
+    g_upper_arm_reject_diagnostic.host_last_command_state =
+        host.last_command_state;
+    g_upper_arm_reject_diagnostic.host_last_command_result =
+        host.last_command_result;
+    g_upper_arm_reject_diagnostic.valid = 1u;
 }
 
 /** 上报ArmTarget拒绝/失败并结束本次任务；保持原位，不自动取消或HOME。 */
 static void UpperControllerHandleArmTargetFailure(
     Upper_Arm_Target_Debug_Stage_e failure_stage)
 {
+    uint8_t flow_diagnostic_valid =
+        g_upper_controller_debug.arm_target_pick_running;
+
+    UpperControllerLatchArmFailure(
+        UPPER_ARM_REJECT_SOURCE_ARM_TARGET, failure_stage,
+        flow_diagnostic_valid, 0u, 0u);
     g_upper_controller_debug.arm_target_pick_running = 0u;
     upper_arm_target_flow_state = UPPER_ARM_TARGET_FLOW_IDLE;
     g_upper_controller_debug.arm_target_pick_flow_status =
@@ -232,9 +281,6 @@ static void UpperControllerHandleArmTargetFailure(
     g_arm_target_debug.stage = failure_stage;
     g_upper_controller_debug.arm_target_pick_fail_count++;
     g_upper_controller_debug.discrete_invalid_count++;
-#if UPPER_DEBUG_BLOCK_HOME_AFTER_ARM_FAILURE_ENABLE != 0u
-    g_upper_controller_debug.arm_failure_home_blocked = 1u;
-#endif
     if (UpperControllerSendCallback(
             UPPER_CALLBACK_ARM_TARGET, UPPER_CALLBACK_FAILED) != 0u) {
         g_upper_controller_debug.arm_target_failed_callback_count++;
@@ -485,6 +531,10 @@ static void UpperControllerClearTaskStateForReset(uint32_t now_ms)
 
 static void UpperControllerFailResetHome(void)
 {
+    UpperControllerLatchArmFailure(
+        UPPER_ARM_REJECT_SOURCE_RESET_HOME, g_arm_target_debug.stage, 0u,
+        g_upper_controller_debug.reset_home_command_id,
+        (uint32_t)g_upper_controller_debug.reset_home_submit_result);
     g_upper_controller_debug.reset_home_fail_count++;
     g_upper_controller_debug.discrete_invalid_count++;
     g_upper_controller_debug.reset_home_state =
@@ -510,6 +560,7 @@ static void UpperControllerRequestResetHome(
     g_upper_controller_debug.reset_home_request_count++;
     g_upper_controller_debug.reset_home_command_id = 0u;
     g_upper_controller_debug.reset_home_submit_result = ARM_COMMAND_OK;
+    g_upper_controller_debug.reset_home_completed_mask = 0u;
     g_upper_controller_debug.reset_home_state =
         UPPER_RESET_HOME_SUBMIT_CANCEL;
     g_upper_controller_debug.discrete_state = UPPER_DISCRETE_RUNNING;
@@ -551,8 +602,10 @@ static void UpperControllerServiceResetHome(void)
         }
         if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
             host.last_command_result == ARM_COMMAND_OK) {
+            g_upper_controller_debug.reset_home_completed_mask |=
+                UPPER_RESET_HOME_DONE_CANCEL;
             g_upper_controller_debug.reset_home_state =
-                UPPER_RESET_HOME_SUBMIT_HOME;
+                UPPER_RESET_HOME_SUBMIT_ARM;
         } else if (host.last_command_state == ARM_COMMAND_STATE_REJECTED ||
                    host.last_command_state == ARM_COMMAND_STATE_CANCELLED ||
                    host.last_command_state == ARM_COMMAND_STATE_FAULTED) {
@@ -562,7 +615,58 @@ static void UpperControllerServiceResetHome(void)
         }
         break;
 
-    case UPPER_RESET_HOME_SUBMIT_HOME:
+    case UPPER_RESET_HOME_SUBMIT_ARM:
+        if (ArmGetHostStatus(&host) == 0u ||
+            host.ready == 0u || host.busy != 0u) {
+            break;
+        }
+        {
+            Arm_Joint_Command_s command;
+
+            memset(&command, 0, sizeof(command));
+            command.command_id = AppArmCommandIdNext();
+            command.move_type = ARM_MOVE_LINEAR;
+            /* 与上电初始化一致：先保持q1，只同步收回q2/q3。 */
+            command.q_deg[ARM_JOINT_BASE_YAW] =
+                host.q_feedback_deg[ARM_JOINT_BASE_YAW];
+            command.q_deg[ARM_JOINT_SHOULDER] = ARM_SAFE_Q2_DEG;
+            command.q_deg[ARM_JOINT_ELBOW] = ARM_SAFE_Q3_DEG;
+            result = ArmSubmitJointCommand(&command);
+            g_upper_controller_debug.reset_home_command_id =
+                command.command_id;
+            g_upper_controller_debug.reset_home_submit_result = result;
+            if (result == ARM_COMMAND_OK) {
+                g_upper_controller_debug.reset_home_state =
+                    UPPER_RESET_HOME_WAIT_ARM;
+            } else if (result != ARM_COMMAND_BUSY &&
+                       result != ARM_COMMAND_NOT_READY) {
+                UpperControllerFailResetHome();
+            }
+        }
+        break;
+
+    case UPPER_RESET_HOME_WAIT_ARM:
+        if (ArmGetHostStatus(&host) == 0u ||
+            host.last_command_id !=
+                g_upper_controller_debug.reset_home_command_id) {
+            break;
+        }
+        if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+            host.last_command_result == ARM_COMMAND_OK) {
+            g_upper_controller_debug.reset_home_completed_mask |=
+                UPPER_RESET_HOME_DONE_ARM;
+            g_upper_controller_debug.reset_home_state =
+                UPPER_RESET_HOME_SUBMIT_BASE;
+        } else if (host.last_command_state == ARM_COMMAND_STATE_REJECTED ||
+                   host.last_command_state == ARM_COMMAND_STATE_CANCELLED ||
+                   host.last_command_state == ARM_COMMAND_STATE_FAULTED) {
+            g_upper_controller_debug.reset_home_submit_result =
+                host.last_command_result;
+            UpperControllerFailResetHome();
+        }
+        break;
+
+    case UPPER_RESET_HOME_SUBMIT_BASE:
         if (ArmGetHostStatus(&host) == 0u ||
             host.ready == 0u || host.busy != 0u) {
             break;
@@ -576,15 +680,13 @@ static void UpperControllerServiceResetHome(void)
             command.q_deg[ARM_JOINT_BASE_YAW] = ARM_SAFE_Q1_DEG;
             command.q_deg[ARM_JOINT_SHOULDER] = ARM_SAFE_Q2_DEG;
             command.q_deg[ARM_JOINT_ELBOW] = ARM_SAFE_Q3_DEG;
-            command.tool_relative_pitch_valid = 1u;
-            command.tool_relative_pitch_deg = 0.0f;
             result = ArmSubmitJointCommand(&command);
             g_upper_controller_debug.reset_home_command_id =
                 command.command_id;
             g_upper_controller_debug.reset_home_submit_result = result;
             if (result == ARM_COMMAND_OK) {
                 g_upper_controller_debug.reset_home_state =
-                    UPPER_RESET_HOME_WAIT_HOME;
+                    UPPER_RESET_HOME_WAIT_BASE;
             } else if (result != ARM_COMMAND_BUSY &&
                        result != ARM_COMMAND_NOT_READY) {
                 UpperControllerFailResetHome();
@@ -592,7 +694,7 @@ static void UpperControllerServiceResetHome(void)
         }
         break;
 
-    case UPPER_RESET_HOME_WAIT_HOME:
+    case UPPER_RESET_HOME_WAIT_BASE:
         if (ArmGetHostStatus(&host) == 0u ||
             host.last_command_id !=
                 g_upper_controller_debug.reset_home_command_id) {
@@ -600,6 +702,107 @@ static void UpperControllerServiceResetHome(void)
         }
         if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
             host.last_command_result == ARM_COMMAND_OK) {
+            g_upper_controller_debug.reset_home_completed_mask |=
+                UPPER_RESET_HOME_DONE_BASE;
+            g_upper_controller_debug.reset_home_state =
+                UPPER_RESET_HOME_SUBMIT_PITCH;
+        } else if (host.last_command_state == ARM_COMMAND_STATE_REJECTED ||
+                   host.last_command_state == ARM_COMMAND_STATE_CANCELLED ||
+                   host.last_command_state == ARM_COMMAND_STATE_FAULTED) {
+            g_upper_controller_debug.reset_home_submit_result =
+                host.last_command_result;
+            UpperControllerFailResetHome();
+        }
+        break;
+
+    case UPPER_RESET_HOME_SUBMIT_PITCH:
+        if (ArmGetHostStatus(&host) == 0u ||
+            host.ready == 0u || host.busy != 0u) {
+            break;
+        }
+        {
+            Arm_Command_s command;
+            const float home_q_deg[3] = {
+                ARM_SAFE_Q1_DEG, ARM_SAFE_Q2_DEG, ARM_SAFE_Q3_DEG
+            };
+
+            memset(&command, 0, sizeof(command));
+            command.command_id = AppArmCommandIdNext();
+            command.type = ARM_COMMAND_TYPE_TOOL;
+            command.payload.tool.action = ARM_TOOL_ACTION_SET_PITCH;
+            command.payload.tool.pitch_deg =
+                ArmToolSmallLinkPitchFromJoint(home_q_deg);
+            result = ArmSubmitCommand(&command);
+            g_upper_controller_debug.reset_home_command_id =
+                command.command_id;
+            g_upper_controller_debug.reset_home_submit_result = result;
+            if (result == ARM_COMMAND_OK) {
+                g_upper_controller_debug.reset_home_state =
+                    UPPER_RESET_HOME_WAIT_PITCH;
+            } else if (result != ARM_COMMAND_BUSY &&
+                       result != ARM_COMMAND_NOT_READY) {
+                UpperControllerFailResetHome();
+            }
+        }
+        break;
+
+    case UPPER_RESET_HOME_WAIT_PITCH:
+        if (ArmGetHostStatus(&host) == 0u ||
+            host.last_command_id !=
+                g_upper_controller_debug.reset_home_command_id) {
+            break;
+        }
+        if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+            host.last_command_result == ARM_COMMAND_OK) {
+            g_upper_controller_debug.reset_home_completed_mask |=
+                UPPER_RESET_HOME_DONE_PITCH;
+            g_upper_controller_debug.reset_home_state =
+                UPPER_RESET_HOME_SUBMIT_GRIPPER;
+        } else if (host.last_command_state == ARM_COMMAND_STATE_REJECTED ||
+                   host.last_command_state == ARM_COMMAND_STATE_CANCELLED ||
+                   host.last_command_state == ARM_COMMAND_STATE_FAULTED) {
+            g_upper_controller_debug.reset_home_submit_result =
+                host.last_command_result;
+            UpperControllerFailResetHome();
+        }
+        break;
+
+    case UPPER_RESET_HOME_SUBMIT_GRIPPER:
+        if (ArmGetHostStatus(&host) == 0u ||
+            host.ready == 0u || host.busy != 0u) {
+            break;
+        }
+        {
+            Arm_Command_s command;
+
+            memset(&command, 0, sizeof(command));
+            command.command_id = AppArmCommandIdNext();
+            command.type = ARM_COMMAND_TYPE_TOOL;
+            command.payload.tool.action = ARM_TOOL_ACTION_GRIPPER_READY;
+            result = ArmSubmitCommand(&command);
+            g_upper_controller_debug.reset_home_command_id =
+                command.command_id;
+            g_upper_controller_debug.reset_home_submit_result = result;
+            if (result == ARM_COMMAND_OK) {
+                g_upper_controller_debug.reset_home_state =
+                    UPPER_RESET_HOME_WAIT_GRIPPER;
+            } else if (result != ARM_COMMAND_BUSY &&
+                       result != ARM_COMMAND_NOT_READY) {
+                UpperControllerFailResetHome();
+            }
+        }
+        break;
+
+    case UPPER_RESET_HOME_WAIT_GRIPPER:
+        if (ArmGetHostStatus(&host) == 0u ||
+            host.last_command_id !=
+                g_upper_controller_debug.reset_home_command_id) {
+            break;
+        }
+        if (host.last_command_state == ARM_COMMAND_STATE_COMPLETED &&
+            host.last_command_result == ARM_COMMAND_OK) {
+            g_upper_controller_debug.reset_home_completed_mask |=
+                UPPER_RESET_HOME_DONE_GRIPPER;
             (void)UpperControllerSendCallback(
                 UPPER_CALLBACK_RETURN_INITIAL_POSE,
                 UPPER_CALLBACK_COMPLETED);
@@ -1223,6 +1426,8 @@ void UpperControllerBridgeInit(void)
     memset(&g_upper_controller_debug, 0,
            sizeof(g_upper_controller_debug));
     memset(&g_arm_target_debug, 0, sizeof(g_arm_target_debug));
+    memset(&g_upper_arm_reject_diagnostic, 0,
+           sizeof(g_upper_arm_reject_diagnostic));
     memset(&upper_pending_discrete, 0,
            sizeof(upper_pending_discrete));
     memset(&upper_arm_target_place_profile, 0,
@@ -1298,15 +1503,6 @@ void on_receive_StateMachineCommand(
     }
     g_upper_controller_debug.discrete_rx_count++;
     if (packet->task_id == UPPER_TASK_RETURN_INITIAL_POSE) {
-#if UPPER_DEBUG_BLOCK_HOME_AFTER_ARM_FAILURE_ENABLE != 0u
-        if (g_upper_controller_debug.arm_failure_home_blocked != 0u) {
-            g_upper_controller_debug.reset_home_blocked_count++;
-            (void)UpperControllerSendCallback(
-                UPPER_CALLBACK_RETURN_INITIAL_POSE,
-                UPPER_CALLBACK_FAILED);
-            return;
-        }
-#endif
         UpperControllerRequestResetHome(packet, HAL_GetTick());
         return;
     }
@@ -1396,6 +1592,17 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
         APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM;
     g_upper_controller_debug.arm_target_advance_selected_mm = NAN;
     g_upper_controller_debug.arm_target_advance_reduced = 0u;
+    g_upper_controller_debug.arm_target_advance_approach_failed = 0u;
+    g_upper_controller_debug.arm_target_advance_reject_reason =
+        APP_ARM_ADVANCE_REJECT_NONE;
+    g_upper_controller_debug.arm_target_advance_planner_status = 0u;
+    g_upper_controller_debug.arm_target_advance_ik_status = 0u;
+    g_upper_controller_debug.arm_target_advance_workspace_result = 0u;
+    g_upper_controller_debug.arm_target_advance_failed_check_mask = 0u;
+    g_upper_controller_debug.arm_target_advance_failed_sample = 0u;
+    g_upper_controller_debug.arm_target_advance_failed_center_mm[0] = NAN;
+    g_upper_controller_debug.arm_target_advance_failed_center_mm[1] = NAN;
+    g_upper_controller_debug.arm_target_advance_failed_center_mm[2] = NAN;
     now_ms = HAL_GetTick();
 
     /*
@@ -1463,8 +1670,8 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
             App_Arm_Pick_Target_s target;
             App_Fruit_Side_e side =
                 (App_Fruit_Side_e)g_upper_controller_debug.ac_active_side;
+            App_Arm_Advance_Result_s advance_result;
             float advance_sign;
-            float selected_advance_mm;
             float pick_x_bias_mm;
             uint8_t start_ok;
 
@@ -1500,14 +1707,17 @@ void on_receive_ArmTarget(const Packet_ArmTarget *packet)
             target.z_mm = APP_ARM_AC_CLOSED_LOOP_PICK_Z_MM;
             target.tool_pitch_deg =
                 APP_ARM_AC_CLOSED_LOOP_PICK_TOOL_PITCH_DEG;
-            if (UpperControllerSelectAcAdvance(
-                    &target, advance_sign, &selected_advance_mm) == 0u) {
+            if (AppArmFlowSelectReachablePickAdvance(
+                    &target, advance_sign,
+                    APP_ARM_AC_CLOSED_LOOP_ADVANCE_MM,
+                    APP_ARM_AC_CLOSED_LOOP_ADVANCE_SEARCH_STEP_MM,
+                    &advance_result) == 0u) {
+                UpperControllerRecordAcAdvanceResult(&advance_result);
                 UpperControllerHandleArmTargetFailure(
                     UPPER_ARM_TARGET_DEBUG_ADVANCE_REJECTED);
                 return;
             }
-            target.y_mm = target.approach_y_mm +
-                advance_sign * selected_advance_mm;
+            UpperControllerRecordAcAdvanceResult(&advance_result);
             /*
              * AC闭环抓后放置沿用开环profile，但Y峰值按本次视觉目标动态
              * 收紧：只允许比最终抓取点再向当前侧前方多配置余量。

@@ -69,8 +69,14 @@ typedef enum {
     UPPER_RESET_HOME_IDLE = 0,
     UPPER_RESET_HOME_SUBMIT_CANCEL,
     UPPER_RESET_HOME_WAIT_CANCEL,
-    UPPER_RESET_HOME_SUBMIT_HOME,
-    UPPER_RESET_HOME_WAIT_HOME,
+    UPPER_RESET_HOME_SUBMIT_ARM,
+    UPPER_RESET_HOME_WAIT_ARM,
+    UPPER_RESET_HOME_SUBMIT_BASE,
+    UPPER_RESET_HOME_WAIT_BASE,
+    UPPER_RESET_HOME_SUBMIT_PITCH,
+    UPPER_RESET_HOME_WAIT_PITCH,
+    UPPER_RESET_HOME_SUBMIT_GRIPPER,
+    UPPER_RESET_HOME_WAIT_GRIPPER,
     UPPER_RESET_HOME_FAILED
 } Upper_Reset_Home_State_e;
 
@@ -82,6 +88,58 @@ typedef struct {
     uint8_t gate_flags;
     uint8_t pick_start_result;
 } Upper_Arm_Target_Debug_s;
+
+typedef enum {
+    UPPER_ARM_REJECT_SOURCE_NONE = 0,
+    UPPER_ARM_REJECT_SOURCE_ARM_TARGET,
+    UPPER_ARM_REJECT_SOURCE_RESET_HOME
+} Upper_Arm_Reject_Source_e;
+
+/**
+ * 最近一次机械臂拒绝/失败的独立Watch快照。运行状态可由HOME/reset清理，
+ * 本结构只在下一次失败或重新初始化时更新。
+ */
+typedef struct {
+    uint8_t valid;
+    uint8_t flow_diagnostic_valid;
+    uint32_t count;
+    uint32_t tick_ms;
+    Upper_Arm_Reject_Source_e source;
+    Upper_Arm_Target_Debug_Stage_e stage;
+    Upper_Reset_Home_State_e reset_home_state;
+    uint8_t reset_home_completed_mask;
+    App_Arm_Flow_Status_e flow_status;
+    uint8_t pick_step;
+    uint8_t place_step;
+    App_Arm_Pick_Place_Failure_Source_e failure_source;
+    uint32_t bridge_command_id;
+    uint32_t bridge_submit_result;
+    uint32_t active_command_id;
+    uint32_t command_state;
+    uint32_t command_result;
+    uint32_t arm_fault_code;
+    uint32_t motion_state;
+    uint32_t motion_fault;
+    uint32_t tool_error_code;
+    uint32_t ik_status;
+    uint32_t workspace_safety_result;
+    uint32_t failed_check_mask;
+    uint8_t failed_segment;
+    uint16_t failed_sample;
+    float failed_center_mm[3];
+    float failed_q_deg[3];
+    App_Arm_Advance_Reject_Reason_e advance_reject_reason;
+    uint32_t advance_planner_status;
+    uint8_t advance_approach_failed;
+    float advance_requested_mm;
+    float advance_selected_mm;
+    uint8_t host_status_valid;
+    uint32_t host_fault_code;
+    uint32_t host_last_command_id;
+    Arm_Command_Type_e host_last_command_type;
+    Arm_Command_State_e host_last_command_state;
+    Arm_Command_Result_e host_last_command_result;
+} Upper_Arm_Reject_Diagnostic_s;
 
 typedef struct {
     uint8_t initialized;
@@ -139,15 +197,21 @@ typedef struct {
     float arm_target_advance_requested_mm;
     float arm_target_advance_selected_mm;
     uint8_t arm_target_advance_reduced;
+    uint8_t arm_target_advance_approach_failed;
     uint32_t arm_target_advance_reduce_count;
     uint32_t arm_target_advance_reject_count;
+    App_Arm_Advance_Reject_Reason_e arm_target_advance_reject_reason;
+    uint32_t arm_target_advance_planner_status;
+    uint32_t arm_target_advance_ik_status;
+    uint32_t arm_target_advance_workspace_result;
+    uint32_t arm_target_advance_failed_check_mask;
+    uint16_t arm_target_advance_failed_sample;
+    float arm_target_advance_failed_center_mm[3];
     uint32_t arm_target_pick_start_count;
     uint32_t arm_target_pick_complete_count;
     uint32_t arm_target_pick_fail_count;
     uint32_t arm_target_failed_callback_count;
     uint32_t arm_target_failed_callback_fail_count;
-    uint8_t arm_failure_home_blocked;
-    uint32_t reset_home_blocked_count;
     Upper_Controller_Area_e current_area;
     uint8_t current_area_valid;
     uint8_t current_area_callback_pending;
@@ -161,6 +225,7 @@ typedef struct {
     Upper_Reset_Home_State_e reset_home_state;
     uint32_t reset_home_command_id;
     Arm_Command_Result_e reset_home_submit_result;
+    uint8_t reset_home_completed_mask;
     uint32_t reset_home_request_count;
     uint32_t reset_home_complete_count;
     uint32_t reset_home_fail_count;
@@ -192,6 +257,7 @@ typedef struct {
 
 extern Upper_Controller_Debug_s g_upper_controller_debug;
 extern Upper_Arm_Target_Debug_s g_arm_target_debug;
+extern Upper_Arm_Reject_Diagnostic_s g_upper_arm_reject_diagnostic;
 
 /** 初始化桥状态；不会主动移动任何执行机构。 */
 void UpperControllerBridgeInit(void);

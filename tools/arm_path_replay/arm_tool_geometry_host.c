@@ -55,3 +55,50 @@ uint8_t ArmToolGetWristFromCenter(const Arm_Position_s *center,
     return isfinite(wrist->x_mm) && isfinite(wrist->y_mm) &&
            isfinite(wrist->z_mm) ? 1u : 0u;
 }
+
+float ArmToolSmallLinkPitchFromJoint(const float q_deg[3])
+{
+    if (q_deg == NULL || !isfinite(q_deg[1]) || !isfinite(q_deg[2])) {
+        return NAN;
+    }
+    return q_deg[1] + (-180.0f - q_deg[2]);
+}
+
+uint8_t ArmToolPitchPositionForPose(float tool_pitch_deg,
+                                     float small_link_pitch_deg,
+                                     uint16_t *position)
+{
+    float relative_pitch_deg;
+    float position_f;
+
+    if (position == NULL || !isfinite(tool_pitch_deg) ||
+        !isfinite(small_link_pitch_deg)) {
+        return 0u;
+    }
+    relative_pitch_deg = tool_pitch_deg - small_link_pitch_deg;
+    if (relative_pitch_deg < ARM_TOOL_PITCH_RELATIVE_MIN_DEG ||
+        relative_pitch_deg > ARM_TOOL_PITCH_RELATIVE_MAX_DEG) {
+        return 0u;
+    }
+    position_f = (float)ARM_TOOL_PITCH_NEUTRAL_POS +
+        ARM_TOOL_PITCH_DIRECTION * relative_pitch_deg *
+        (float)(ARM_TOOL_SERVO_POS_MAX - ARM_TOOL_SERVO_POS_MIN) /
+        ARM_TOOL_SERVO_RANGE_DEG;
+    if (!isfinite(position_f) ||
+        position_f < (float)ARM_TOOL_PITCH_SERVO_MIN_POS ||
+        position_f > (float)ARM_TOOL_PITCH_SERVO_MAX_POS) {
+        return 0u;
+    }
+    *position = (uint16_t)(position_f + 0.5f);
+    return *position >= ARM_TOOL_PITCH_SERVO_MIN_POS &&
+           *position <= ARM_TOOL_PITCH_SERVO_MAX_POS;
+}
+
+uint8_t ArmToolPitchValidForPose(float tool_pitch_deg,
+                                  const float q_deg[3])
+{
+    uint16_t position;
+
+    return ArmToolPitchPositionForPose(
+        tool_pitch_deg, ArmToolSmallLinkPitchFromJoint(q_deg), &position);
+}

@@ -6,6 +6,18 @@
 
 ## Phases
 
+54. [complete] 将AC抓后放置拆为先独立抬升到现有q2=75deg经过点、再改变ID1并转向后方；第一段锁存当前ID1相对角且工具中心Z必须至少上升50mm，非AC放置流程不变，并完成HOST回放、ARM GCC和Keil验证。
+
+53. [complete] 将在线且反馈有效的ID2闭爪超时卸力结果降级为`FORCED_HELD`，允许抓取流程继续进入放置；离线、发送和初始化故障仍锁存。按用户最终参数保持AC闭环抓取绝对俯仰-15deg并将固定Z从-105mm下调至-115mm，重算近远端边界并完成状态机、生产规划器、ARM GCC和Keil验证。
+
+52. [complete] 复现右侧视觉目标拒绝并确认 approach 与30mm终点均为几何不可达，不能通过增加路径waypoint修复；临时诊断已移除，生产HOST回放保持通过，固件行为未改变。
+
+51. [complete] 将上位机task 6 HOME/reset改为与完整上电初始化一致的安全顺序：取消活动动作后，q2+q3同步HOME，随后q1 HOME，最后恢复ID1/ID2安全状态；保留Phase 50拒绝诊断锁存与协议回调语义。ARM GCC、HOST回放、Keil全量构建和差异检查均通过。
+
+50. [complete] 恢复上位机HOME/reset命令的真实执行；取消仅用于调试的拒绝后HOME阻断，同时增加独立拒绝诊断快照，使reset清理运行状态和回HOME后仍可查看此前失败原因。ARM GCC、HOST回放、Keil全量构建和最终差异检查均通过。
+
+49. [complete] 实施赛前机械臂解算止血：提取生产工具中心路径预检内核，统一AC推进降级、正式轨迹与HOST回放的可达性规则；保持既有运动参数和协议不变，仅修正推进预检与真实轨迹不一致。
+
 1. [complete] 审计当前启动状态机、耦合补偿、工具初始化和抓放接口。
 2. [complete] 设计并实现 `[0,-480,-135]` 到位后的闭合与左侧放置流程。
 3. [complete] 实现大臂优先的上电初始化顺序和故障/Watch状态。
@@ -124,6 +136,11 @@
 - 阶段48验证边界：ARM严格GCC含HOST强制分支、永久路径回放和`git diff --check`通过；ArmTarget运行时X/Y来自上位机坐标，具体点位可达性仍由收到目标后的IK/限位/路径预检决定；未运行Keil、未烧录或实机运动。
 
 ## Errors Encountered
+| Phase 51首次文档补丁的Watch段落上下文与当前换行不匹配，`apply_patch`原子拒绝 | 1 | 源码未受影响；重新读取task 6现有段落后拆分为精确小补丁。 |
+| Phase 49旧HOST回放链接共享规划器缺少`ArmToolPitchValidForPose`实现 | 1 | 在现有HOST工具几何shim中加入与生产`arm_tool.c`等价的三项纯计算俯仰函数。 |
+| Phase 49首次正确ARM GCC编译发现规划器使用`ARM_JOINT_COUNT=4`，与三轴轨迹缓存`float[][3]`不兼容 | 1 | 规划器接口显式使用三自由度数组`[3]`，与现有IK、CCM轨迹和候选类型一致。 |
+| Phase 49首次严格GCC检查从仓库根目录调用相对路径脚本，找不到`../Core/Src/tim.c` | 1 | 新源码尚未得到该次编译结论；后续从`Engineer/MDK-ARM`工作目录运行，不重复错误调用。 |
+| Phase 49首次跨三个历史记录文件追加因`findings.md`标题与模板不一致而原子拒绝 | 1 | 分别读取三个文件的稳定标题，改用独立小补丁追加，不覆盖历史。 |
 
 | Error | Attempt | Resolution |
 |---|---:|---|
